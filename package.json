@@ -1,0 +1,47 @@
+{
+  "name": "cloudsaver",
+  "version": "1.0.0",
+  "description": "Telegram Cloud Storage Desktop App",
+  "main": "out/main/index.js",
+  "author": "CloudSaver",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "build:win": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.52",
+    "chokidar": "^5.0.0",
+    "input": "^1.0.1",
+    "telegram": "^2.23.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.3.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  },
+  "build": {
+    "appId": "com.cloudsaver.app",
+    "productName": "CloudSaver",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*"
+    ]
+  }
+}

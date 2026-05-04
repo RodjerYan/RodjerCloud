@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.npm-cache/
+.yarn/
+yarn-error.log
+
+# Build outputs
+out/
+dist/
+*.exe
+*.exe.blockmap
+*.dmg
+*.AppImage
+*.deb
+*.snap
+builder-debug.yml
+builder-effective-config.yaml
+
+# Native rebuilds
+*.node
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Local secrets — NEVER commit
+.env
+.env.*
+!.env.example
+session_data.json
+session_data.enc
+*.pem
+*.key
+*.session
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# Misc
+*.tsbuildinfo
+.turbo/
