@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
 
 const DAY = 86400
+
+const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
 function fmtSize(n: number) {
   if (!n) return '0 B'
@@ -27,6 +29,19 @@ const CAT_COLOR: Record<string, string> = {
   Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
 
+function groupByMonth(items: any[]) {
+  const years: Record<number, Record<number, any[]>> = {}
+  items.forEach(f => {
+    const d = new Date((f.uploadedAt || 0) * 1000)
+    if (!isFinite(d.getTime())) return
+    const y = d.getFullYear(), m = d.getMonth()
+    if (!years[y]) years[y] = {}
+    if (!years[y][m]) years[y][m] = []
+    years[y][m].push(f)
+  })
+  return years
+}
+
 export default function MyFilesPage() {
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -38,6 +53,7 @@ export default function MyFilesPage() {
   const [preview, setPreview] = useState<{ idx: number } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [toast, setToast] = useState<string>('')
+  const [drillDown, setDrillDown] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -67,6 +83,13 @@ export default function MyFilesPage() {
     filtered.forEach(f => { map[typeOf(f.fileName)]?.push(f) })
     return map
   }, [filtered])
+
+  const galleryFiles = useMemo(() => {
+    if (!drillDown) return []
+    return filtered.filter(f => typeOf(f.fileName) === drillDown)
+  }, [drillDown, filtered])
+
+  const galleryByYear = useMemo(() => groupByMonth(galleryFiles), [galleryFiles])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
 
@@ -121,6 +144,10 @@ export default function MyFilesPage() {
   }
 
   const toggleCategory = (cat: string) => {
+    if (cat === 'Изображения' || cat === 'Видео') {
+      setDrillDown(cat)
+      return
+    }
     const s = new Set(expanded)
     s.has(cat) ? s.delete(cat) : s.add(cat)
     setExpanded(s)
@@ -155,12 +182,53 @@ export default function MyFilesPage() {
         </div>
       )}
 
-      {loading ? <div className="mf-empty">Загрузка…</div> : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
+      {loading ? <div className="mf-empty">Загрузка…</div> : drillDown ? (
+        <div className="mf-gallery">
+          <div className="mf-gallery-head" onClick={() => setDrillDown(null)} style={{ '--cat-color': CAT_COLOR[drillDown] } as React.CSSProperties}>
+            <ArrowLeft size={18} />
+            <span className="mf-section-icon">{CAT_ICON[drillDown]}</span>
+            <span className="mf-section-title">{drillDown}</span>
+            <span className="mf-gallery-count">{galleryFiles.length}</span>
+          </div>
+          <div className="mf-gallery-body">
+            {Object.entries(galleryByYear).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+              <div key={year} className="mf-gy">
+                <div className="mf-gy-title">{year}</div>
+                {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, items]) => (
+                  <div key={year + '-' + month} className="mf-gm">
+                    <div className="mf-gm-title">{MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                    <div className="mf-gm-items">
+                      {items.map((f: any) => (
+                        <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '')}>
+                          <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                          <div className="mf-gm-icon" data-type={drillDown}>
+                            {drillDown === 'Изображения' ? '🖼️' : '🎬'}
+                          </div>
+                          <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+                          <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+                          <div className="mf-gm-actions">
+                            <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                            {drillDown === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={13} /></button>}
+                            <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
+                            <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+            {galleryFiles.length === 0 && <div className="mf-empty">Нет файлов</div>}
+          </div>
+        </div>
+      ) : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
         <div className="mf-sections">
           {CATEGORIES.map(cat => {
             const items = grouped[cat]
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
+            const isDrillable = cat === 'Изображения' || cat === 'Видео'
             return (
               <div key={cat} className={'mf-section' + (open ? ' open' : '')}>
                 <div className="mf-section-head" onClick={() => toggleCategory(cat)} style={{ '--cat-color': CAT_COLOR[cat] } as React.CSSProperties}>
@@ -168,6 +236,7 @@ export default function MyFilesPage() {
                   <span className="mf-section-icon">{CAT_ICON[cat]}</span>
                   <span className="mf-section-title">{cat}</span>
                   <span className="mf-section-count">{items.length}</span>
+                  {isDrillable && <span className="mf-section-drill">Открыть →</span>}
                 </div>
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
                   {items.length > 0 && (
