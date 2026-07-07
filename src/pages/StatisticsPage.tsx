@@ -9,12 +9,12 @@ function fmtSize(n: number) {
 }
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Images'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Videos'
-  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Audio'
-  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Documents'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Archives'
-  return 'Others'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Изображения'
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Видео'
+  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Аудио'
+  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Документы'
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Архивы'
+  return 'Другое'
 }
 const COLORS = ['#7c83ff', '#4ed3a8', '#ffb84d', '#ff6b9b', '#6bc6ff', '#b78bff']
 
@@ -59,18 +59,18 @@ export default function StatisticsPage() {
 
   return (
     <div className="st-root">
-      <h1>Statistics</h1>
+      <h1>Статистика</h1>
 
       <div className="st-cards">
-        <div className="st-card"><div className="st-card-label">Total Files</div><div className="st-card-value">{loading ? '…' : totalFiles}</div></div>
-        <div className="st-card"><div className="st-card-label">Data Stored</div><div className="st-card-value">{loading ? '…' : fmtSize(totalBytes)}</div></div>
-        <div className="st-card"><div className="st-card-label">Last Upload</div><div className="st-card-value small">{last ? last.fileName : '—'}</div>
+        <div className="st-card"><div className="st-card-label">Всего файлов</div><div className="st-card-value">{loading ? '…' : totalFiles}</div></div>
+        <div className="st-card"><div className="st-card-label">Всего данных</div><div className="st-card-value">{loading ? '…' : fmtSize(totalBytes)}</div></div>
+        <div className="st-card"><div className="st-card-label">Последняя загрузка</div><div className="st-card-value small">{last ? last.fileName : '—'}</div>
           <div className="st-card-sub">{last ? new Date(last.date * 1000).toLocaleString() : ''}</div></div>
       </div>
 
       <div className="st-grid">
         <div className="st-panel">
-          <h2>Upload Activity (last 30 days)</h2>
+          <h2>Активность (последние 30 дней)</h2>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer>
               <LineChart data={activity}>
@@ -84,7 +84,7 @@ export default function StatisticsPage() {
           </div>
         </div>
         <div className="st-panel">
-          <h2>Storage Breakdown</h2>
+          <h2>По типам данных</h2>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer>
               <PieChart>
@@ -100,9 +100,9 @@ export default function StatisticsPage() {
       </div>
 
       <div className="st-panel">
-        <h2>Largest Files</h2>
+        <h2>Крупнейшие файлы</h2>
         <table className="st-table">
-          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Size</th></tr></thead>
+          <thead><tr><th>#</th><th>Имя</th><th>Тип</th><th>Размер</th></tr></thead>
           <tbody>
             {largest.map((f, i) => (
               <tr key={f.messageId}><td>{i + 1}</td><td className="ellip">{f.fileName}</td><td>{typeOf(f.fileName)}</td><td>{fmtSize(f.fileSize)}</td></tr>

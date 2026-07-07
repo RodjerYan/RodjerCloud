@@ -3,8 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   telegram: {
     checkSession: () => ipcRenderer.invoke('telegram:check-session'),
-    login: (data: { apiId: number; apiHash: string; phoneNumber: string }) =>
-      ipcRenderer.invoke('telegram:login', data),
+    login: (phoneNumber: string) => ipcRenderer.invoke('telegram:login', phoneNumber),
     verifyCode: (code: string) => ipcRenderer.invoke('telegram:verify-code', code),
     verify2FA: (password: string) => ipcRenderer.invoke('telegram:verify-2fa', password),
     reconnect: () => ipcRenderer.invoke('telegram:reconnect'),
@@ -27,20 +26,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('telegram:bulk-download', items),
     bulkDelete: (ids: number[]) => ipcRenderer.invoke('telegram:bulk-delete', ids),
     logout: () => ipcRenderer.invoke('telegram:logout'),
-    setupNewChannel: () => ipcRenderer.invoke('telegram:setup-new-channel'),
-    setupExistingChannel: (key: string) => ipcRenderer.invoke('telegram:setup-existing-channel', key)
-  },
-  storage: {
-    saveCredentials: (credentials: any) => ipcRenderer.invoke('storage:save-credentials', credentials),
-    getCredentials: () => ipcRenderer.invoke('storage:get-credentials'),
-    getDownloadPath: () => ipcRenderer.invoke('storage:get-download-path'),
-    setDownloadPath: (p: string) => ipcRenderer.invoke('storage:set-download-path', p),
-    getUploadConcurrency: () => ipcRenderer.invoke('storage:get-upload-concurrency'),
-    setUploadConcurrency: (n: number) => ipcRenderer.invoke('storage:set-upload-concurrency', n),
-    getSyncHistory: () => ipcRenderer.invoke('storage:get-sync-history'),
-    appendSyncHistory: (entry: any) => ipcRenderer.invoke('storage:append-sync-history', entry),
-    clearSyncHistory: () => ipcRenderer.invoke('storage:clear-sync-history'),
-    factoryReset: () => ipcRenderer.invoke('storage:factory-reset')
   },
   dialog: {
     pickFile: () => ipcRenderer.invoke('dialog:pick-file'),
@@ -48,7 +33,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pickFolder: () => ipcRenderer.invoke('dialog:pick-folder'),
     pickFolderRecursive: () => ipcRenderer.invoke('dialog:pick-folder-recursive'),
     pickDownloadDir: () => ipcRenderer.invoke('dialog:pick-download-dir'),
-    saveKeyFile: (key: string, body: string) => ipcRenderer.invoke('dialog:save-key-file', key, body)
   },
   autoSync: {
     getConfig: () => ipcRenderer.invoke('autosync:get-config'),

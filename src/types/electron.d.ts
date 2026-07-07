@@ -5,8 +5,8 @@ declare global {
     electronAPI: {
       telegram: {
         checkSession: () => Promise<{ success: boolean; hasSession?: boolean; error?: string }>
-        login: (data: { apiId: number; apiHash: string; phoneNumber: string }) => Promise<{ success: boolean; data?: any; error?: string }>
-        verifyCode: (code: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        login: (phoneNumber: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        verifyCode: (code: string) => Promise<{ success: boolean; data?: any; error?: string; needs2FA?: boolean }>
         verify2FA: (password: string) => Promise<{ success: boolean; data?: any; error?: string }>
         reconnect: () => Promise<{ success: boolean; data?: any; error?: string }>
         uploadFile: (filePath: string, id?: string) => Promise<{ success: boolean; data?: any; error?: string }>
@@ -18,20 +18,6 @@ declare global {
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>
-        setupNewChannel: () => Promise<{ success: boolean; data?: any; error?: string }>
-        setupExistingChannel: (key: string) => Promise<{ success: boolean; data?: any; error?: string }>
-      }
-      storage: {
-        saveCredentials: (credentials: any) => Promise<{ success: boolean; error?: string }>
-        getCredentials: () => Promise<{ success: boolean; data?: any; error?: string }>
-        getDownloadPath: () => Promise<{ success: boolean; data?: string; error?: string }>
-        setDownloadPath: (p: string) => Promise<{ success: boolean; error?: string }>
-        getUploadConcurrency: () => Promise<{ success: boolean; data?: number; error?: string }>
-        setUploadConcurrency: (n: number) => Promise<{ success: boolean; error?: string }>
-        getSyncHistory: () => Promise<{ success: boolean; data?: any[]; error?: string }>
-        appendSyncHistory: (entry: any) => Promise<{ success: boolean; error?: string }>
-        clearSyncHistory: () => Promise<{ success: boolean; error?: string }>
-        factoryReset: () => Promise<{ success: boolean; error?: string }>
       }
       dialog: {
         pickFile: () => Promise<{ success: boolean; data?: { filePath: string; fileName: string; fileSize: number }; error?: string }>
@@ -39,7 +25,6 @@ declare global {
         pickFolder: () => Promise<{ success: boolean; data?: { folderPath: string }; error?: string }>
         pickFolderRecursive: () => Promise<{ success: boolean; data?: { folderPath: string; files: Array<{ filePath: string; fileName: string; fileSize: number }> }; error?: string }>
         pickDownloadDir: () => Promise<{ success: boolean; data?: { folderPath: string }; error?: string }>
-        saveKeyFile: (key: string, body: string) => Promise<{ success: boolean; data?: { filePath: string }; error?: string }>
       }
       autoSync: {
         getConfig: () => Promise<{ success: boolean; data?: any; error?: string }>

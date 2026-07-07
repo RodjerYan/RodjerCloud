@@ -91,7 +91,7 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
       <header className="dashboard-header">
         <div className="header-content">
           <div className="header-left">
-            <img src={iconUrl} alt="CloudSaver" className="logo-img-sm" />
+            <img src={iconUrl} alt="RodjerCloud" className="logo-img-sm" />
             <h1 className="dashboard-title">
               Cloud<span className="text-gradient">Saver</span>
             </h1>

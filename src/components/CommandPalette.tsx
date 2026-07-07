@@ -21,7 +21,7 @@ const COMMANDS = [
   { id: "go-diagnostics", label: "Run Diagnostics", path: "/diagnostics" },
   { id: "go-settings", label: "Open Settings", path: "/settings" },
   { id: "go-help", label: "Keyboard Shortcuts", path: "/help" },
-  { id: "go-about", label: "About CloudSaver", path: "/about" },
+  { id: "go-about", label: "About RodjerCloud", path: "/about" },
 ]
 
 export default function CommandPalette() {

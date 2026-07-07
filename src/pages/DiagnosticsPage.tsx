@@ -12,30 +12,30 @@ export default function DiagnosticsPage() {
     const push = (r: R) => { out.push(r); setResults([...out]) }
     try {
       const v = await window.electronAPI?.app?.getVersion?.()
-      push({ name: "IPC: app.getVersion", pass: !!v?.success, detail: v?.data })
-    } catch (e: any) { push({ name: "IPC: app.getVersion", pass: false, detail: e?.message }) }
+      push({ name: "IPC: версия приложения", pass: !!v?.success, detail: v?.data })
+      } catch (e: any) { push({ name: "IPC: версия приложения", pass: false, detail: e?.message }) }
     try {
       const s = await window.electronAPI?.telegram?.checkSession?.()
-      push({ name: "Telegram session", pass: !!s?.success, detail: s?.hasSession ? "Active" : "None" })
+      push({ name: "Сессия Telegram", pass: !!s?.success, detail: s?.hasSession ? "Активна" : "Нет" })
     } catch (e: any) { push({ name: "Telegram session", pass: false, detail: e?.message }) }
     try {
       const dl = await window.electronAPI?.storage?.getDownloadPath?.()
-      push({ name: "Download path", pass: !!dl?.success, detail: dl?.data })
+      push({ name: "Путь загрузки", pass: !!dl?.success, detail: dl?.data })
     } catch (e: any) { push({ name: "Download path", pass: false, detail: e?.message }) }
     try {
       localStorage.setItem("__diag", "1"); const v = localStorage.getItem("__diag"); localStorage.removeItem("__diag")
-      push({ name: "Local storage write", pass: v === "1" })
+      push({ name: "Запись локального хранилища", pass: v === "1" })
     } catch (e: any) { push({ name: "Local storage write", pass: false, detail: e?.message }) }
-    push({ name: "Online", pass: navigator.onLine })
+    push({ name: "Интернет", pass: navigator.onLine })
     setRunning(false)
   }
   return (
     <div className="v3-page" data-testid="diagnostics-page">
-      <h1 className="v3-h1">Diagnostics</h1>
-      <div className="v3-sub">Run self-tests for IPC, storage, and network.</div>
+      <h1 className="v3-h1">Диагностика</h1>
+      <div className="v3-sub">Запуск самопроверки IPC, хранилища и сети.</div>
       <div className="v3-row" style={{ marginTop: 12 }}>
         <button className="v3-btn primary" disabled={running} onClick={run} data-testid="diag-run">
-          {running ? <Loader2 size={14} className="v3-spin"/> : <Stethoscope size={14}/>} Run tests
+          {running ? <Loader2 size={14} className="v3-spin"/> : <Stethoscope size={14}/>} Запустить тесты
         </button>
       </div>
       <div className="v3-card" style={{ marginTop: 18 }}>

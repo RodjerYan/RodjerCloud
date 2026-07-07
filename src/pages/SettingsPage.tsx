@@ -30,7 +30,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     if (r.success) {
       setDownloadPath(r.data.folderPath)
       await window.electronAPI.storage.setDownloadPath(r.data.folderPath)
-      show('Saved')
+      show('Сохранено')
     }
   }
 
@@ -47,16 +47,16 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const copyKey = async () => {
     if (!channelInfo?.token) return
     await window.electronAPI.app.copyToClipboard(channelInfo.token)
-    show('Key copied')
+    show('Ключ скопирован')
   }
 
   const clearAll = async () => {
-    if (!confirm('Clear all local data? You will need to log in again.')) return
+    if (!confirm('Очистить все локальные данные? Придётся заново войти.')) return
     await window.electronAPI.telegram.logout()
     onChangeChannel()
   }
   const factoryReset = async () => {
-    if (!confirm('Factory reset will wipe ALL local data. Continue?')) return
+    if (!confirm('Сброс удалит ВСЕ локальные данные. Продолжить?')) return
     await window.electronAPI.storage.factoryReset()
     localStorage.clear()
     onChangeChannel()
@@ -64,52 +64,52 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
 
   return (
     <div className="se-root">
-      <h1>Settings</h1>
+      <h1>Настройки</h1>
 
       <section className="se-card">
-        <h2>Appearance</h2>
-        <label className="se-row"><span>Reduce animations</span>
+        <h2>Внешний вид</h2>
+        <label className="se-row"><span>Уменьшить анимации</span>
           <input type="checkbox" checked={reduceAnim} onChange={e => toggle('v2.reduceAnim', e.target.checked, 'reduce-anim', setReduceAnim)} />
         </label>
-        <label className="se-row"><span>Compact mode</span>
+        <label className="se-row"><span>Компактный режим</span>
           <input type="checkbox" checked={compact} onChange={e => toggle('v2.compact', e.target.checked, 'compact', setCompact)} />
         </label>
       </section>
 
       <section className="se-card">
-        <h2>Download Settings</h2>
+        <h2>Загрузка</h2>
         <div className="se-row">
-          <span>Default download folder</span>
-          <div className="se-path"><code>{downloadPath || 'Default'}</code><button onClick={pickDownload}><FolderOpen size={14} /> Change</button></div>
+          <span>Папка для скачивания</span>
+          <div className="se-path"><code>{downloadPath || 'По умолчанию'}</code><button onClick={pickDownload}><FolderOpen size={14} /> Изменить</button></div>
         </div>
       </section>
 
       <section className="se-card">
-        <h2>Upload Settings</h2>
-        <label className="se-row"><span>Auto-rename on conflict</span>
+        <h2>Отправка</h2>
+        <label className="se-row"><span>Авто-переименование при совпадении</span>
           <input type="checkbox" checked={autoRename} onChange={e => { setAutoRename(e.target.checked); localStorage.setItem('v2.autoRename', e.target.checked ? '1' : '0') }} />
         </label>
-        <div className="se-row"><span>Upload concurrency</span>
+        <div className="se-row"><span>Одновременных загрузок</span>
           <input type="number" min={1} max={5} value={concurrency} onChange={e => onConcurrency(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))} style={{ width: 80 }} />
         </div>
       </section>
 
       <section className="se-card">
-        <h2>Channel</h2>
-        <div className="se-row"><span>Connected channel</span><strong>{channelInfo?.title || '—'}</strong></div>
+        <h2>Канал</h2>
+        <div className="se-row"><span>Подключённый канал</span><strong>{channelInfo?.title || '—'}</strong></div>
         {channelInfo?.token && (
-          <div className="se-row"><span>Channel key</span>
+          <div className="se-row"><span>Ключ канала</span>
             <div className="se-path"><code>{String(channelInfo.token).slice(0, 12)}…</code>
-              <button onClick={copyKey}><Copy size={14} /> Copy Key</button></div>
+              <button onClick={copyKey}><Copy size={14} /> Копировать ключ</button></div>
           </div>
         )}
-        <button className="se-secondary" onClick={onChangeChannel}>Change Channel</button>
+        <button className="se-secondary" onClick={onChangeChannel}>Сменить канал</button>
       </section>
 
       <section className="se-card se-danger">
-        <h2><AlertTriangle size={16} /> Danger Zone</h2>
-        <button className="se-warn" onClick={clearAll}>Clear All Local Data</button>
-        <button className="se-warn" onClick={factoryReset}>Factory Reset</button>
+        <h2><AlertTriangle size={16} /> Опасная зона</h2>
+        <button className="se-warn" onClick={clearAll}>Очистить локальные данные</button>
+        <button className="se-warn" onClick={factoryReset}>Сброс настроек</button>
       </section>
 
       {toast && <div className="mf-toast">{toast}</div>}

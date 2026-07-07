@@ -20,10 +20,10 @@ export default function AboutPage() {
     <div className="ab-root">
       <div className="ab-card">
         <div className="ab-logo">CS</div>
-        <h1>CloudSaver</h1>
+        <h1>RodjerCloud</h1>
         <div className="ab-version">v{version} — 100+ features</div>
         <p className="ab-desc">
-          CloudSaver turns your private Telegram channel into unlimited cloud storage.
+          RodjerCloud turns your private Telegram channel into unlimited cloud storage.
           Encrypt-free, no monthly fee, fully owned by you.
         </p>
         <div className="ab-stack">

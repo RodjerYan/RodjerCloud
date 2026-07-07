@@ -1,9 +1,9 @@
 {
-  "name": "cloudsaver",
-  "version": "2.0.0",
-  "description": "CloudSaver v2 - Telegram Cloud Storage Desktop App",
+  "name": "rodjercloud",
+  "version": "1.0.0",
+  "description": "RodjerCloud - Telegram Cloud Storage Desktop App",
   "main": "out/main/index.js",
-  "author": "CloudSaver",
+  "author": "RodjerCloud",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -41,8 +41,8 @@
     "vite": "^6.0.7"
   },
   "build": {
-    "appId": "com.cloudsaver.app",
-    "productName": "CloudSaver",
+    "appId": "com.rodjercloud.app",
+    "productName": "RodjerCloud",
     "directories": {
       "output": "dist"
     },

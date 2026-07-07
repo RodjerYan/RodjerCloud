@@ -19,15 +19,15 @@ export default function NetworkPage() {
   const max = Math.max(50, ...pings)
   return (
     <div className="v3-page" data-testid="network-page">
-      <h1 className="v3-h1">Network</h1>
-      <div className="v3-sub">Live Telegram connection health.</div>
+      <h1 className="v3-h1">Сеть</h1>
+      <div className="v3-sub">Состояние подключения к Telegram.</div>
       <div className="v3-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginTop: 18 }}>
-        <div className="v3-card"><div className="v3-sub">Online</div><div className="v3-h2 v3-num" style={{ color: online ? "var(--v3-success)" : "var(--v3-danger)" }}>{online ? "YES" : "NO"}</div></div>
-        <div className="v3-card"><div className="v3-sub">Latency</div><div className="v3-h2 v3-num">{latency} ms</div></div>
-        <div className="v3-card"><div className="v3-sub">Samples</div><div className="v3-h2 v3-num">{pings.length}</div></div>
+        <div className="v3-card"><div className="v3-sub">Статус</div><div className="v3-h2 v3-num" style={{ color: online ? "var(--v3-success)" : "var(--v3-danger)" }}>{online ? "ДА" : "НЕТ"}</div></div>
+        <div className="v3-card"><div className="v3-sub">Задержка</div><div className="v3-h2 v3-num">{latency} мс</div></div>
+        <div className="v3-card"><div className="v3-sub">Измерений</div><div className="v3-h2 v3-num">{pings.length}</div></div>
       </div>
       <div className="v3-card" style={{ marginTop: 18 }}>
-        <div className="v3-row"><Activity size={16}/> <span>Latency (ms) — last 40 samples</span></div>
+        <div className="v3-row"><Activity size={16}/> <span>Задержка (мс) — последние 40 замеров</span></div>
         <svg viewBox={`0 0 400 100`} style={{ width: "100%", height: 140, marginTop: 12 }}>
           <defs><linearGradient id="g1" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#22d3ee"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
           <polyline fill="none" stroke="url(#g1)" strokeWidth={2}

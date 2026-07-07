@@ -92,11 +92,11 @@ export default function UploadPage() {
   return (
     <div className="up-root">
       <div className="up-head">
-        <h1>Upload Files</h1>
+        <h1>Загрузка файлов</h1>
         <div className="up-stats">
-          <span>{doneCount} done</span>
-          {failedCount > 0 && <span className="warn">{failedCount} failed</span>}
-          <span>{queue.length} total</span>
+          <span>{doneCount} готово</span>
+          {failedCount > 0 && <span className="warn">{failedCount} ошибок</span>}
+          <span>{queue.length} всего</span>
         </div>
       </div>
 
@@ -105,19 +105,19 @@ export default function UploadPage() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}>
         <UploadIcon size={48} />
-        <h2>Drag & drop files here</h2>
-        <p>or use one of the buttons below</p>
+        <h2>Перетащите файлы сюда</h2>
+        <p>или используйте кнопки ниже</p>
         <div className="up-actions">
-          <button className="primary" onClick={pickFiles}><UploadIcon size={16} /> Browse Files</button>
-          <button onClick={pickFolder}><FolderOpen size={16} /> Pick Folder</button>
+          <button className="primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
+          <button onClick={pickFolder}><FolderOpen size={16} /> Выбрать папку</button>
         </div>
       </div>
 
       {queue.length > 0 && (
         <div className="up-queue">
           <div className="up-queue-head">
-            <h2>Upload Queue</h2>
-            <button onClick={clearDone}>Clear completed</button>
+            <h2>Очередь загрузки</h2>
+            <button onClick={clearDone}>Очистить завершённые</button>
           </div>
           <ul>
             {queue.map(q => (

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react"
 import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom"
 import SplashScreen from "./components/SplashScreen"
 import LoginScreen from "./components/LoginScreen"
-import KeyChoiceScreen from "./components/KeyChoiceScreen"
 import Sidebar from "./components/Sidebar"
 import CommandPalette from "./components/CommandPalette"
 import AggregateProgress from "./components/AggregateProgress"
@@ -41,7 +40,6 @@ declare global { interface Window { electronAPI: any } }
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [needsKeyChoice, setNeedsKeyChoice] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [showSplash, setShowSplash] = useState(true)
   const [channelInfo, setChannelInfo] = useState<any>(null)
@@ -49,7 +47,6 @@ function App() {
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 1400)
     checkSession()
-    // apply v3 prefs (theme/density/animations/font)
     const p = v3store.getPrefs()
     document.documentElement.dataset.theme = p.theme
     document.documentElement.dataset.density = p.density
@@ -73,25 +70,18 @@ function App() {
   }
 
   const handleLoginSuccess = (channelData: any) => {
-    if (channelData && channelData.needsKeyChoice) { setNeedsKeyChoice(true); return }
     setIsAuthenticated(true); setChannelInfo(channelData)
     v3store.logActivity("login", "Login successful")
-  }
-  const handleKeyChoiceComplete = (channelData: any) => {
-    setNeedsKeyChoice(false); setIsAuthenticated(true); setChannelInfo(channelData)
   }
   const handleLogout = async () => {
     try {
       await window.electronAPI.telegram.logout()
-      setIsAuthenticated(false); setNeedsKeyChoice(false); setChannelInfo(null)
+      setIsAuthenticated(false); setChannelInfo(null)
       v3store.logActivity("login", "Logged out")
     } catch (e) { console.error("Logout failed:", e) }
   }
 
   if (showSplash || isLoading) return <SplashScreen />
-  if (needsKeyChoice) {
-    return <div className="app-container"><KeyChoiceScreen onComplete={handleKeyChoiceComplete} /></div>
-  }
   if (!isAuthenticated) {
     return <div className="app-container"><LoginScreen onLoginSuccess={handleLoginSuccess} /></div>
   }

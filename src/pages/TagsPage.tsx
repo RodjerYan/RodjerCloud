@@ -12,15 +12,15 @@ export default function TagsPage() {
   const remove = (n: string) => { v3store.removeTag(n); setTags(v3store.getTags()) }
   return (
     <div className="v3-page" data-testid="tags-page">
-      <h1 className="v3-h1">Tags</h1>
-      <div className="v3-sub">Organise files with custom labels.</div>
+      <h1 className="v3-h1">Метки</h1>
+      <div className="v3-sub">Организуйте файлы с помощью пользовательских меток.</div>
       <div className="v3-card" style={{ marginTop: 18 }}>
         <div className="v3-row">
-          <input className="v3-input" placeholder="Tag name" value={name} onChange={e => setName(e.target.value)} data-testid="tag-name"/>
+          <input className="v3-input" placeholder="Название метки" value={name} onChange={e => setName(e.target.value)} data-testid="tag-name"/>
           <div className="v3-row" style={{ flex: "none" }}>
             {PALETTE.map(c => <button key={c} onClick={() => setColor(c)} style={{ width: 22, height: 22, borderRadius: 8, background: c, border: c === color ? "2px solid white" : "1px solid rgba(255,255,255,0.2)" }}/>)}
           </div>
-          <button className="v3-btn primary" onClick={add} data-testid="tag-add"><Plus size={14}/> Add</button>
+          <button className="v3-btn primary" onClick={add} data-testid="tag-add"><Plus size={14}/> Добавить</button>
         </div>
         <div className="v3-row" style={{ marginTop: 16, flexWrap: "wrap", gap: 8 }}>
           {tags.map(t => (

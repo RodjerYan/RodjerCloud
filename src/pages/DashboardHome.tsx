@@ -12,12 +12,12 @@ function fmtSize(n: number) {
 }
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Images'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Videos'
-  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Audio'
-  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Documents'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Archives'
-  return 'Others'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Изображения'
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Видео'
+  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Аудио'
+  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Документы'
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Архивы'
+  return 'Другое'
 }
 
 export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
@@ -54,32 +54,32 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
     <div className="dh-root">
       <div className="dh-banner">
         <div>
-          <h1>Welcome to CloudSaver <span className="dh-v">v2</span></h1>
-          <p>{channelInfo?.title ? `Connected to ${channelInfo.title}` : 'Your private Telegram cloud'}</p>
+          <h1>Добро пожаловать в RodjerCloud</h1>
+          <p>{channelInfo?.title ? `Подключено к ${channelInfo.title}` : 'Ваше приватное облако в Telegram'}</p>
         </div>
         <button className="dh-cta" onClick={() => navigate('/upload')}>
-          <Upload size={16} /> Upload Files
+          <Upload size={16} /> Загрузить файлы
         </button>
       </div>
 
       <div className="dh-stats">
         <div className="dh-card"><div className="dh-card-icon"><FileText size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Total Files</div>
+          <div className="dh-card-body"><div className="dh-card-label">Всего файлов</div>
             <div className="dh-card-value">{loading ? '…' : total}</div></div></div>
         <div className="dh-card"><div className="dh-card-icon"><HardDrive size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Storage Used</div>
+          <div className="dh-card-body"><div className="dh-card-label">Использовано</div>
             <div className="dh-card-value">{loading ? '…' : fmtSize(totalSize)}</div></div></div>
         <div className="dh-card"><div className="dh-card-icon"><TrendingUp size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">This Week</div>
+          <div className="dh-card-body"><div className="dh-card-label">За неделю</div>
             <div className="dh-card-value">{loading ? '…' : weekFiles}</div></div></div>
         <div className="dh-card"><div className="dh-card-icon"><BarChart3Icon /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Avg File Size</div>
+          <div className="dh-card-body"><div className="dh-card-label">Средний размер</div>
             <div className="dh-card-value">{loading ? '…' : fmtSize(avgSize)}</div></div></div>
       </div>
 
       <div className="dh-grid">
         <div className="dh-panel">
-          <div className="dh-panel-head"><h2>Storage by Type</h2></div>
+          <div className="dh-panel-head"><h2>Файлы по типам</h2></div>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer>
               <BarChart data={chartData}>
@@ -97,8 +97,8 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
         </div>
 
         <div className="dh-panel">
-          <div className="dh-panel-head"><h2>Recent Files</h2></div>
-          {recent.length === 0 ? <div className="dh-empty">No files yet</div> : (
+          <div className="dh-panel-head"><h2>Последние файлы</h2></div>
+          {recent.length === 0 ? <div className="dh-empty">Файлов пока нет</div> : (
             <ul className="dh-recent">
               {recent.map(f => (
                 <li key={f.messageId}>
@@ -113,8 +113,8 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
 
       <div className="dh-quick" onClick={onQuickUpload}>
         <Upload size={28} />
-        <div className="dh-quick-title">Quick Upload</div>
-        <div className="dh-quick-sub">Click to pick files</div>
+        <div className="dh-quick-title">Быстрая загрузка</div>
+        <div className="dh-quick-sub">Нажмите, чтобы выбрать файлы</div>
       </div>
     </div>
   )

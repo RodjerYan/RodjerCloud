@@ -1,4 +1,4 @@
-// CloudSaver v2 — lightweight localStorage-backed stores for new features
+// RodjerCloud — lightweight localStorage-backed stores
 export type TrashItem = { messageId: number; fileName: string; size: number; deletedAt: number }
 export type FavItem = { messageId: number; fileName: string; addedAt: number }
 export type SharedLink = { id: string; fileName: string; messageId: number; createdAt: number; expiresAt?: number; password?: string; useCount: number }

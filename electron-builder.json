@@ -1,6 +1,6 @@
 {
-  "appId": "com.cloudsaver.app",
-  "productName": "CloudSaver",
+  "appId": "com.rodjercloud.app",
+  "productName": "RodjerCloud",
   "directories": {
     "output": "dist"
   },

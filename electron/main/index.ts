@@ -1,6 +1,3 @@
-// CloudSaver v2 - Electron Main Process
-// Extends v1 main process with v2 features: bulk ops, clipboard, settings persistence,
-// sync history, upload concurrency queue, folder recursive picker.
 import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
 import * as fs from 'fs'
 import * as pathMod from 'path'
@@ -17,7 +14,6 @@ const autoSyncService = new AutoSyncService(telegramService)
 autoSyncService.setStatusCallback((status, file) => {
   if (mainWindow) {
     mainWindow.webContents.send('autosync:status', { status, file })
-    // append to sync history
     appendSyncHistory({ timestamp: Date.now(), fileName: file || '', status, size: 0 }).catch(() => {})
   }
 })
@@ -65,7 +61,7 @@ app.on('before-quit', () => { autoSyncService.stop() })
 
 // ===== V2 prefs file helpers =====
 function prefsPath(): string {
-  return pathMod.join(app.getPath('userData'), 'cloudsaver-v2-prefs.json')
+  return pathMod.join(app.getPath('userData'), 'rodjercloud-prefs.json')
 }
 async function readPrefs(): Promise<any> {
   try {
@@ -78,7 +74,7 @@ async function writePrefs(prefs: any): Promise<void> {
   fs.writeFileSync(prefsPath(), JSON.stringify(prefs, null, 2), 'utf8')
 }
 function historyPath(): string {
-  return pathMod.join(app.getPath('userData'), 'cloudsaver-sync-history.json')
+  return pathMod.join(app.getPath('userData'), 'rodjercloud-sync-history.json')
 }
 async function appendSyncHistory(entry: any): Promise<void> {
   try {
@@ -92,7 +88,7 @@ async function appendSyncHistory(entry: any): Promise<void> {
   } catch (e) { console.error('sync history append failed', e) }
 }
 
-// ===== Existing IPC handlers (v1) =====
+// ===== Auth IPC =====
 ipcMain.handle('telegram:check-session', async () => {
   try {
     const session = await storageService.getSession()
@@ -100,9 +96,9 @@ ipcMain.handle('telegram:check-session', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('telegram:login', async (_, data: { apiId: number; apiHash: string; phoneNumber: string }) => {
+ipcMain.handle('telegram:login', async (_, phoneNumber: string) => {
   try {
-    const result = await telegramService.startAuth(data.apiId, data.apiHash, data.phoneNumber)
+    const result = await telegramService.startAuth(phoneNumber)
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -112,9 +108,9 @@ ipcMain.handle('telegram:verify-code', async (_, code: string) => {
     const result = await telegramService.verifyCode(code)
     if (result.success) {
       const sessionString = telegramService.getSessionString()
-      const credentials = telegramService.getCredentials()
-      await storageService.saveSession(sessionString, credentials)
-      return { success: true, needsKeyChoice: true }
+      const channelResult = await telegramService.createPrivateChannel()
+      await storageService.saveSession(sessionString)
+      return { success: true, data: channelResult }
     }
     return result
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -125,9 +121,9 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
     const result = await telegramService.verify2FA(password)
     if (result.success) {
       const sessionString = telegramService.getSessionString()
-      const credentials = telegramService.getCredentials()
-      await storageService.saveSession(sessionString, credentials)
-      return { success: true, needsKeyChoice: true }
+      const channelResult = await telegramService.createPrivateChannel()
+      await storageService.saveSession(sessionString)
+      return { success: true, data: channelResult }
     }
     return result
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -137,14 +133,12 @@ ipcMain.handle('telegram:reconnect', async () => {
   try {
     const sessionData = await storageService.getSession()
     if (!sessionData) return { success: false, error: 'No session found' }
-    const result = await telegramService.reconnect(
-      sessionData.session, sessionData.credentials.apiId, sessionData.credentials.apiHash
-    )
+    const result = await telegramService.reconnect(sessionData.session)
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-// ===== V2 Upload queue with concurrency =====
+// ===== Upload queue =====
 interface UploadJob { id: string; filePath: string; event: any }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
@@ -189,27 +183,6 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
   try {
     const jobId = id || Math.random().toString(36).slice(2)
     return await new Promise((resolve) => {
-      const onComplete = (_: any, payload: any) => {
-        if (payload.id !== jobId) return
-        event.sender.off('telegram:upload-complete' as any, onComplete as any)
-        resolve(payload.success ? { success: true, data: payload.data } : { success: false, error: payload.error })
-      }
-      const listener = (_: any, payload: any) => onComplete(_, payload)
-      ipcMain.on('telegram:_internal-noop', () => {})
-      const channelListener = (e: any, payload: any) => {
-        if (payload && payload.id === jobId) {
-          resolve(payload.success ? { success: true, data: payload.data } : { success: false, error: payload.error })
-        }
-      }
-      // We attach to webContents IPC instead
-      const wc = event.sender
-      const handler = (_evt: any, payload: any) => {
-        if (payload && payload.id === jobId) {
-          wc.off('ipc-message-sync' as any, handler as any)
-          resolve(payload.success ? { success: true, data: payload.data } : { success: false, error: payload.error })
-        }
-      }
-      // Simpler approach: directly await runUpload but bypass queue with concurrency cap
       uploadQueue.push({ id: jobId, filePath, event: {
         sender: {
           send: (channel: string, data: any) => {
@@ -255,6 +228,7 @@ ipcMain.handle('telegram:logout', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+// ===== Dialog handlers =====
 ipcMain.handle('dialog:pick-file', async () => {
   try {
     const result = await dialog.showOpenDialog({ title: 'Select a file to upload', properties: ['openFile'] })
@@ -285,73 +259,7 @@ ipcMain.handle('dialog:pick-folder', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('telegram:setup-new-channel', async () => {
-  try {
-    const channelResult = await telegramService.createNewChannel()
-    return { success: true, data: channelResult }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('telegram:setup-existing-channel', async (_, key: string) => {
-  try {
-    const channelResult = await telegramService.findChannelByToken(key)
-    return { success: true, data: channelResult }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('dialog:save-key-file', async (_, key: string, body: string) => {
-  try {
-    const downloadsPath = app.getPath('downloads')
-    const filePath = pathMod.join(downloadsPath, 'cloudsave.txt')
-    const content = `key :- ${key}\n\n${body}\n`
-    fs.writeFileSync(filePath, content, 'utf8')
-    return { success: true, data: { filePath } }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('storage:save-credentials', async (_, credentials: any) => {
-  try { await storageService.saveCredentials(credentials); return { success: true } }
-  catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('storage:get-credentials', async () => {
-  try {
-    const credentials = await storageService.getCredentials()
-    return { success: true, data: credentials }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('autosync:get-config', async () => {
-  try { return { success: true, data: autoSyncService.getConfig() } }
-  catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('autosync:update-config', async (_, newConfig: any) => {
-  try {
-    autoSyncService.updateConfig(newConfig)
-    await storageService.saveSyncConfig(autoSyncService.getConfig())
-    return { success: true }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('autosync:start', async () => {
-  try { autoSyncService.start(); return { success: true } }
-  catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('autosync:stop', async () => {
-  try { autoSyncService.stop(); return { success: true } }
-  catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('autosync:get-status', async () => {
-  try { return { success: true, data: autoSyncService.getStatus() } }
-  catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-// ===== V2 NEW IPC handlers =====
-
-// Recursive folder picker
+// ===== V2 handlers =====
 function walkDir(dir: string, exclude: string[] = []): string[] {
   const out: string[] = []
   const items = fs.readdirSync(dir, { withFileTypes: true })

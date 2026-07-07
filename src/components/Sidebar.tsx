@@ -7,25 +7,25 @@ import { Home, FolderOpen, Upload, RefreshCw, BarChart3, Settings, Info,
 interface Props { channelInfo: any; onLogout: () => void }
 
 const items = [
-  { to: "/", label: "Dashboard", icon: Home, end: true },
-  { to: "/files", label: "My Files", icon: FolderOpen },
-  { to: "/upload", label: "Upload", icon: Upload },
-  { to: "/autosync", label: "Auto-Sync", icon: RefreshCw },
-  { to: "/statistics", label: "Statistics", icon: BarChart3 },
-  { to: "/trash", label: "Trash", icon: Trash2 },
-  { to: "/favorites", label: "Favorites", icon: Star },
-  { to: "/shared", label: "Shared", icon: Link2 },
-  { to: "/activity", label: "Activity", icon: Activity },
-  { to: "/tags", label: "Tags", icon: Tag },
-  { to: "/search", label: "Search", icon: Search },
-  { to: "/calendar", label: "Calendar", icon: CalendarDays },
-  { to: "/albums", label: "Albums", icon: ImgIcon },
-  { to: "/notes", label: "Notes", icon: StickyNote },
-  { to: "/network", label: "Network", icon: Wifi },
-  { to: "/diagnostics", label: "Diagnostics", icon: Stethoscope },
-  { to: "/help", label: "Shortcuts", icon: HelpCircle },
-  { to: "/settings", label: "Settings", icon: Settings },
-  { to: "/about", label: "About", icon: Info }
+  { to: "/", label: "Главная", icon: Home, end: true },
+  { to: "/files", label: "Мои файлы", icon: FolderOpen },
+  { to: "/upload", label: "Загрузить", icon: Upload },
+  { to: "/autosync", label: "Авто-синх.", icon: RefreshCw },
+  { to: "/statistics", label: "Статистика", icon: BarChart3 },
+  { to: "/trash", label: "Корзина", icon: Trash2 },
+  { to: "/favorites", label: "Избранное", icon: Star },
+  { to: "/shared", label: "Общее", icon: Link2 },
+  { to: "/activity", label: "Активность", icon: Activity },
+  { to: "/tags", label: "Теги", icon: Tag },
+  { to: "/search", label: "Поиск", icon: Search },
+  { to: "/calendar", label: "Календарь", icon: CalendarDays },
+  { to: "/albums", label: "Альбомы", icon: ImgIcon },
+  { to: "/notes", label: "Заметки", icon: StickyNote },
+  { to: "/network", label: "Сеть", icon: Wifi },
+  { to: "/diagnostics", label: "Диагностика", icon: Stethoscope },
+  { to: "/help", label: "Горячие клавиши", icon: HelpCircle },
+  { to: "/settings", label: "Настройки", icon: Settings },
+  { to: "/about", label: "О программе", icon: Info }
 ]
 
 export default function Sidebar({ channelInfo, onLogout }: Props) {
@@ -36,8 +36,8 @@ export default function Sidebar({ channelInfo, onLogout }: Props) {
         <div className="v2-sidebar-logo">CS</div>
         {!collapsed && (
           <div className="v2-sidebar-title">
-            <div className="v2-sidebar-brand">CloudSaver</div>
-            <span className="v2-sidebar-badge">v2</span>
+            <div className="v2-sidebar-brand">RodjerCloud</div>
+            <span className="v2-sidebar-badge">v1</span>
           </div>
         )}
         <button className="v3-btn ghost" style={{ marginLeft: "auto", padding: 6, borderColor: "transparent" }} onClick={() => setCollapsed(c => !c)} title="Toggle sidebar" data-testid="sidebar-collapse">
@@ -57,16 +57,16 @@ export default function Sidebar({ channelInfo, onLogout }: Props) {
       <div className="v2-sidebar-foot">
         {!collapsed && (
           <div className="v2-sidebar-channel" title={channelInfo?.title}>
-            <div className="v2-sidebar-channel-name">{channelInfo?.title || "Channel"}</div>
-            <div className="v2-sidebar-channel-sub">Connected</div>
+            <div className="v2-sidebar-channel-name">{channelInfo?.title || "Канал"}</div>
+            <div className="v2-sidebar-channel-sub">Подключено</div>
           </div>
         )}
         <button className="v2-sidebar-logout" onClick={onLogout} data-testid="logout-btn">
-          <LogOut size={16} />{!collapsed && <span>Logout</span>}
+          <LogOut size={16} />{!collapsed && <span>Выйти</span>}
         </button>
         {!collapsed && (
           <div className="v3-row" style={{ marginTop: 8, fontSize: 11, color: "var(--v3-text-mute)" }}>
-            <Command size={12} /> + K to search
+            <Command size={12} /> + K — поиск
           </div>
         )}
       </div>

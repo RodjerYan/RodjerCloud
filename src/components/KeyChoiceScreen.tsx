@@ -98,7 +98,7 @@ const KeyChoiceScreen: React.FC<KeyChoiceScreenProps> = ({ onComplete }) => {
       <div className="login-box glass-card">
         <div className="login-header">
           <div className="logo-container">
-            <img src={iconUrl} alt="CloudSaver" className="logo-img" />
+            <img src={iconUrl} alt="RodjerCloud" className="logo-img" />
           </div>
           <h1 className="login-title">
             Cloud<span className="text-gradient">Saver</span>
