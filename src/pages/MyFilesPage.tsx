@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 
 const DAY = 86400
 
@@ -34,12 +34,10 @@ export default function MyFilesPage() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(CATEGORIES))
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [preview, setPreview] = useState<{ idx: number } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [toast, setToast] = useState<string>('')
-  const [activeChip, setActiveChip] = useState<string | null>(null)
-  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const load = async () => {
     setLoading(true)
@@ -69,17 +67,6 @@ export default function MyFilesPage() {
     filtered.forEach(f => { map[typeOf(f.fileName)]?.push(f) })
     return map
   }, [filtered])
-
-  const catStats = useMemo(() => {
-    return CATEGORIES.map(cat => {
-      const items = grouped[cat]
-      const size = items.reduce((s, f) => s + (f.fileSize || 0), 0)
-      const fresh = items.filter(f => isNew(f.uploadedAt)).length
-      return { cat, count: items.length, size, fresh }
-    })
-  }, [grouped])
-
-  const totalSize = useMemo(() => files.reduce((s, f) => s + (f.fileSize || 0), 0), [files])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
 
@@ -139,18 +126,6 @@ export default function MyFilesPage() {
     setExpanded(s)
   }
 
-  const allExpanded = expanded.size === CATEGORIES.length
-  const toggleAll = () => {
-    setExpanded(allExpanded ? new Set() : new Set(CATEGORIES))
-  }
-
-  const scrollToCat = (cat: string) => {
-    setActiveChip(cat)
-    sectionRefs.current[cat]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    if (!expanded.has(cat)) toggleCategory(cat)
-    setTimeout(() => setActiveChip(null), 1000)
-  }
-
   const hasFiles = Object.values(grouped).some(g => g.length > 0)
 
   return (
@@ -171,29 +146,6 @@ export default function MyFilesPage() {
         </div>
       </div>
 
-      {!loading && hasFiles && (
-        <div className="mf-chips">
-          {catStats.map(({ cat, count, size, fresh }) => (
-            <div
-              key={cat}
-              className={'mf-chip' + (activeChip === cat ? ' active' : '')}
-              style={{ '--cat-color': CAT_COLOR[cat] } as React.CSSProperties}
-              onClick={() => scrollToCat(cat)}
-            >
-              <span className="mf-chip-icon">{CAT_ICON[cat]}</span>
-              <span className="mf-chip-name">{cat}</span>
-              <span className="mf-chip-count">{count}</span>
-              {fresh > 0 && <span className="mf-chip-new">{fresh}</span>}
-            </div>
-          ))}
-          <div className="mf-chip mf-chip-total">
-            <span className="mf-chip-name">Всего</span>
-            <span className="mf-chip-count">{files.length}</span>
-            <span className="mf-chip-size">{fmtSize(totalSize)}</span>
-          </div>
-        </div>
-      )}
-
       {selected.size > 0 && (
         <div className="mf-bulkbar">
           <span>Выбрано: {selected.size}</span>
@@ -203,42 +155,30 @@ export default function MyFilesPage() {
         </div>
       )}
 
-      {hasFiles && (
-        <div className="mf-sections-bar">
-          <span />
-          <button className="mf-toggle-all" onClick={toggleAll}>
-            <ChevronsUpDown size={14} /> {allExpanded ? 'Свернуть всё' : 'Развернуть всё'}
-          </button>
-        </div>
-      )}
-
       {loading ? <div className="mf-empty">Загрузка…</div> : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
         <div className="mf-sections">
           {CATEGORIES.map(cat => {
             const items = grouped[cat]
-            const fresh = items.filter(f => isNew(f.uploadedAt)).length
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
             return (
-              <div key={cat} className={'mf-section' + (open ? ' open' : '')} ref={el => { sectionRefs.current[cat] = el }}>
+              <div key={cat} className={'mf-section' + (open ? ' open' : '')}>
                 <div className="mf-section-head" onClick={() => toggleCategory(cat)} style={{ '--cat-color': CAT_COLOR[cat] } as React.CSSProperties}>
-                  <ChevronDown size={16} />
+                  <ChevronDown size={14} />
                   <span className="mf-section-icon">{CAT_ICON[cat]}</span>
                   <span className="mf-section-title">{cat}</span>
-                  <span className="mf-section-meta">{items.length} файл{items.length !== 1 ? 'ов' : ''}</span>
-                  {fresh > 0 && <span className="mf-section-fresh">{fresh} новых</span>}
+                  <span className="mf-section-count">{items.length}</span>
                 </div>
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
                   {items.length > 0 && (
                     view === 'grid' ? (
                       <div className="mf-grid">
                         {items.map((f, i) => (
-                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (isNew(f.uploadedAt) ? ' fresh' : '')}>
+                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '')}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
-                            {isNew(f.uploadedAt) && <span className="mf-card-badge">Новый</span>}
                             <div className="mf-card-actions">
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                               {cat === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
@@ -258,7 +198,7 @@ export default function MyFilesPage() {
                           {items.map((f, i) => (
                             <tr key={f.messageId} className={selected.has(f.messageId) ? 'selected' : ''}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
-                              <td className="ellip" title={f.fileName}>{f.fileName}{isNew(f.uploadedAt) && <span className="mf-row-badge">new</span>}</td>
+                              <td className="ellip" title={f.fileName}>{f.fileName}</td>
                               <td>{fmtSize(f.fileSize)}</td>
                               <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
                               <td>
@@ -272,9 +212,6 @@ export default function MyFilesPage() {
                         </tbody>
                       </table>
                     )
-                  )}
-                  {items.length === 0 && !search && (
-                    <div className="mf-empty" style={{ padding: 24 }}>Нет файлов</div>
                   )}
                 </div>
               </div>
