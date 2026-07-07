@@ -4,17 +4,38 @@
   "directories": {
     "output": "dist"
   },
-  "win": {
-    "target": [
-      "nsis",
-      "portable"
-    ],
-    "icon": "resources/icon.ico"
-  },
   "files": [
     "out/**/*",
     "resources/**/*"
   ],
+  "win": {
+    "target": ["nsis", "portable"],
+    "icon": "resources/icon.ico"
+  },
+  "mac": {
+    "target": ["dmg", "zip"],
+    "icon": "resources/icon.icns",
+    "category": "public.app-category.utilities",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
+  },
+  "dmg": {
+    "title": "RodjerCloud",
+    "background": null,
+    "icon": "resources/icon.icns",
+    "iconSize": 100,
+    "contents": [
+      { "x": 130, "y": 220, "type": "file" },
+      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+    ],
+    "window": {
+      "width": 540,
+      "height": 380
+    }
+  },
+  "afterSign": "build/notarize.js",
   "buildDependenciesFromSource": false,
   "nodeGypRebuild": false,
   "npmRebuild": false

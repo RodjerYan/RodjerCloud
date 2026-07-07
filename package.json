@@ -8,7 +8,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "build:win": "electron-vite build && electron-builder --win"
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac --x64",
+    "build:mac:universal": "electron-vite build && electron-builder --mac --universal",
+    "build:mac:arm64": "electron-vite build && electron-builder --mac --arm64"
   },
   "dependencies": {
     "big-integer": "^1.6.52",
@@ -39,25 +42,5 @@
     "react-dom": "^18.3.1",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
-  },
-  "build": {
-    "appId": "com.rodjercloud.app",
-    "productName": "RodjerCloud",
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "resources/icon.ico"
-    },
-    "files": [
-      "out/**/*",
-      "resources/**/*"
-    ],
-    "npmRebuild": false,
-    "nodeGypRebuild": false,
-    "buildDependenciesFromSource": false
   }
 }
