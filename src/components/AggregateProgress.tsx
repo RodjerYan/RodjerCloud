@@ -7,7 +7,7 @@ export default function AggregateProgress() {
   const { items } = useUploadProgress()
   const list = Object.values(items)
   const active = list.filter(i => !i.finished)
-  if (active.length === 0 && list.length === 0) return null
+  if (active.length === 0) return null
   const totalBytes = list.reduce((s, i) => s + (i.total || 0), 0)
   const sentBytes = list.reduce((s, i) => s + (i.sent || 0), 0)
   const overall = totalBytes > 0 ? Math.min(100, Math.floor((sentBytes / totalBytes) * 100)) : 0

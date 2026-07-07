@@ -55,6 +55,7 @@ export default function MyFilesPage() {
   const [toast, setToast] = useState<string>('')
   const [drillDown, setDrillDown] = useState<string | null>(null)
   const [thumbs, setThumbs] = useState<Record<number, string>>({})
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
 
   const loadThumbs = useCallback(async (files: any[]) => {
     const map: Record<number, string> = {}
@@ -66,15 +67,6 @@ export default function MyFilesPage() {
     }))
     setThumbs(prev => ({ ...prev, ...map }))
   }, [])
-
-  useEffect(() => {
-    if (drillDown) {
-      const files = filtered.filter(f => typeOf(f.fileName) === drillDown)
-      loadThumbs(files)
-    } else {
-      setThumbs({})
-    }
-  }, [drillDown, filtered, loadThumbs])
 
   const load = async () => {
     setLoading(true)
@@ -112,6 +104,15 @@ export default function MyFilesPage() {
 
   const galleryByYear = useMemo(() => groupByMonth(galleryFiles), [galleryFiles])
 
+  useEffect(() => {
+    if (drillDown) {
+      const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown)
+      loadThumbs(ddFiles)
+    } else {
+      setThumbs({})
+    }
+  }, [drillDown, filtered, loadThumbs])
+
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
 
   const toggleSelect = (id: number) => {
@@ -126,8 +127,19 @@ export default function MyFilesPage() {
   }
   const handleDelete = async (f: any) => {
     if (!confirm('Удалить ' + f.fileName + '?')) return
+    setDeletingIds(prev => new Set(prev).add(f.messageId))
+    showToast('Удаление…')
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
-    if (r.success) { showToast('Удалено'); load() } else showToast('Ошибка удаления')
+    if (r.success) {
+      showToast('Удалено')
+      setTimeout(() => {
+        setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+        setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+      }, 300)
+    } else {
+      setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+      showToast('Ошибка удаления')
+    }
   }
   const handleCopyLink = async (f: any) => {
     const link = `https://t.me/c/${f.chatId || ''}/${f.messageId}`
@@ -152,9 +164,20 @@ export default function MyFilesPage() {
   const bulkDelete = async () => {
     if (selected.size === 0) return
     if (!confirm(`Удалить ${selected.size} файлов?`)) return
+    const ids = Array.from(selected)
+    setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
     showToast('Удаление…')
-    await window.electronAPI.telegram.bulkDelete(Array.from(selected))
-    clearSelection(); load()
+    const r = await window.electronAPI.telegram.bulkDelete(ids)
+    if (r.success) {
+      setTimeout(() => {
+        setFiles(prev => prev.filter(x => !ids.includes(x.messageId)))
+        setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
+        clearSelection()
+      }, 300)
+    } else {
+      setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
+      showToast('Ошибка удаления')
+    }
   }
   const bulkDownload = async () => {
     if (selected.size === 0) return
@@ -223,7 +246,7 @@ export default function MyFilesPage() {
                         const thumbUrl = thumbs[f.messageId]
                         const isVideo = drillDown === 'Видео'
                         return (
-                        <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '')}>
+                          <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                           <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                           <div className="mf-gm-icon" data-type={drillDown}>
                             {thumbUrl ? (
@@ -274,7 +297,7 @@ export default function MyFilesPage() {
                     view === 'grid' ? (
                       <div className="mf-grid">
                         {items.map((f, i) => (
-                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '')}>
+                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
@@ -296,7 +319,7 @@ export default function MyFilesPage() {
                         </tr></thead>
                         <tbody>
                           {items.map((f, i) => (
-                            <tr key={f.messageId} className={selected.has(f.messageId) ? 'selected' : ''}>
+                            <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                               <td className="ellip" title={f.fileName}>{f.fileName}</td>
                               <td>{fmtSize(f.fileSize)}</td>

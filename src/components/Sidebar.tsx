@@ -44,7 +44,7 @@ export default function Sidebar({ channelInfo, onLogout }: Props) {
           {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         </button>
       </div>
-      <nav className="v2-sidebar-nav" style={{ overflowY: "auto" }}>
+      <nav className="v2-sidebar-nav">
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}
             className={({ isActive }) => "v2-sidebar-link" + (isActive ? " active" : "")}
