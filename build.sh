@@ -1,11 +1,11 @@
 #!/bin/bash
 
 echo "========================================="
-echo "  CloudSaver Build Script"
+echo "  RodjerCloud Build Script"
 echo "========================================="
 echo ""
 
-cd /app/cloudsaver
+cd /app/rodjercloud
 
 echo "Step 1: Installing dependencies..."
 yarn install
@@ -38,10 +38,10 @@ echo "========================================="
 echo "  Build Complete!"
 echo "========================================="
 echo ""
-echo "Output location: /app/cloudsaver/dist/"
+echo "Output location: /app/rodjercloud/dist/"
 echo ""
 echo "Files created:"
-ls -lh /app/cloudsaver/dist/ 2>/dev/null || echo "Check dist/ folder for output"
+ls -lh /app/rodjercloud/dist/ 2>/dev/null || echo "Check dist/ folder for output"
 echo ""
 echo "To run in development mode: yarn dev"
 echo "To test built app: yarn preview"
