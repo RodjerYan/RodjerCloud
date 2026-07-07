@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import iconUrl from '../assets/icon.png'
 import '../styles/login.css'
 
@@ -12,19 +12,37 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [step, setStep] = useState<Step>('phone')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneDigits, setPhoneDigits] = useState('')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [step])
+
+  const getFullPhone = () => {
+    const d = phoneDigits.replace(/\D/g, '')
+    if (d.startsWith('7') || d.startsWith('8')) return '+7' + d.replace(/^[78]/, '')
+    if (d.startsWith('1')) return '+1' + d.slice(1)
+    return '+' + d
+  }
 
   const handleSubmitPhone = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
+    const fullPhone = getFullPhone()
+    if (phoneDigits.replace(/\D/g, '').length < 5) {
+      setError('Введите номер телефона')
+      setLoading(false)
+      return
+    }
     try {
-      const result = await window.electronAPI.telegram.login(phoneNumber)
+      const result = await window.electronAPI.telegram.login(fullPhone)
       if (result.success) {
         setStep('code')
+        setTimeout(() => inputRef.current?.focus(), 100)
       } else {
         setError(result.error || 'Не удалось отправить код')
       }
@@ -45,6 +63,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         onLoginSuccess(result.data)
       } else if (result.needs2FA) {
         setStep('2fa')
+        setTimeout(() => inputRef.current?.focus(), 100)
       } else {
         setError(result.error || 'Неверный код')
       }
@@ -73,117 +92,184 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
   }
 
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/[^\d+]/g, '')
+    const digits = raw.replace(/\D/g, '')
+    const hasPlus = raw.startsWith('+') || phoneDigits.startsWith('+')
+    const prefix = hasPlus ? '+' : ''
+    if (digits.length <= 15) {
+      setPhoneDigits(prefix + digits)
+    }
+  }
+
+  const formatDisplay = () => {
+    const d = phoneDigits.replace(/\D/g, '')
+    if (!d) return ''
+    if (d.length <= 1) return d
+    if (d.length <= 4) return `${d[0]} (${d.slice(1)}`
+    if (d.length <= 7) return `${d[0]} (${d.slice(1, 4)}) ${d.slice(4)}`
+    if (d.length <= 9) return `${d[0]} (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`
+    return `${d[0]} (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9, 11)}`
+  }
+
+  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 5)
+    setCode(v)
+  }
+
   return (
     <div className="login-container fade-in">
-      <div className="login-box glass-card">
+      <div className="login-bg-shapes">
+        <div className="login-shape login-shape-1" />
+        <div className="login-shape login-shape-2" />
+        <div className="login-shape login-shape-3" />
+      </div>
+
+      <div className="login-card">
         <div className="login-header">
-          <div className="logo-container">
-            <img src={iconUrl} alt="RodjerCloud" className="logo-img" />
+          <div className="login-logo-wrap">
+            <img src={iconUrl} alt="RodjerCloud" className="login-logo" />
+            <div className="login-logo-glow" />
           </div>
           <h1 className="login-title">
-            Rodjer<span className="text-gradient">Cloud</span>
+            Rodjer<span className="login-title-accent">Cloud</span>
           </h1>
-          <p className="login-subtitle">My area — облачное хранилище в Telegram</p>
+          <p className="login-subtitle">Облачное хранилище в Telegram</p>
         </div>
 
         {error && (
-          <div className="error-box" data-testid="login-error-message">
-            <span className="error-icon">!</span>
+          <div className="login-error">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
             <span>{error}</span>
           </div>
         )}
 
         {step === 'phone' && (
           <form onSubmit={handleSubmitPhone} className="login-form">
-            <div className="form-group">
-              <label htmlFor="phoneNumber" className="form-label">Номер телефона</label>
-              <input
-                id="phoneNumber"
-                type="tel"
-                className="glass-input"
-                placeholder="+79001234567"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                data-testid="login-phone-input"
-                autoFocus
-              />
-              <p className="form-hint">Введите номер с кодом страны</p>
+            <div className="login-field">
+              <label className="login-label">Номер телефона</label>
+              <div className="login-phone-wrap">
+                <span className="login-phone-prefix">{getFullPhone().replace(/\d/g, '').replace(/[+\s]/g, '') || '+'}</span>
+                <input
+                  ref={inputRef}
+                  type="tel"
+                  className="login-phone-input"
+                  placeholder="7 (999) 123-45-67"
+                  value={formatDisplay()}
+                  onChange={handlePhoneChange}
+                  data-testid="login-phone-input"
+                  autoFocus
+                />
+              </div>
+              <p className="login-hint">Введите номер телефона для входа в Telegram</p>
             </div>
             <button
               type="submit"
-              className="glass-button glass-button-primary submit-button"
-              disabled={loading}
-              data-testid="login-phone-submit-button"
+              className="login-btn"
+              disabled={loading || phoneDigits.replace(/\D/g, '').length < 5}
             >
-              {loading ? 'Отправка...' : 'Отправить код'}
+              {loading ? (
+                <span className="login-btn-loading">
+                  <span className="login-spinner" />
+                  Отправка...
+                </span>
+              ) : (
+                'Получить код'
+              )}
             </button>
           </form>
         )}
 
         {step === 'code' && (
           <form onSubmit={handleSubmitCode} className="login-form">
-            <button
-              type="button"
-              className="back-button"
-              onClick={() => setStep('phone')}
-            >
-              ← Назад
+            <button type="button" className="login-back" onClick={() => setStep('phone')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              Назад
             </button>
-            <div className="form-group">
-              <label htmlFor="code" className="form-label">Код подтверждения</label>
-              <input
-                id="code"
-                type="text"
-                className="glass-input code-input"
-                placeholder="12345"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                maxLength={6}
-                data-testid="login-code-input"
-                autoFocus
-              />
-              <p className="form-hint">Проверьте Telegram — код придёт в приложение</p>
+            <div className="login-field">
+              <label className="login-label">Код подтверждения</label>
+              <div className="login-code-wrap">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="login-code-input"
+                  placeholder="00000"
+                  value={code}
+                  onChange={handleCodeChange}
+                  maxLength={5}
+                  data-testid="login-code-input"
+                  autoFocus
+                  inputMode="numeric"
+                />
+                <div className="login-code-dashes">
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <span key={i} className={`login-code-dash ${code.length > i ? 'filled' : ''}`} />
+                  ))}
+                </div>
+              </div>
+              <p className="login-hint">Код пришёл в Telegram</p>
             </div>
             <button
               type="submit"
-              className="glass-button glass-button-primary submit-button"
-              disabled={loading}
-              data-testid="login-code-submit-button"
+              className="login-btn"
+              disabled={loading || code.length < 4}
             >
-              {loading ? 'Проверка...' : 'Подтвердить'}
+              {loading ? (
+                <span className="login-btn-loading">
+                  <span className="login-spinner" />
+                  Проверка...
+                </span>
+              ) : (
+                'Подтвердить'
+              )}
             </button>
           </form>
         )}
 
         {step === '2fa' && (
           <form onSubmit={handleSubmit2FA} className="login-form">
-            <div className="form-group">
-              <label htmlFor="password" className="form-label">Двухфакторная аутентификация</label>
-              <input
-                id="password"
-                type="password"
-                className="glass-input"
-                placeholder="Введите пароль 2FA"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                data-testid="login-2fa-input"
-                autoFocus
-              />
-              <p className="form-hint">Ваш облачный пароль Telegram</p>
+            <div className="login-field">
+              <label className="login-label">Двухфакторная аутентификация</label>
+              <div className="login-password-wrap">
+                <input
+                  ref={inputRef}
+                  type="password"
+                  className="login-input"
+                  placeholder="Введите пароль 2FA"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  data-testid="login-2fa-input"
+                  autoFocus
+                />
+              </div>
+              <p className="login-hint">Облачный пароль Telegram</p>
             </div>
             <button
               type="submit"
-              className="glass-button glass-button-primary submit-button"
-              disabled={loading}
-              data-testid="login-2fa-submit-button"
+              className="login-btn"
+              disabled={loading || !password}
             >
-              {loading ? 'Проверка...' : 'Войти'}
+              {loading ? (
+                <span className="login-btn-loading">
+                  <span className="login-spinner" />
+                  Вход...
+                </span>
+              ) : (
+                'Войти'
+              )}
             </button>
           </form>
         )}
 
         <div className="login-footer">
-          <p>Все данные зашифрованы и хранятся локально</p>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span>Все данные зашифрованы</span>
         </div>
       </div>
     </div>

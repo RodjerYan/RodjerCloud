@@ -13,12 +13,12 @@ export default function AlbumsPage() {
   const remove = (id: string) => { v3store.removeAlbum(id); setAlbums(v3store.getAlbums()) }
   return (
     <div className="v3-page" data-testid="albums-page">
-      <h1 className="v3-h1">Albums</h1>
-      <div className="v3-sub">Group images into albums and play as slideshow.</div>
+      <h1 className="v3-h1">Альбомы</h1>
+      <div className="v3-sub">Группируйте изображения в альбомы и показывайте как слайд-шоу.</div>
       <div className="v3-card" style={{ marginTop: 18 }}>
         <div className="v3-row">
-          <input className="v3-input" placeholder="Album name" value={name} onChange={e => setName(e.target.value)} data-testid="album-name"/>
-          <button className="v3-btn primary" onClick={create} data-testid="album-create"><Plus size={14}/> Create</button>
+          <input className="v3-input" placeholder="Название альбома" value={name} onChange={e => setName(e.target.value)} data-testid="album-name"/>
+          <button className="v3-btn primary" onClick={create} data-testid="album-create"><Plus size={14}/> Создать</button>
         </div>
         <div className="v3-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", marginTop: 16 }}>
           {albums.map(a => (
@@ -26,7 +26,7 @@ export default function AlbumsPage() {
               <div className="v3-row"><ImgIcon size={16}/><div style={{ flex: 1, fontWeight: 600 }}>{a.name}</div>
                 <button className="v3-btn ghost" onClick={() => remove(a.id)}><Trash2 size={14}/></button>
               </div>
-              <div className="v3-sub v3-num">{a.messageIds.length} items · {new Date(a.createdAt).toLocaleDateString()}</div>
+              <div className="v3-sub v3-num">{a.messageIds.length} элементов · {new Date(a.createdAt).toLocaleDateString()}</div>
             </div>
           ))}
         </div>

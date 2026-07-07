@@ -22,7 +22,7 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
     return (
       <div className="file-list-loading">
         <div className="loading-spinner"></div>
-        <p>Loading files...</p>
+        <p>Загрузка файлов...</p>
       </div>
     )
   }
@@ -31,8 +31,8 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
     return (
       <div className="file-list-empty">
         <div className="empty-icon">📁</div>
-        <p className="empty-text">No files uploaded yet</p>
-        <p className="empty-hint">Upload your first file to get started</p>
+        <p className="empty-text">Файлы ещё не загружены</p>
+        <p className="empty-hint">Загрузите первый файл, чтобы начать</p>
       </div>
     )
   }
@@ -40,10 +40,10 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
   return (
     <div className="file-list">
       <div className="file-list-header">
-        <div className="header-col col-name">Name</div>
-        <div className="header-col col-size">Size</div>
-        <div className="header-col col-date">Uploaded</div>
-        <div className="header-col col-actions">Actions</div>
+        <div className="header-col col-name">Имя</div>
+        <div className="header-col col-size">Размер</div>
+        <div className="header-col col-date">Загружен</div>
+        <div className="header-col col-actions">Действия</div>
       </div>
 
       <div className="file-list-body">
@@ -71,7 +71,7 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
               <button
                 className="action-button download-button"
                 onClick={() => onDownload(file.messageId, file.fileName)}
-                title="Download"
+                title="Скачать"
                 data-testid="file-download-button"
               >
                 ⬇️
@@ -79,7 +79,7 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
               <button
                 className="action-button delete-button"
                 onClick={() => onDelete(file.messageId)}
-                title="Delete"
+                title="Удалить"
                 data-testid="file-delete-button"
               >
                 🗑️
@@ -131,9 +131,9 @@ function formatDate(timestamp: number): string {
   const diff = now.getTime() - date.getTime()
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
 
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days} days ago`
+  if (days === 0) return 'Сегодня'
+  if (days === 1) return 'Вчера'
+  if (days < 7) return `${days} дн. назад`
   
   return date.toLocaleDateString('en-US', {
     month: 'short',

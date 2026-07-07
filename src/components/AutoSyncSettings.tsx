@@ -155,7 +155,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
     <div className="autosync-overlay" onClick={onClose} data-testid="autosync-overlay">
       <div className="autosync-modal glass-card" onClick={(e) => e.stopPropagation()} data-testid="autosync-modal">
         <div className="modal-header">
-          <h2 className="modal-title">🔄 Auto-Sync Settings</h2>
+          <h2 className="modal-title">🔄 Настройки авто-синхронизации</h2>
           <button className="close-btn" onClick={onClose} data-testid="close-autosync-btn">✕</button>
         </div>
 
@@ -174,8 +174,8 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
           <div className="setting-section">
             <div className="setting-row">
               <div className="setting-info">
-                <h3 className="setting-title">Enable Auto-Sync</h3>
-                <p className="setting-desc">Automatically upload files from monitored folders</p>
+                <h3 className="setting-title">Включить авто-синхронизацию</h3>
+                <p className="setting-desc">Автоматически загружать файлы из отслеживаемых папок</p>
               </div>
               <label className="toggle-switch">
                 <input
@@ -190,7 +190,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
             {syncStatus?.isRunning && (
               <div className="sync-status-badge active">
                 <span className="status-indicator"></span>
-                <span>Active • {syncStatus.queueLength} file(s) in queue</span>
+                <span>Активна • {syncStatus.queueLength} файл(ов) в очереди</span>
               </div>
             )}
           </div>
@@ -199,7 +199,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
             <>
               {/* Sync Mode Selection */}
               <div className="setting-section">
-                <h3 className="section-title">Sync Mode</h3>
+                <h3 className="section-title">Режим синхронизации</h3>
                 <div className="mode-options">
                   <div
                     className={`mode-option ${config.mode === 'all' ? 'selected' : ''}`}
@@ -208,8 +208,8 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                   >
                     <div className="mode-icon">📁</div>
                     <div className="mode-content">
-                      <h4 className="mode-title">Auto-Sync ALL</h4>
-                      <p className="mode-desc">Monitor all default folders</p>
+                      <h4 className="mode-title">Все папки</h4>
+                      <p className="mode-desc">Отслеживать все стандартные папки</p>
                       <div className="folder-list-preview">
                         {defaultFolders.map((folder, i) => (
                           <span key={i} className="folder-badge">{folder}</span>
@@ -226,8 +226,8 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                   >
                     <div className="mode-icon">📂</div>
                     <div className="mode-content">
-                      <h4 className="mode-title">Custom Paths Only</h4>
-                      <p className="mode-desc">Select specific folders to monitor</p>
+                      <h4 className="mode-title">Только выбранные</h4>
+                      <p className="mode-desc">Выберите конкретные папки для отслеживания</p>
                     </div>
                     {config.mode === 'custom' && <span className="check-icon">✓</span>}
                   </div>
@@ -237,11 +237,11 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
               {/* Custom Paths */}
               {config.mode === 'custom' && (
                 <div className="setting-section">
-                  <h3 className="section-title">Custom Sync Folders</h3>
+                  <h3 className="section-title">Пользовательские папки</h3>
                   <div className="custom-paths-list">
                     {config.customPaths.length === 0 ? (
                       <div className="empty-state">
-                        <p className="empty-text">No folders added yet</p>
+                        <p className="empty-text">Папки ещё не добавлены</p>
                       </div>
                     ) : (
                       config.customPaths.map((folderPath, index) => (
@@ -264,7 +264,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                     onClick={handleAddFolder}
                     data-testid="add-folder-btn"
                   >
-                    + Add Folder
+                    + Добавить папку
                   </button>
                 </div>
               )}
@@ -273,8 +273,8 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
               <div className="setting-section">
                 <div className="setting-row">
                   <div className="setting-info">
-                    <h3 className="setting-title">File Type Filters</h3>
-                    <p className="setting-desc">Only sync specific file types</p>
+                    <h3 className="setting-title">Фильтры типов файлов</h3>
+                    <p className="setting-desc">Синхронизировать только определённые типы</p>
                   </div>
                   <label className="toggle-switch">
                     <input
@@ -292,7 +292,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                     <div className="extensions-list">
                       {config.fileFilters.extensions.length === 0 ? (
                         <div className="empty-state-small">
-                          <p className="empty-text-small">All file types will be synced</p>
+                          <p className="empty-text-small">Все типы файлов будут синхронизироваться</p>
                         </div>
                       ) : (
                         config.fileFilters.extensions.map((ext, index) => (
@@ -313,7 +313,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                       <input
                         type="text"
                         className="ext-input"
-                        placeholder=".jpg, .png, .pdf..."
+                        placeholder=".jpg, .png, .pdf…"
                         value={newExtension}
                         onChange={(e) => setNewExtension(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handleAddExtension()}
@@ -324,7 +324,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                         onClick={handleAddExtension}
                         data-testid="add-extension-btn"
                       >
-                        Add
+                        Добавить
                       </button>
                     </div>
                   </div>
@@ -334,7 +334,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
               {/* Current Watch Paths */}
               {syncStatus?.watchPaths && syncStatus.watchPaths.length > 0 && (
                 <div className="setting-section">
-                  <h3 className="section-title">Currently Monitoring</h3>
+                  <h3 className="section-title">Сейчас отслеживается</h3>
                   <div className="watch-paths-list">
                     {syncStatus.watchPaths.map((path: string, i: number) => (
                       <div key={i} className="watch-path-item">
@@ -351,7 +351,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
 
         <div className="modal-footer">
           <button className="glass-button" onClick={onClose} data-testid="close-footer-btn">
-            Close
+            Закрыть
           </button>
         </div>
       </div>

@@ -13,13 +13,13 @@ export default function NotesPage() {
   const create = () => { const id = parseInt(newId, 10); if (!id) return; v3store.setNote(id, ""); setNotes(v3store.getNotes()); setActiveId(id); setNewId("") }
   return (
     <div className="v3-page" data-testid="notes-page">
-      <h1 className="v3-h1">Notes</h1>
-      <div className="v3-sub">Attach markdown notes to any file by message ID.</div>
+      <h1 className="v3-h1">Заметки</h1>
+      <div className="v3-sub">Прикрепите заметку в Markdown к любому файлу по ID сообщения.</div>
       <div className="v3-grid" style={{ gridTemplateColumns: "260px 1fr", marginTop: 18 }}>
         <div className="v3-card">
           <div className="v3-row">
-            <input className="v3-input" placeholder="Msg ID" value={newId} onChange={e => setNewId(e.target.value)} data-testid="note-new-id"/>
-            <button className="v3-btn primary" onClick={create} data-testid="note-create">New</button>
+            <input className="v3-input" placeholder="ID сообщения" value={newId} onChange={e => setNewId(e.target.value)} data-testid="note-new-id"/>
+            <button className="v3-btn primary" onClick={create} data-testid="note-create">Создать</button>
           </div>
           <div style={{ marginTop: 12 }}>
             {notes.map(n => (
@@ -33,10 +33,10 @@ export default function NotesPage() {
           </div>
         </div>
         <div className="v3-card" style={{ display: "flex", flexDirection: "column" }}>
-          <textarea className="v3-input" rows={18} placeholder="# Write markdown here..." value={draft} onChange={e => setDraft(e.target.value)} data-testid="note-editor" style={{ fontFamily: "var(--v3-mono)", resize: "vertical" }}/>
+          <textarea className="v3-input" rows={18} placeholder="# Пишите Markdown здесь..." value={draft} onChange={e => setDraft(e.target.value)} data-testid="note-editor" style={{ fontFamily: "var(--v3-mono)", resize: "vertical" }}/>
           <div className="v3-row" style={{ marginTop: 12 }}>
-            <button className="v3-btn primary" onClick={save} data-testid="note-save"><Save size={14}/> Save</button>
-            <div className="v3-sub">{draft.length} chars</div>
+            <button className="v3-btn primary" onClick={save} data-testid="note-save"><Save size={14}/> Сохранить</button>
+            <div className="v3-sub">{draft.length} симв.</div>
           </div>
         </div>
       </div>

@@ -57,15 +57,15 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
     try {
       const result = await window.electronAPI.telegram.downloadFile(messageId, fileName)
       if (result.success) {
-        alert(`File downloaded to: ${result.data.filePath}`)
+        alert(`Файл сохранён: ${result.data.filePath}`)
       }
     } catch (error) {
-      alert('Download failed: ' + (error as Error).message)
+      alert('Ошибка скачивания: ' + (error as Error).message)
     }
   }
 
   const handleDelete = async (messageId: number) => {
-    if (!confirm('Are you sure you want to delete this file?')) {
+    if (!confirm('Вы уверены, что хотите удалить этот файл?')) {
       return
     }
 
@@ -75,7 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
         setRefreshTrigger(prev => prev + 1)
       }
     } catch (error) {
-      alert('Delete failed: ' + (error as Error).message)
+      alert('Ошибка удаления: ' + (error as Error).message)
     }
   }
 
@@ -97,7 +97,7 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
             </h1>
             <div className="channel-info">
               <span className="channel-badge" data-testid="dashboard-channel-name">
-                📡 {channelInfo?.channelName || 'Connected'}
+                📡 {channelInfo?.channelName || 'Подключено'}
               </span>
             </div>
           </div>
@@ -108,21 +108,21 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
               onClick={() => setShowAutoSync(true)}
               data-testid="dashboard-autosync-button"
             >
-              {autoSyncActive ? '🔄 Auto-Sync ON' : '🔄 Auto-Sync'}
+              {autoSyncActive ? '🔄 Авто-синхр. ВКЛ' : '🔄 Авто-синхр.'}
             </button>
             <button
               className="glass-button header-button"
               onClick={() => setRefreshTrigger(prev => prev + 1)}
               data-testid="dashboard-refresh-button"
             >
-              🔄 Refresh
+              🔄 Обновить
             </button>
             <button
               className="glass-button header-button"
               onClick={onLogout}
               data-testid="dashboard-logout-button"
             >
-              🚪 Logout
+              🚪 Выйти
             </button>
           </div>
         </div>
@@ -136,7 +136,7 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
             <div className="stat-icon">📁</div>
             <div className="stat-content">
               <div className="stat-value" data-testid="dashboard-file-count">{files.length}</div>
-              <div className="stat-label">Total Files</div>
+              <div className="stat-label">Всего файлов</div>
             </div>
           </div>
           
@@ -148,7 +148,7 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
               <div className="stat-value" data-testid="dashboard-total-size">
                 {formatFileSize(totalSize)}
               </div>
-              <div className="stat-label">Total Storage</div>
+              <div className="stat-label">Всего занято</div>
             </div>
           </div>
           
@@ -157,8 +157,8 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
           <div className="stat-item">
             <div className="stat-icon">☁️</div>
             <div className="stat-content">
-              <div className="stat-value">Unlimited</div>
-              <div className="stat-label">Cloud Space</div>
+              <div className="stat-value">Безлимит</div>
+              <div className="stat-label">Облачное хранилище</div>
             </div>
           </div>
 
@@ -168,8 +168,8 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
               <div className="stat-item">
                 <div className="stat-icon">🔄</div>
                 <div className="stat-content">
-                  <div className="stat-value autosync-badge">Active</div>
-                  <div className="stat-label">Auto-Sync</div>
+                  <div className="stat-value autosync-badge">Активна</div>
+                  <div className="stat-label">Авто-синхр.</div>
                 </div>
               </div>
             </>
@@ -182,12 +182,12 @@ const Dashboard: React.FC<DashboardProps> = ({ channelInfo, onLogout }) => {
         {/* Search & Files */}
         <div className="files-section glass-card">
           <div className="files-header">
-            <h2 className="section-title">📂 My Files</h2>
+            <h2 className="section-title">📂 Мои файлы</h2>
             <div className="search-box">
               <input
                 type="text"
                 className="glass-input search-input"
-                placeholder="🔍 Search files..."
+                placeholder="🔍 Поиск файлов..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 data-testid="dashboard-search-input"

@@ -20,13 +20,13 @@ export default function SearchPage() {
   }, [q, files])
   return (
     <div className="v3-page" data-testid="search-page">
-      <h1 className="v3-h1">Search</h1>
-      <div className="v3-sub">Full-text search across file names, tags, and notes.</div>
+      <h1 className="v3-h1">Поиск</h1>
+      <div className="v3-sub">Полнотекстовый поиск по именам файлов, тегам и заметкам.</div>
       <div className="v3-card" style={{ marginTop: 18 }}>
         <div className="v3-row">
           <Search size={16}/>
-          <input autoFocus className="v3-input" placeholder="Search… (Ctrl+K)" value={q} onChange={e => setQ(e.target.value)} data-testid="search-input"/>
-          <span className="v3-chip v3-num">{results.length} hits</span>
+          <input autoFocus className="v3-input" placeholder="Поиск… (Ctrl+K)" value={q} onChange={e => setQ(e.target.value)} data-testid="search-input"/>
+          <span className="v3-chip v3-num">{results.length} найдено</span>
         </div>
         <div style={{ marginTop: 14 }}>
           {results.map((f: any) => (

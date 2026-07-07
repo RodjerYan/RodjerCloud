@@ -22,11 +22,11 @@
 .mf-card-icon { height: 78px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 14px; letter-spacing: 0.5px;
   background: linear-gradient(135deg, #2a2a55, #1a1a3a); color: #b8bcdb; margin-bottom: 10px; }
-.mf-card-icon[data-type="Images"] { background: linear-gradient(135deg, #4a2a7c, #2c1850); color: #d4b5ff; }
-.mf-card-icon[data-type="Videos"] { background: linear-gradient(135deg, #7c2a4a, #50182c); color: #ffb5cc; }
-.mf-card-icon[data-type="Audio"] { background: linear-gradient(135deg, #2a7c4a, #18502c); color: #b5ffcc; }
-.mf-card-icon[data-type="Documents"] { background: linear-gradient(135deg, #2a4a7c, #182c50); color: #b5ccff; }
-.mf-card-icon[data-type="Archives"] { background: linear-gradient(135deg, #7c5a2a, #503818); color: #ffd4a5; }
+.mf-card-icon[data-type="Изображения"] { background: linear-gradient(135deg, #4a2a7c, #2c1850); color: #d4b5ff; }
+.mf-card-icon[data-type="Видео"] { background: linear-gradient(135deg, #7c2a4a, #50182c); color: #ffb5cc; }
+.mf-card-icon[data-type="Аудио"] { background: linear-gradient(135deg, #2a7c4a, #18502c); color: #b5ffcc; }
+.mf-card-icon[data-type="Документы"] { background: linear-gradient(135deg, #2a4a7c, #182c50); color: #b5ccff; }
+.mf-card-icon[data-type="Архивы"] { background: linear-gradient(135deg, #7c5a2a, #503818); color: #ffd4a5; }
 .mf-card-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mf-card-meta { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
 .mf-card-actions { display: flex; gap: 4px; margin-top: 10px; }
@@ -50,3 +50,13 @@
   z-index: 1000; animation: fadeInUp 0.3s ease both; }
 body.compact .mf-card { padding: 10px; }
 body.compact .mf-card-icon { height: 60px; }
+
+.mf-sections { display: flex; flex-direction: column; gap: 8px; }
+.mf-section { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; backdrop-filter: blur(14px); }
+.mf-section-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; user-select: none; transition: background 0.15s; }
+.mf-section-head:hover { background: rgba(255,255,255,0.03); }
+.mf-section-icon { font-size: 18px; }
+.mf-section-title { font-weight: 600; font-size: 14px; flex: 1; }
+.mf-section-count { font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,0.06); padding: 2px 10px; border-radius: 20px; }
+.mf-section .mf-grid { padding: 0 14px 14px; }
+.mf-section .mf-table { border-radius: 0; border-left: none; border-right: none; }

@@ -20,11 +20,11 @@ export default function AggregateProgress() {
       <div className="v3-aggregate" data-testid="aggregate-progress">
         <div className="v3-row">
           <Activity size={14}/>
-          <div className="label">Uploading <span className="v3-num">{done}</span> of <span className="v3-num">{list.length}</span> · overall <span className="v3-num">{overall}%</span></div>
+          <div className="label">Загрузка <span className="v3-num">{done}</span> из <span className="v3-num">{list.length}</span> · всего <span className="v3-num">{overall}%</span></div>
           <div style={{ marginLeft: "auto" }} className="v3-row v3-sub v3-num">
             <span>{fmtBytes(speed)}/s</span>
             <span>·</span>
-            <span>ETA {fmtTime(eta)}</span>
+            <span>Осталось {fmtTime(eta)}</span>
           </div>
         </div>
         <div className="v3-progress"><div className="v3-progress-bar" style={{ width: overall + "%" }}/></div>
@@ -32,7 +32,7 @@ export default function AggregateProgress() {
       {active.length > 0 && (
         <div className="v3-tray" data-testid="upload-tray">
           <span className="pulse"/>
-          <span className="v3-num">{active.length} active</span>
+          <span className="v3-num">{active.length} активных</span>
           <span className="v3-sub v3-num">· {fmtBytes(speed)}/s</span>
         </div>
       )}

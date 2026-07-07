@@ -25,19 +25,19 @@ export default function CalendarPage() {
   const lvl = (n: number) => { if (n === 0) return "rgba(255,255,255,0.05)"; const r = n / max; if (r > 0.66) return "#22d3ee"; if (r > 0.33) return "#22d3ee99"; return "#22d3ee55" }
   return (
     <div className="v3-page" data-testid="calendar-page">
-      <h1 className="v3-h1">Upload Calendar</h1>
-      <div className="v3-sub">Activity over the past year.</div>
+      <h1 className="v3-h1">Календарь загрузок</h1>
+      <div className="v3-sub">Активность за последний год.</div>
       <div className="v3-card" style={{ marginTop: 18, overflowX: "auto" }}>
         <div style={{ display: "grid", gridTemplateColumns: `repeat(53, 12px)`, gridAutoFlow: "column", gridTemplateRows: "repeat(7, 12px)", gap: 3 }}>
           {grid.map(g => <div key={g.d} title={`${g.d}: ${g.n}`} style={{ width: 12, height: 12, borderRadius: 3, background: lvl(g.n) }}/>)}
         </div>
         <div className="v3-row v3-sub" style={{ marginTop: 14 }}>
-          <span>Less</span>
+          <span>Меньше</span>
           <div style={{ width:12,height:12,borderRadius:3,background:"rgba(255,255,255,0.05)" }}/>
           <div style={{ width:12,height:12,borderRadius:3,background:"#22d3ee55" }}/>
           <div style={{ width:12,height:12,borderRadius:3,background:"#22d3ee99" }}/>
           <div style={{ width:12,height:12,borderRadius:3,background:"#22d3ee" }}/>
-          <span>More</span>
+          <span>Больше</span>
         </div>
       </div>
     </div>

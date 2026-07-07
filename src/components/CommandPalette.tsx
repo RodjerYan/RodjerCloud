@@ -3,25 +3,25 @@ import { useNavigate } from "react-router-dom"
 import { Command, Search } from "lucide-react"
 
 const COMMANDS = [
-  { id: "go-dashboard", label: "Go to Dashboard", path: "/" },
-  { id: "go-files", label: "Go to My Files", path: "/files" },
-  { id: "go-upload", label: "Go to Upload", path: "/upload" },
-  { id: "go-autosync", label: "Go to Auto-Sync", path: "/autosync" },
-  { id: "go-statistics", label: "Go to Statistics", path: "/statistics" },
-  { id: "go-trash", label: "Go to Trash", path: "/trash" },
-  { id: "go-favorites", label: "Go to Favorites", path: "/favorites" },
-  { id: "go-shared", label: "Go to Shared Links", path: "/shared" },
-  { id: "go-activity", label: "Go to Activity Log", path: "/activity" },
-  { id: "go-tags", label: "Go to Tags", path: "/tags" },
-  { id: "go-search", label: "Open Search", path: "/search" },
-  { id: "go-calendar", label: "Go to Calendar", path: "/calendar" },
-  { id: "go-albums", label: "Go to Albums", path: "/albums" },
-  { id: "go-notes", label: "Go to Notes", path: "/notes" },
-  { id: "go-network", label: "Go to Network", path: "/network" },
-  { id: "go-diagnostics", label: "Run Diagnostics", path: "/diagnostics" },
-  { id: "go-settings", label: "Open Settings", path: "/settings" },
-  { id: "go-help", label: "Keyboard Shortcuts", path: "/help" },
-  { id: "go-about", label: "About RodjerCloud", path: "/about" },
+  { id: "go-dashboard", label: "На главную", path: "/" },
+  { id: "go-files", label: "Мои файлы", path: "/files" },
+  { id: "go-upload", label: "Загрузить", path: "/upload" },
+  { id: "go-autosync", label: "Авто-синхронизация", path: "/autosync" },
+  { id: "go-statistics", label: "Статистика", path: "/statistics" },
+  { id: "go-trash", label: "Корзина", path: "/trash" },
+  { id: "go-favorites", label: "Избранное", path: "/favorites" },
+  { id: "go-shared", label: "Общие ссылки", path: "/shared" },
+  { id: "go-activity", label: "Журнал действий", path: "/activity" },
+  { id: "go-tags", label: "Теги", path: "/tags" },
+  { id: "go-search", label: "Поиск", path: "/search" },
+  { id: "go-calendar", label: "Календарь", path: "/calendar" },
+  { id: "go-albums", label: "Альбомы", path: "/albums" },
+  { id: "go-notes", label: "Заметки", path: "/notes" },
+  { id: "go-network", label: "Сеть", path: "/network" },
+  { id: "go-diagnostics", label: "Диагностика", path: "/diagnostics" },
+  { id: "go-settings", label: "Настройки", path: "/settings" },
+  { id: "go-help", label: "Горячие клавиши", path: "/help" },
+  { id: "go-about", label: "О RodjerCloud", path: "/about" },
 ]
 
 export default function CommandPalette() {
@@ -48,7 +48,7 @@ export default function CommandPalette() {
       <div className="v3-card" style={{ width: 540, padding: 0 }} onClick={(e) => e.stopPropagation()}>
         <div className="v3-row" style={{ padding: "12px 14px", borderBottom: "1px solid var(--v3-border-soft)" }}>
           <Command size={16}/>
-          <input autoFocus className="v3-input" placeholder="Type a command…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: 0, background: "transparent" }} data-testid="cmd-input"/>
+          <input autoFocus className="v3-input" placeholder="Введите команду…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: 0, background: "transparent" }} data-testid="cmd-input"/>
         </div>
         <div style={{ maxHeight: 360, overflowY: "auto", padding: 8 }}>
           {filtered.map(c => (

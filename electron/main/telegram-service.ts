@@ -86,23 +86,43 @@ export class TelegramService {
       },
       onError: (err: any) => {
         console.error('[telegram.start onError]', err?.errorMessage || err?.message || err)
-        return false
+        const isPhoneLoop = !(this.codeRequested as any)?._done
+        if (isPhoneLoop) {
+          this.authError = new Error(err?.errorMessage || err?.message || String(err))
+          this.authResolved = true
+        }
+        return isPhoneLoop
       },
     })
       .then(() => {
         this.authResolved = true
       })
       .catch((err: any) => {
-        this.authError = err instanceof Error ? err : new Error(String(err))
+        if (!this.authError) {
+          this.authError = err instanceof Error ? err : new Error(String(err?.errorMessage || String(err)))
+        }
         this.authResolved = true
       })
 
-    await Promise.race([
-      this.codeRequested.promise,
-      this.startPromise.then(() => {
-        if (this.authError) throw this.authError
-      }),
-    ])
+    const TIMEOUT_MS = 45000
+    let timeoutHandle: any
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error('Время ожидания истекло. Проверьте подключение к интернету.'))
+      }, TIMEOUT_MS)
+    })
+
+    try {
+      await Promise.race([
+        this.codeRequested.promise,
+        this.startPromise.then(() => {
+          if (this.authError) throw this.authError
+        }),
+        timeoutPromise,
+      ])
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
 
     return { success: true, codeSent: true }
   }
@@ -247,11 +267,10 @@ export class TelegramService {
       caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}`,
       forceDocument: true,
       workers: 4,
-      progressCallback: (progress: any, total: any) => {
+      progressCallback: (progress: any) => {
         try {
-          const sent = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
-          const tot = typeof total === 'number' ? total : Number(total?.toString?.() ?? sizeBytes)
-          onProgress?.(sent, tot || sizeBytes)
+          const fraction = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
+          onProgress?.(Math.round(fraction * sizeBytes), sizeBytes)
         } catch (err) {
           console.error('Progress callback error:', err)
         }

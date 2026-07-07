@@ -74,7 +74,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           path: resolvePath(file),
           status: 'error' as const,
           progress: 0,
-          error: 'File exceeds 2GB limit',
+          error: 'Файл превышает лимит 2GB',
         }
       }
       return {
@@ -130,7 +130,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         setUploadQueue(prev => {
           const updated = [...prev]
           updated[i].status = 'error'
-          updated[i].error = 'Unable to access file path'
+          updated[i].error = 'Не удалось получить путь к файлу'
           return updated
         })
         continue
@@ -149,7 +149,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           setUploadQueue(prev => {
             const updated = [...prev]
             updated[i].status = 'error'
-            updated[i].error = result.error || 'Upload failed'
+            updated[i].error = result.error || 'Ошибка загрузки'
             return updated
           })
         }
@@ -198,8 +198,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   return (
     <div className="upload-section glass-card">
       <div className="upload-header">
-        <h2 className="section-title">⬆️ Upload Files</h2>
-        <p className="upload-subtitle">Drag and drop multiple files or click to select (up to 2GB each)</p>
+        <h2 className="section-title">⬆️ Загрузка файлов</h2>
+        <p className="upload-subtitle">Перетащите файлы сюда или нажмите для выбора (до 2GB каждый)</p>
       </div>
 
       <div
@@ -223,20 +223,20 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         {uploadQueue.length === 0 ? (
           <div className="dropzone-content">
             <div className="dropzone-icon">📤</div>
-            <p className="dropzone-text">Drop multiple files here or click to browse</p>
-            <p className="dropzone-hint">Maximum file size: 2GB per file</p>
+            <p className="dropzone-text">Перетащите файлы сюда или нажмите для выбора</p>
+            <p className="dropzone-hint">Максимальный размер: 2GB на файл</p>
           </div>
         ) : (
           <div className="upload-queue">
             <div className="queue-header">
-              <span className="queue-count">{uploadQueue.length} file(s) in queue</span>
+              <span className="queue-count">{uploadQueue.length} файл(ов) в очереди</span>
               {!isUploading && (
                 <button
                   className="clear-queue-btn"
                   onClick={(e) => { e.stopPropagation(); clearQueue() }}
                   data-testid="clear-queue-button"
                 >
-                  Clear All
+                    Очистить всё
                 </button>
               )}
             </div>
@@ -288,7 +288,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                   <div className="progress-fill" style={{ width: `${totalProgress}%` }}></div>
                 </div>
                 <div className="progress-text" data-testid="overall-progress-text">
-                  Overall: {totalProgress}%
+                  Всего: {totalProgress}%
                 </div>
               </div>
             )}
@@ -300,14 +300,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                   onClick={(e) => { e.stopPropagation(); startUploadQueue() }}
                   data-testid="start-upload-button"
                 >
-                  Upload {pendingCount} File(s) to Cloud
+                  Загрузить {pendingCount} файл(ов) в облако
                 </button>
                 <button
                   className="glass-button"
                   onClick={(e) => { e.stopPropagation(); handlePickViaDialog() }}
                   data-testid="add-more-files-button"
                 >
-                  Add More Files
+                  Добавить файлы
                 </button>
               </div>
             )}

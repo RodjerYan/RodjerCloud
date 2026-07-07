@@ -16,7 +16,8 @@
     "target": ["dmg", "zip"],
     "icon": "resources/icon.icns",
     "category": "public.app-category.utilities",
-    "hardenedRuntime": true,
+    "hardenedRuntime": false,
+    "identity": null,
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist"
@@ -35,7 +36,7 @@
       "height": 380
     }
   },
-  "afterSign": "build/notarize.js",
+  "afterSign": null,
   "buildDependenciesFromSource": false,
   "nodeGypRebuild": false,
   "npmRebuild": false
