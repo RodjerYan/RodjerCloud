@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "RodjerCloud",
+    "slug": "rodjercloud",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "rodjercloud",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rodjercloud.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "RodjerCloud needs access to your photo library to upload files.",
+        "NSDocumentsFolderUsageDescription": "RodjerCloud needs access to your documents to upload files."
+      }
+    },
+    "plugins": [
+      "expo-document-picker",
+      "expo-file-system"
+    ]
+  }
+}
