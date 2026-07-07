@@ -52,25 +52,27 @@ body.compact .mf-card { padding: 10px; }
 body.compact .mf-card-icon { height: 60px; }
 
 /* ── Sections ── */
-.mf-sections { display: flex; flex-direction: column; gap: 4px; }
-.mf-section { border-radius: 12px; background: transparent; }
+.mf-sections { display: flex; flex-direction: column; gap: 2px; }
+.mf-section { border-radius: 10px; background: transparent; }
 .mf-section-head {
-  display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; user-select: none;
-  border-radius: 12px; transition: background 0.15s;
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none;
+  border-radius: 10px; transition: background 0.15s;
 }
-.mf-section-head:hover { background: rgba(255,255,255,0.03); }
+.mf-section-head:hover { background: rgba(255,255,255,0.04); }
 .mf-section-head svg { color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0; }
 .mf-section:not(.open) .mf-section-head svg { transform: rotate(-90deg); }
-.mf-section-icon { font-size: 16px; line-height: 1; flex-shrink: 0; }
-.mf-section-title { font-weight: 500; font-size: 14px; flex: 1; }
+.mf-section-icon { font-size: 15px; line-height: 1; flex-shrink: 0; }
+.mf-section-title { font-weight: 500; font-size: 13px; flex: 1; color: var(--text-dim); }
+.mf-section.open .mf-section-title { color: var(--text); }
 .mf-section-count {
   font-size: 11px; font-weight: 500; color: var(--text-dim);
-  background: rgba(255,255,255,0.06); padding: 1px 9px; border-radius: 12px; flex-shrink: 0;
+  background: rgba(255,255,255,0.05); padding: 1px 8px; border-radius: 10px; flex-shrink: 0;
 }
 .mf-section-body {
   display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.25s;
+  margin-left: 24px; border-left: 1.5px solid color-mix(in srgb, var(--cat-color) 30%, transparent);
 }
 .mf-section-body.open { grid-template-rows: 1fr; }
 .mf-section-body > * { overflow: hidden; }
-.mf-section .mf-grid { padding: 4px 14px 10px; }
-.mf-section .mf-table { border-radius: 0; border-left: none; border-right: none; border-bottom: none; }
+.mf-section .mf-grid { padding: 6px 0 8px 12px; margin: 0; }
+.mf-section .mf-table { border-radius: 0; border: none; margin: 4px 0 8px 12px; }
