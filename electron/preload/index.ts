@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
     downloadFile: (messageId: number, fileName: string) =>
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
+    downloadThumbnail: (messageId: number) =>
+      ipcRenderer.invoke('telegram:download-thumbnail', messageId),
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
       ipcRenderer.invoke('telegram:bulk-download', items),

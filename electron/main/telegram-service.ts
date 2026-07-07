@@ -323,6 +323,31 @@ export class TelegramService {
     return { filePath: downloadPath, fileName }
   }
 
+  async downloadThumbnail(messageId: number): Promise<string | null> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) return null
+    const message: any = messages[0]
+    if (!message.file) return null
+
+    const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+    const cachePath = path.join(cacheDir, `${messageId}.jpg`)
+    if (fs.existsSync(cachePath)) return cachePath
+
+    try {
+      await this.client.downloadMedia(message, { outputFile: cachePath, thumb: 0 } as any)
+      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
+    } catch {}
+
+    try {
+      await this.client.downloadMedia(message, { outputFile: cachePath, thumb: 1 } as any)
+      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
+    } catch {}
+
+    return null
+  }
+
   async deleteFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     await this.client.invoke(

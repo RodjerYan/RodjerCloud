@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play } from 'lucide-react'
 
 const DAY = 86400
 
@@ -54,6 +54,27 @@ export default function MyFilesPage() {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [toast, setToast] = useState<string>('')
   const [drillDown, setDrillDown] = useState<string | null>(null)
+  const [thumbs, setThumbs] = useState<Record<number, string>>({})
+
+  const loadThumbs = useCallback(async (files: any[]) => {
+    const map: Record<number, string> = {}
+    await Promise.all(files.map(async (f) => {
+      try {
+        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId)
+        if (r.success && r.data) map[f.messageId] = 'file://' + r.data
+      } catch {}
+    }))
+    setThumbs(prev => ({ ...prev, ...map }))
+  }, [])
+
+  useEffect(() => {
+    if (drillDown) {
+      const files = filtered.filter(f => typeOf(f.fileName) === drillDown)
+      loadThumbs(files)
+    } else {
+      setThumbs({})
+    }
+  }, [drillDown, filtered, loadThumbs])
 
   const load = async () => {
     setLoading(true)
@@ -198,11 +219,21 @@ export default function MyFilesPage() {
                   <div key={year + '-' + month} className="mf-gm">
                     <div className="mf-gm-title">{MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
                     <div className="mf-gm-items">
-                      {items.map((f: any) => (
+                      {items.map((f: any) => {
+                        const thumbUrl = thumbs[f.messageId]
+                        const isVideo = drillDown === 'Видео'
+                        return (
                         <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '')}>
                           <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                           <div className="mf-gm-icon" data-type={drillDown}>
-                            {drillDown === 'Изображения' ? '🖼️' : '🎬'}
+                            {thumbUrl ? (
+                              <>
+                                <img src={thumbUrl} className="mf-gm-img" />
+                                {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
+                              </>
+                            ) : (
+                              isVideo ? '🎬' : '🖼️'
+                            )}
                           </div>
                           <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
                           <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
@@ -213,7 +244,7 @@ export default function MyFilesPage() {
                             <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
                           </div>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   </div>
                 ))}

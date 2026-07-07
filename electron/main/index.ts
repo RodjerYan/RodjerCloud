@@ -212,6 +212,13 @@ ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: 
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:download-thumbnail', async (_, messageId: number) => {
+  try {
+    const filePath = await telegramService.downloadThumbnail(messageId)
+    return { success: true, data: filePath }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:delete-file', async (_, messageId: number) => {
   try {
     await telegramService.deleteFile(messageId)

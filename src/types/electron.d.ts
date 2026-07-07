@@ -14,6 +14,7 @@ declare global {
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
         deleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
