@@ -5,209 +5,265 @@ import chokidar from 'chokidar'
 import { TelegramService } from './telegram-service'
 
 export interface SyncConfig {
-  enabled: boolean
-  mode: 'all' | 'custom' // 'all' monitors default folders, 'custom' monitors only user-specified paths
-  customPaths: string[]
-  fileFilters: {
-    enabled: boolean
-    extensions: string[] // e.g., ['.jpg', '.png', '.pdf']
-  }
-  excludePatterns: string[] // e.g., ['node_modules', '.git']
+  enabled: boolean; mode: 'all' | 'custom'; customPaths: string[]
+  fileFilters: { enabled: boolean; extensions: string[] }; excludePatterns: string[]
+}
+
+export interface QueueItem {
+  id: string; filePath: string; fileName: string; fileSize: number
+  status: 'pending' | 'uploading' | 'done' | 'failed'; percent: number; error?: string
+}
+
+export interface SyncEvent {
+  type: string; file?: string; current?: number; total?: number
+  uploaded?: number; failed?: number; error?: string; ts?: number
+  queue?: QueueItem[]
 }
 
 export class AutoSyncService {
   private watcher: chokidar.FSWatcher | null = null
   private config: SyncConfig
-  private telegramService: TelegramService
-  private isRunning: boolean = false
-  private uploadQueue: Set<string> = new Set()
-  private statusCallback: ((status: string, file?: string) => void) | null = null
+  private tg: TelegramService
+  private running = false
+  private queue: QueueItem[] = []
+  private uploadedCount = 0
+  private failedCount = 0
+  private log: SyncEvent[] = []
+  private maxLog = 200
+  private onEvent: ((e: SyncEvent) => void) | null = null
+  private uploadedIndex: Set<string> = new Set()
+  private trackerDirty = false
 
-  constructor(telegramService: TelegramService) {
-    this.telegramService = telegramService
-    this.config = {
-      enabled: false,
-      mode: 'custom',
-      customPaths: [],
-      fileFilters: {
-        enabled: false,
-        extensions: [],
-      },
-      excludePatterns: ['node_modules', '.git', '$RECYCLE.BIN', 'System Volume Information'],
-    }
-  }
+  constructor(tg: TelegramService) { this.tg = tg; this.setDefaults() }
 
-  setStatusCallback(callback: (status: string, file?: string) => void) {
-    this.statusCallback = callback
-  }
+  private trackerPath() { return path.join(app.getPath('userData'), 'rodjercloud-uploads.json') }
 
-  private emitStatus(status: string, file?: string) {
-    if (this.statusCallback) {
-      this.statusCallback(status, file)
-    }
-  }
-
-  getConfig(): SyncConfig {
-    return { ...this.config }
-  }
-
-  updateConfig(newConfig: Partial<SyncConfig>) {
-    this.config = { ...this.config, ...newConfig }
-    
-    // Restart watcher if running
-    if (this.isRunning) {
-      this.stop()
-      if (this.config.enabled) {
-        this.start()
+  loadTracker() {
+    try {
+      const p = this.trackerPath()
+      if (fs.existsSync(p)) {
+        const arr: string[] = JSON.parse(fs.readFileSync(p, 'utf8'))
+        this.uploadedIndex = new Set(arr)
       }
-    }
+    } catch {}
+  }
+
+  private saveTracker() {
+    try {
+      fs.writeFileSync(this.trackerPath(), JSON.stringify([...this.uploadedIndex]), 'utf8')
+      this.trackerDirty = false
+    } catch {}
+  }
+
+  private fileKey(fp: string): string {
+    try {
+      const s = fs.statSync(fp)
+      return `${fp}|${s.size}|${Math.floor(s.mtimeMs / 1000)}`
+    } catch { return `${fp}|0|0` }
+  }
+
+  private isAlreadyUploaded(fp: string): boolean {
+    return this.uploadedIndex.has(this.fileKey(fp))
+  }
+
+  private markUploaded(fp: string) {
+    this.uploadedIndex.add(this.fileKey(fp))
+    this.trackerDirty = true
+    this.saveTracker()
+  }
+
+  private setDefaults() {
+    this.config = { enabled: false, mode: 'custom', customPaths: [], fileFilters: { enabled: false, extensions: [] }, excludePatterns: ['node_modules', '.git', '$RECYCLE.BIN', 'System Volume Information'] }
+  }
+
+  setEventCallback(cb: (e: SyncEvent) => void) { this.onEvent = cb }
+  private emit(e: SyncEvent) {
+    const ev = { ...e, ts: Date.now() }
+    this.log.unshift(ev)
+    if (this.log.length > this.maxLog) this.log.length = this.maxLog
+    this.onEvent?.(ev)
+  }
+
+  private emitQueue() { this.emit({ type: 'queue', queue: [...this.queue] }) }
+
+  getConfig() { return { ...this.config } }
+
+  updateConfig(c: Partial<SyncConfig>) {
+    this.config = { ...this.config, ...c }
+    if (this.running) { this.stop(); if (this.config.enabled) this.start() }
   }
 
   private getDefaultPaths(): string[] {
-    const paths: string[] = []
+    const keys = ['downloads', 'documents', 'pictures', 'videos', 'desktop'] as const
+    return keys.map(k => { try { return app.getPath(k) } catch { return '' } }).filter(p => p && fs.existsSync(p))
+  }
+
+  private getWatchPaths() {
+    return this.config.mode === 'all' ? this.getDefaultPaths() : this.config.customPaths.filter(p => fs.existsSync(p))
+  }
+
+  walkFiles(dir: string): string[] {
+    const out: string[] = []
     try {
-      paths.push(app.getPath('downloads'))
-      paths.push(app.getPath('documents'))
-      paths.push(app.getPath('pictures'))
-      paths.push(app.getPath('videos'))
-      paths.push(app.getPath('desktop'))
-    } catch (err) {
-      console.error('Error getting default paths:', err)
-    }
-    return paths.filter(p => fs.existsSync(p))
+      for (const name of fs.readdirSync(dir)) {
+        const fp = path.join(dir, name)
+        try {
+          const s = fs.statSync(fp)
+          if (s.isDirectory()) out.push(...this.walkFiles(fp))
+          else if (s.isFile() && this.passesFilters(fp)) out.push(fp)
+        } catch {}
+      }
+    } catch {}
+    return out
   }
 
-  private getWatchPaths(): string[] {
-    if (this.config.mode === 'all') {
-      return this.getDefaultPaths()
-    }
-    return this.config.customPaths.filter(p => fs.existsSync(p))
-  }
-
-  private shouldUploadFile(filePath: string): boolean {
-    // Check file filters
+  private passesFilters(fp: string): boolean {
     if (this.config.fileFilters.enabled && this.config.fileFilters.extensions.length > 0) {
-      const ext = path.extname(filePath).toLowerCase()
-      if (!this.config.fileFilters.extensions.includes(ext)) {
-        return false
-      }
+      const ext = path.extname(fp).toLowerCase()
+      if (!this.config.fileFilters.extensions.includes(ext)) return false
     }
-
-    // Check exclude patterns
-    for (const pattern of this.config.excludePatterns) {
-      if (filePath.includes(pattern)) {
-        return false
-      }
-    }
-
-    // Check file size (max 2GB)
+    for (const p of this.config.excludePatterns) { if (fp.includes(p)) return false }
     try {
-      const stats = fs.statSync(filePath)
-      const TWO_GB = 2 * 1024 * 1024 * 1024
-      if (stats.size > TWO_GB) {
-        console.log(`Skipping file (>2GB): ${filePath}`)
-        return false
-      }
-      // Skip very small files (likely temp files)
-      if (stats.size < 1024) {
-        return false
-      }
-    } catch (err) {
-      return false
-    }
-
+      const s = fs.statSync(fp)
+      if (s.size === 0 || s.size > 2 * 1024 * 1024 * 1024) return false
+    } catch { return false }
     return true
   }
 
-  private async uploadFile(filePath: string) {
-    if (this.uploadQueue.has(filePath)) {
-      return // Already queued
+  private shouldUploadFile(fp: string, silent = false): boolean {
+    if (this.isAlreadyUploaded(fp)) {
+      if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: 'Уже загружен ранее' })
+      return false
     }
+    if (this.config.fileFilters.enabled && this.config.fileFilters.extensions.length > 0) {
+      const ext = path.extname(fp).toLowerCase()
+      if (!this.config.fileFilters.extensions.includes(ext)) {
+        if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: `Расширение .${ext} не в списке` })
+        return false
+      }
+    }
+    for (const p of this.config.excludePatterns) {
+      if (fp.includes(p)) {
+        if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: `Исключено: ${p}` })
+        return false
+      }
+    }
+    try {
+      const s = fs.statSync(fp)
+      if (s.size === 0) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: 'Пустой файл' }); return false }
+      if (s.size > 2 * 1024 * 1024 * 1024) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: 'Файл >2GB' }); return false }
+    } catch (e) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: `Ошибка чтения: ${e}` }); return false }
+    return true
+  }
 
-    this.uploadQueue.add(filePath)
-    this.emitStatus('uploading', path.basename(filePath))
+  private async uploadOne(fp: string) {
+    const existing = this.queue.find(q => q.filePath === fp && q.status !== 'done')
+    if (existing) return
+    if (this.isAlreadyUploaded(fp)) return
 
     try {
-      // Wait a bit to ensure file is fully written
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const stat = fs.statSync(fp)
+      const id = Math.random().toString(36).slice(2, 10)
+      const item: QueueItem = { id, filePath: fp, fileName: path.basename(fp), fileSize: stat.size, status: 'pending', percent: 0 }
+      this.queue.push(item)
+      this.emitQueue()
+      this.emit({ type: 'uploading', file: path.basename(fp) })
 
-      // Check if file still exists
-      if (!fs.existsSync(filePath)) {
-        this.uploadQueue.delete(filePath)
-        return
-      }
+      item.status = 'uploading'
+      this.emitQueue()
 
-      await this.telegramService.uploadFile(filePath)
-      this.emitStatus('completed', path.basename(filePath))
-      console.log(`Auto-synced: ${filePath}`)
-    } catch (err) {
-      this.emitStatus('error', path.basename(filePath))
-      console.error(`Failed to auto-sync ${filePath}:`, err)
-    } finally {
-      this.uploadQueue.delete(filePath)
+      await new Promise(r => setTimeout(r, 300))
+      if (!fs.existsSync(fp)) { this.queue = this.queue.filter(q => q.id !== id); this.emitQueue(); return }
+
+      await this.tg.uploadFile(fp, (sent, total) => {
+        item.percent = Math.round((sent / total) * 100)
+        this.emitQueue()
+      })
+
+      item.status = 'done'; item.percent = 100
+      this.uploadedCount++
+      this.markUploaded(fp)
+      this.emitQueue()
+      this.emit({ type: 'uploaded', file: path.basename(fp) })
+    } catch (err: any) {
+      console.error(`AutoSync upload error for ${fp}:`, err.message, err.stack)
+      this.markUploaded(fp)
+      const item = this.queue.find(q => q.filePath === fp && q.status !== 'done')
+      if (item) { item.status = 'failed'; item.error = err.message; this.emitQueue() }
+      this.failedCount++
+      this.emit({ type: 'failed', file: path.basename(fp), error: err.message })
     }
   }
 
-  start() {
-    if (this.isRunning || !this.config.enabled) {
-      return
+  async start() {
+    if (this.running || !this.config.enabled) return
+    const paths = this.getWatchPaths()
+    if (!paths.length) { console.warn('AutoSync: no paths'); return }
+
+    this.emit({ type: 'started' })
+    this.queue = []; this.uploadedCount = 0; this.failedCount = 0
+    this.emitQueue()
+
+    const allFiles = paths.flatMap(d => this.walkFiles(d)).filter(f => !this.isAlreadyUploaded(f))
+    this.emit({ type: 'scan-start', total: allFiles.length })
+
+    for (let i = 0; i < allFiles.length; i++) {
+      this.emit({ type: 'scan-progress', current: i + 1, total: allFiles.length, file: path.basename(allFiles[i]) })
+      await this.uploadOne(allFiles[i])
     }
+    this.emit({ type: 'scan-done', uploaded: this.uploadedCount, failed: this.failedCount, total: allFiles.length })
 
-    const watchPaths = this.getWatchPaths()
-    if (watchPaths.length === 0) {
-      console.warn('No valid paths to watch')
-      return
-    }
-
-    console.log('Starting auto-sync on:', watchPaths)
-
-    this.watcher = chokidar.watch(watchPaths, {
-      ignored: /(^|[\/\\])\../, // ignore dotfiles
-      persistent: true,
-      ignoreInitial: true, // Don't trigger on existing files
-      awaitWriteFinish: {
-        stabilityThreshold: 2000,
-        pollInterval: 100,
-      },
+    this.watcher = chokidar.watch(paths, {
+      ignored: /(^|[\/\\])\../, persistent: true, ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 100 },
     })
-
-    this.watcher.on('add', (filePath: string) => {
-      if (this.shouldUploadFile(filePath)) {
-        console.log(`New file detected: ${filePath}`)
-        this.uploadFile(filePath)
-      }
+    this.watcher.on('add', (fp: string) => {
+      this.emit({ type: 'detected', file: fp })
+      if (this.shouldUploadFile(fp)) this.uploadOne(fp)
     })
+    this.watcher.on('error', (err: Error) => this.emit({ type: 'error', error: err.message }))
 
-    this.watcher.on('error', (error: Error) => {
-      console.error('Watcher error:', error)
-      this.emitStatus('error')
-    })
-
-    this.isRunning = true
-    this.emitStatus('started')
+    this.running = true
+    console.log('AutoSync: started watching', paths)
   }
 
   stop() {
-    if (this.watcher) {
-      this.watcher.close()
-      this.watcher = null
-    }
-    this.isRunning = false
-    this.uploadQueue.clear()
-    this.emitStatus('stopped')
-    console.log('Auto-sync stopped')
+    this.watcher?.close(); this.watcher = null
+    this.running = false; this.queue = []; this.emitQueue()
+    this.emit({ type: 'stopped' })
+    if (this.trackerDirty) this.saveTracker()
   }
 
-  isActive(): boolean {
-    return this.isRunning
+  countFiles(): number {
+    return this.getWatchPaths().reduce((sum, dir) => sum + this.walkFiles(dir).length, 0)
   }
+
+  async scanNow(): Promise<{ total: number; uploaded: number; failed: number }> {
+    const paths = this.getWatchPaths()
+    const allFiles = paths.flatMap(d => this.walkFiles(d)).filter(f => !this.isAlreadyUploaded(f))
+    this.queue = []; this.uploadedCount = 0; this.failedCount = 0
+    this.emit({ type: 'scan-start', total: allFiles.length })
+
+    for (let i = 0; i < allFiles.length; i++) {
+      this.emit({ type: 'scan-progress', current: i + 1, total: allFiles.length, file: path.basename(allFiles[i]) })
+      await this.uploadOne(allFiles[i])
+    }
+    this.emit({ type: 'scan-done', uploaded: this.uploadedCount, failed: this.failedCount, total: allFiles.length })
+    return { total: allFiles.length, uploaded: this.uploadedCount, failed: this.failedCount }
+  }
+
+  isActive() { return this.running }
 
   getStatus() {
-    return {
-      isRunning: this.isRunning,
-      watchPaths: this.getWatchPaths(),
-      queueLength: this.uploadQueue.size,
-      currentFiles: Array.from(this.uploadQueue),
-    }
+    return { isRunning: this.running, watchPaths: this.getWatchPaths(), uploadedCount: this.uploadedCount, failedCount: this.failedCount }
+  }
+
+  getLog(limit = 50): SyncEvent[] { return this.log.slice(0, limit) }
+  getQueue(): QueueItem[] { return [...this.queue] }
+
+  resetTracker() {
+    this.uploadedIndex.clear()
+    this.trackerDirty = true
+    this.saveTracker()
   }
 }

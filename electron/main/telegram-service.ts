@@ -368,6 +368,18 @@ export class TelegramService {
     return this.client.session.save() as any
   }
 
+  async cacheAudio(messageId: number, fileName: string, cacheDir: string): Promise<string> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized')
+    const cachePath = path.join(cacheDir, `${messageId}_${fileName}`)
+    if (fs.existsSync(cachePath)) return cachePath
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const message: any = messages[0]
+    if (!message.file) throw new Error('No file attached')
+    await this.client.downloadMedia(message, { outputFile: cachePath } as any)
+    return cachePath
+  }
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes'
     const k = 1024

@@ -9,7 +9,8 @@
 .mf-view-toggle button { background: transparent; border: none; color: var(--text-dim); padding: 7px 10px; cursor: pointer; border-radius: 8px; }
 .mf-view-toggle button.active { background: rgba(124,131,255,0.18); color: var(--text); }
 .mf-bulkbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px;
-  background: rgba(124,131,255,0.12); border: 1px solid rgba(124,131,255,0.3); border-radius: 12px; }
+  background: rgba(124,131,255,0.14); border: 1px solid rgba(124,131,255,0.3); border-radius: 12px;
+  backdrop-filter: blur(16px); }
 .mf-bulkbar button { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text);
   padding: 6px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
 .mf-bulkbar button.danger { color: var(--err); border-color: rgba(255,107,122,0.4); }

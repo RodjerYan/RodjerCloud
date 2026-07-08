@@ -11,10 +11,12 @@ const telegramService = new TelegramService()
 const storageService = new StorageService()
 const autoSyncService = new AutoSyncService(telegramService)
 
-autoSyncService.setStatusCallback((status, file) => {
+autoSyncService.setEventCallback((event) => {
   if (mainWindow) {
-    mainWindow.webContents.send('autosync:status', { status, file })
-    appendSyncHistory({ timestamp: Date.now(), fileName: file || '', status, size: 0 }).catch(() => {})
+    mainWindow.webContents.send('autosync:status', event)
+    if (event.type === 'uploaded' || event.type === 'failed') {
+      appendSyncHistory({ timestamp: Date.now(), fileName: event.file || '', status: event.type, size: 0 }).catch(() => {})
+    }
   }
 })
 
@@ -46,8 +48,11 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   createWindow()
-  const savedConfig = await storageService.getSyncConfig()
-  if (savedConfig) autoSyncService.updateConfig(savedConfig)
+
+  autoSyncService.loadTracker()
+  const prefs = await readPrefs()
+  if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
+  if (prefs.autoSync?.enabled) autoSyncService.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -219,6 +224,18 @@ ipcMain.handle('telegram:download-thumbnail', async (_, messageId: number) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:cache-audio', async (_, messageId: number, fileName: string) => {
+  try {
+    const audioCacheDir = pathMod.join(app.getPath('userData'), 'audio-cache')
+    if (!fs.existsSync(audioCacheDir)) fs.mkdirSync(audioCacheDir, { recursive: true })
+    const cachePath = await telegramService.cacheAudio(messageId, fileName, audioCacheDir)
+    const data = fs.readFileSync(cachePath)
+    const ext = pathMod.extname(fileName).toLowerCase()
+    const mime: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.aac': 'audio/aac', '.ogg': 'audio/ogg' }
+    return { success: true, data: { base64: data.toString('base64'), mime: mime[ext] || 'audio/mpeg', fileName } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:delete-file', async (_, messageId: number) => {
   try {
     await telegramService.deleteFile(messageId)
@@ -373,12 +390,99 @@ ipcMain.handle('dialog:pick-download-dir', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('autosync:test-upload', async () => {
+  try {
+    const result = await dialog.showOpenDialog({ title: 'Выберите файл для тестовой загрузки', properties: ['openFile'] })
+    if (result.canceled || !result.filePaths?.length) return { success: false, error: 'Отменено' }
+    const filePath = result.filePaths[0]
+    const stat = fs.statSync(filePath)
+    const fileResult = await telegramService.uploadFile(filePath)
+    return { success: true, data: { ...fileResult, localPath: filePath } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('storage:factory-reset', async () => {
   try {
     await storageService.clearSession()
     if (fs.existsSync(prefsPath())) fs.unlinkSync(prefsPath())
     if (fs.existsSync(historyPath())) fs.unlinkSync(historyPath())
     autoSyncService.stop()
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+// ===== Auto-sync IPC =====
+async function saveAutoSyncConfig() {
+  const prefs = await readPrefs()
+  prefs.autoSync = autoSyncService.getConfig()
+  await writePrefs(prefs)
+}
+
+ipcMain.handle('autosync:get-config', async () => {
+  try {
+    return { success: true, data: autoSyncService.getConfig() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:update-config', async (_, config: any) => {
+  try {
+    autoSyncService.updateConfig(config)
+    await saveAutoSyncConfig()
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:start', async () => {
+  try {
+    await autoSyncService.start()
+    await saveAutoSyncConfig()
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:stop', async () => {
+  try {
+    autoSyncService.stop()
+    await saveAutoSyncConfig()
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:get-status', async () => {
+  try {
+    return { success: true, data: autoSyncService.getStatus() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:scan-now', async () => {
+  try {
+    const result = await autoSyncService.scanNow()
+    return { success: true, data: result }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:count-files', async () => {
+  try {
+    const count = autoSyncService.countFiles()
+    return { success: true, data: { count } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:get-log', async () => {
+  try {
+    return { success: true, data: autoSyncService.getLog(100) }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:get-queue', async () => {
+  try {
+    return { success: true, data: autoSyncService.getQueue() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('autosync:reset-uploaded', async () => {
+  try {
+    autoSyncService.resetTracker()
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })

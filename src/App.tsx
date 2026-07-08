@@ -5,6 +5,8 @@ import LoginScreen from "./components/LoginScreen"
 import Sidebar from "./components/Sidebar"
 import CommandPalette from "./components/CommandPalette"
 import AggregateProgress from "./components/AggregateProgress"
+import AudioPlayerBar from "./components/AudioPlayerBar"
+import { AudioPlayerProvider } from "./lib/AudioPlayerContext"
 import DashboardHome from "./pages/DashboardHome"
 import MyFilesPage from "./pages/MyFilesPage"
 import UploadPage from "./pages/UploadPage"
@@ -20,6 +22,7 @@ import TagsPage from "./pages/TagsPage"
 import SearchPage from "./pages/SearchPage"
 import CalendarPage from "./pages/CalendarPage"
 import AlbumsPage from "./pages/AlbumsPage"
+import AudioPlayerPage from "./pages/AudioPlayerPage"
 import NotesPage from "./pages/NotesPage"
 import NetworkPage from "./pages/NetworkPage"
 import DiagnosticsPage from "./pages/DiagnosticsPage"
@@ -90,6 +93,7 @@ function App() {
     <MemoryRouter initialEntries={["/"]}>
       <div className="v2-shell">
         <Sidebar channelInfo={channelInfo} onLogout={handleLogout} />
+        <AudioPlayerProvider>
         <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
           <AggregateProgress />
           <Routes>
@@ -106,6 +110,7 @@ function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
+            <Route path="/audioplayer" element={<AudioPlayerPage />} />
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/network" element={<NetworkPage />} />
             <Route path="/diagnostics" element={<DiagnosticsPage />} />
@@ -115,6 +120,8 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
+        <AudioPlayerBar />
+        </AudioPlayerProvider>
         <CommandPalette />
       </div>
     </MemoryRouter>

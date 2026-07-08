@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play } from 'lucide-react'
 
-const DAY = 86400
+const SIX_HOURS = 21600
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -21,12 +21,12 @@ function typeOf(name: string): string {
   return 'Другое'
 }
 
-const CATEGORIES = ['Изображения', 'Видео', 'Документы', 'Архивы', 'Аудио', 'Другое'] as const
+const CATEGORIES = ['Изображения', 'Видео', 'Документы', 'Архивы', 'Аудио', 'Другое', 'Недавние'] as const
 const CAT_ICON: Record<string, string> = {
-  Изображения: '🖼️', Видео: '🎬', Документы: '📄', Архивы: '🗄️', Аудио: '🎵', Другое: '📁',
+  Недавние: '🕐', Изображения: '🖼️', Видео: '🎬', Документы: '📄', Архивы: '🗄️', Аудио: '🎵', Другое: '📁',
 }
 const CAT_COLOR: Record<string, string> = {
-  Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
+  Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
 
 function groupByMonth(items: any[]) {
@@ -77,7 +77,7 @@ export default function MyFilesPage() {
   useEffect(() => { load() }, [])
 
   const now = Math.floor(Date.now() / 1000)
-  const isNew = (t: number) => t > 0 && (now - t) < DAY
+  const SIX_HOURS = 21600
 
   const filtered = useMemo(() => {
     let arr = [...files]
@@ -93,9 +93,12 @@ export default function MyFilesPage() {
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
-    filtered.forEach(f => { map[typeOf(f.fileName)]?.push(f) })
+    filtered.forEach(f => {
+      if ((f.uploadedAt || 0) > 0 && (now - f.uploadedAt) < SIX_HOURS) map['Недавние']?.push(f)
+      map[typeOf(f.fileName)]?.push(f)
+    })
     return map
-  }, [filtered])
+  }, [filtered, now])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
@@ -135,7 +138,7 @@ export default function MyFilesPage() {
       setTimeout(() => {
         setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
         setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
-      }, 300)
+      }, 500)
     } else {
       setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
       showToast('Ошибка удаления')
@@ -188,7 +191,7 @@ export default function MyFilesPage() {
   }
 
   const toggleCategory = (cat: string) => {
-    if (cat === 'Изображения' || cat === 'Видео') {
+    if (cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио') {
       setDrillDown(cat)
       return
     }
@@ -217,14 +220,12 @@ export default function MyFilesPage() {
         </div>
       </div>
 
-      {selected.size > 0 && (
-        <div className="mf-bulkbar">
-          <span>Выбрано: {selected.size}</span>
-          <button onClick={bulkDownload}><Download size={14} /> Скачать</button>
-          <button className="danger" onClick={bulkDelete}><Trash2 size={14} /> Удалить</button>
-          <button onClick={clearSelection}>Снять</button>
-        </div>
-      )}
+      <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
+        <span>Выбрано: {selected.size}</span>
+        <button onClick={bulkDownload}><Download size={14} /> Скачать</button>
+        <button className="danger" onClick={bulkDelete}><Trash2 size={14} /> Удалить</button>
+        <button onClick={clearSelection}>Снять</button>
+      </div>
 
       {loading ? <div className="mf-empty">Загрузка…</div> : drillDown ? (
         <div className="mf-gallery">
@@ -235,45 +236,69 @@ export default function MyFilesPage() {
             <span className="mf-gallery-count">{galleryFiles.length}</span>
           </div>
           <div className="mf-gallery-body">
-            {Object.entries(galleryByYear).sort(([a], [b]) => +b - +a).map(([year, months]) => (
-              <div key={year} className="mf-gy">
-                <div className="mf-gy-title">{year}</div>
-                {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, items]) => (
-                  <div key={year + '-' + month} className="mf-gm">
-                    <div className="mf-gm-title">{MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
-                    <div className="mf-gm-items">
-                      {items.map((f: any) => {
-                        const thumbUrl = thumbs[f.messageId]
-                        const isVideo = drillDown === 'Видео'
-                        return (
-                          <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
-                          <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                          <div className="mf-gm-icon" data-type={drillDown}>
-                            {thumbUrl ? (
-                              <>
-                                <img src={thumbUrl} className="mf-gm-img" />
-                                {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
-                              </>
-                            ) : (
-                              isVideo ? '🎬' : '🖼️'
-                            )}
+            {drillDown === 'Аудио' ? (
+              <table className="mf-table">
+                <thead><tr>
+                  <th><input type="checkbox" onChange={() => galleryFiles.forEach(f => toggleSelect(f.messageId))} /></th>
+                  <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
+                </tr></thead>
+                <tbody>
+                  {galleryFiles.map(f => (
+                    <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                      <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
+                      <td className="ellip" title={f.fileName}>{f.fileName}</td>
+                      <td>{fmtSize(f.fileSize)}</td>
+                      <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
+                      <td>
+                        <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                        <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
+                        <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              Object.entries(galleryByYear).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+                <div key={year} className="mf-gy">
+                  <div className="mf-gy-title">{year}</div>
+                  {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, items]) => (
+                    <div key={year + '-' + month} className="mf-gm">
+                      <div className="mf-gm-title">{MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                      <div className="mf-gm-items">
+                        {items.map((f: any) => {
+                          const thumbUrl = thumbs[f.messageId]
+                          const isVideo = drillDown === 'Видео'
+                          return (
+                            <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                            <div className="mf-gm-icon" data-type={drillDown}>
+                              {thumbUrl ? (
+                                <>
+                                  <img src={thumbUrl} className="mf-gm-img" />
+                                  {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
+                                </>
+                              ) : (
+                                isVideo ? '🎬' : '🖼️'
+                              )}
+                            </div>
+                            <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+                            <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+                            <div className="mf-gm-actions">
+                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                              {drillDown === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={13} /></button>}
+                              <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
+                              <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                            </div>
                           </div>
-                          <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
-                          <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
-                          <div className="mf-gm-actions">
-                            <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
-                            {drillDown === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={13} /></button>}
-                            <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
-                            <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
-                          </div>
-                        </div>
-                      )})}
+                        )})}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            ))}
-            {galleryFiles.length === 0 && <div className="mf-empty">Нет файлов</div>}
+                  ))}
+                </div>
+              ))
+            )}
+            {galleryFiles.length === 0 && drillDown !== 'Аудио' && <div className="mf-empty">Нет файлов</div>}
           </div>
         </div>
       ) : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
@@ -282,7 +307,7 @@ export default function MyFilesPage() {
             const items = grouped[cat]
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
-            const isDrillable = cat === 'Изображения' || cat === 'Видео'
+            const isDrillable = cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио'
             return (
               <div key={cat} className={'mf-section' + (open ? ' open' : '')}>
                 <div className="mf-section-head" onClick={() => toggleCategory(cat)} style={{ '--cat-color': CAT_COLOR[cat] } as React.CSSProperties}>

@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, BarChart3, Settings, Info,
   LogOut, Trash2, Star, Link2, Activity, Tag, Search, CalendarDays, Image as ImgIcon,
-  StickyNote, Wifi, ChevronsLeft, ChevronsRight, Command, HelpCircle, Stethoscope } from "lucide-react"
+  StickyNote, Wifi, ChevronsLeft, ChevronsRight, Command, HelpCircle, Stethoscope, Headphones } from "lucide-react"
 
 interface Props { channelInfo: any; onLogout: () => void }
 
@@ -20,6 +20,7 @@ const items = [
   { to: "/search", label: "Поиск", icon: Search },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },
   { to: "/albums", label: "Альбомы", icon: ImgIcon },
+  { to: "/audioplayer", label: "Аудиоплеер", icon: Headphones },
   { to: "/notes", label: "Заметки", icon: StickyNote },
   { to: "/network", label: "Сеть", icon: Wifi },
   { to: "/diagnostics", label: "Диагностика", icon: Stethoscope },

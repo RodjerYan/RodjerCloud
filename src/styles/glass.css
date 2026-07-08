@@ -55,6 +55,13 @@ body.reduce-anim *, body.reduce-anim *::before, body.reduce-anim *::after {
 .splash-loading { color: var(--text-dim); margin-top: 16px; font-size: 14px; }
 .splash-version { position: absolute; bottom: -120px; left: 50%; transform: translateX(-50%); color: var(--text-mute); font-size: 12px; }
 
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* App shell */
 .v2-shell { display: flex; height: 100vh; width: 100%; }
 .v2-main { flex: 1; overflow: auto; padding: 28px 32px; scrollbar-width: none; }

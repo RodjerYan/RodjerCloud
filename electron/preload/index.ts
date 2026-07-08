@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     downloadThumbnail: (messageId: number) =>
       ipcRenderer.invoke('telegram:download-thumbnail', messageId),
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
+    cacheAudio: (messageId: number, fileName: string) => ipcRenderer.invoke('telegram:cache-audio', messageId, fileName),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
       ipcRenderer.invoke('telegram:bulk-download', items),
     bulkDelete: (ids: number[]) => ipcRenderer.invoke('telegram:bulk-delete', ids),
@@ -42,11 +43,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: () => ipcRenderer.invoke('autosync:start'),
     stop: () => ipcRenderer.invoke('autosync:stop'),
     getStatus: () => ipcRenderer.invoke('autosync:get-status'),
-    onStatus: (cb: (data: { status: string; file?: string }) => void) => {
+    onStatus: (cb: (data: any) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('autosync:status', listener)
       return () => ipcRenderer.removeListener('autosync:status', listener)
-    }
+    },
+    testUpload: () => ipcRenderer.invoke('autosync:test-upload'),
+    scanNow: () => ipcRenderer.invoke('autosync:scan-now'),
+    countFiles: () => ipcRenderer.invoke('autosync:count-files'),
+    getLog: () => ipcRenderer.invoke('autosync:get-log'),
+    getQueue: () => ipcRenderer.invoke('autosync:get-queue'),
+    resetUploaded: () => ipcRenderer.invoke('autosync:reset-uploaded'),
   },
   app: {
     copyToClipboard: (text: string) => ipcRenderer.invoke('app:copy-to-clipboard', text),
