@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
 import * as fs from 'fs'
+import * as zlib from 'zlib'
 import * as pathMod from 'path'
 import path from 'path'
 import { TelegramService } from './telegram-service'
@@ -435,6 +436,16 @@ ipcMain.handle('folders:remove-file', async (_, messageId: number) => {
 ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string) => {
   try {
     const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d); return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('tgs:read', async () => {
+  try {
+    const tgsPath = path.join(app.getAppPath(), 'resources', 'duck.tgs')
+    if (!fs.existsSync(tgsPath)) return { success: false, error: 'File not found' }
+    const compressed = fs.readFileSync(tgsPath)
+    const decompressed = zlib.gunzipSync(compressed)
+    return { success: true, data: JSON.parse(decompressed.toString('utf-8')) }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

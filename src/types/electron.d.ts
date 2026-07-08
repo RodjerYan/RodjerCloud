@@ -40,6 +40,18 @@ declare global {
         getVersion: () => Promise<{ success: boolean; data?: string; error?: string }>
       }
       getPathForFile: (file: File) => string
+      folders: {
+        list: () => Promise<{ success: boolean; data?: { folders: any[]; fileFolders: Record<number, string> }; error?: string }>
+        create: (name: string) => Promise<{ success: boolean; error?: string }>
+        rename: (id: string, name: string) => Promise<{ success: boolean; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        addFile: (folderId: string, messageId: number) => Promise<{ success: boolean; error?: string }>
+        removeFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        moveFile: (messageId: number, folderId: string) => Promise<{ success: boolean; error?: string }>
+      }
+      tgs: {
+        read: () => Promise<{ success: boolean; data?: any; error?: string }>
+      }
     }
   }
 }

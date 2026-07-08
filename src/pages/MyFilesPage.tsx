@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play,
   Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil } from 'lucide-react'
+import { Player } from '@lottiefiles/react-lottie-player'
 
 const SIX_HOURS = 21600
 
@@ -70,6 +71,10 @@ export default function MyFilesPage() {
   const [renameVal, setRenameVal] = useState('')
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  const [moveTarget, setMoveTarget] = useState<number[] | null>(null)
+  const [duckAnim, setDuckAnim] = useState<any>(null)
+
+  useEffect(() => { window.electronAPI.tgs.read().then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
   const loadFolders = async () => {
     const r = await window.electronAPI.folders.list()
@@ -96,19 +101,19 @@ export default function MyFilesPage() {
     setRenameId(null); loadFolders()
   }
 
-  const moveFileToFolder = async (messageId: number) => {
-    const folderId = fileFolders[messageId] || ''
-    const f = folders.find(x => x.id === folderId)
-    const choices = folders.map(x => ({ id: x.id, name: x.name }))
-    const items = choices.map((x, i) => `${i + 1}. ${x.name}`).join('\n')
-    const input = prompt(`Переместить в папку:\n${items}\n(0 — убрать из папки)`)
-    if (input === null) return
-    const idx = parseInt(input) - 1
-    if (idx === -1) {
-      await window.electronAPI.folders.removeFile(messageId)
-    } else if (idx >= 0 && idx < choices.length) {
-      await window.electronAPI.folders.moveFile(messageId, choices[idx].id)
+  const moveFileToFolder = (messageId: number) => { setMoveTarget([messageId]) }
+  const bulkMoveToFolder = () => { if (selected.size > 0) setMoveTarget(Array.from(selected)) }
+  const confirmMoveFile = async (target: string) => {
+    if (!moveTarget || moveTarget.length === 0) return
+    for (const id of moveTarget) {
+      if (target.startsWith('cat:')) {
+        await window.electronAPI.folders.removeFile(id)
+      } else {
+        await window.electronAPI.folders.moveFile(id, target)
+      }
     }
+    setMoveTarget(null)
+    clearSelection()
     loadFolders()
   }
 
@@ -146,30 +151,34 @@ export default function MyFilesPage() {
   }, [files, search, sort])
 
   const grouped = useMemo(() => {
+    const ffset = new Set(Object.keys(fileFolders).map(Number))
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
+      if (ffset.has(f.messageId)) return
       if ((f.uploadedAt || 0) > 0 && (now - f.uploadedAt) < SIX_HOURS) map['Недавние']?.push(f)
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
-  }, [filtered, now])
+  }, [filtered, now, fileFolders])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
-    return filtered.filter(f => typeOf(f.fileName) === drillDown)
-  }, [drillDown, filtered])
+    const ffset = new Set(Object.keys(fileFolders).map(Number))
+    return filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
+  }, [drillDown, filtered, fileFolders])
 
   const galleryByYear = useMemo(() => groupByMonth(galleryFiles), [galleryFiles])
 
   useEffect(() => {
     if (drillDown) {
-      const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown)
+      const ffset = new Set(Object.keys(fileFolders).map(Number))
+      const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
       loadThumbs(ddFiles)
     } else {
       setThumbs({})
     }
-  }, [drillDown, filtered, loadThumbs])
+  }, [drillDown, filtered, loadThumbs, fileFolders])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
 
@@ -279,6 +288,7 @@ export default function MyFilesPage() {
       <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
         <span>Выбрано: {selected.size}</span>
         <button onClick={bulkDownload}><Download size={14} /> Скачать</button>
+        <button onClick={bulkMoveToFolder}><MoveRight size={14} /> Переместить</button>
         <button className="danger" onClick={bulkDelete}><Trash2 size={14} /> Удалить</button>
         <button onClick={clearSelection}>Снять</button>
       </div>
@@ -421,6 +431,14 @@ export default function MyFilesPage() {
                       </table>
                     )
                   )}
+                  {items.length === 0 && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 22px', gap: 8 }}>
+                    {duckAnim ? (
+                      <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                    ) : (
+                      <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
+                    )}
+                    <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Здесь пока никого…</span>
+                  </div>}
                 </div>
               </div>
             )
@@ -445,7 +463,7 @@ export default function MyFilesPage() {
                       <span className="mf-section-title">{fld.name}</span>
                       <span className="mf-section-count">{ffiles.length}</span>
                       <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
-                        onClick={(e) => { e.stopPropagation(); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
+                        onClick={(e) => { e.stopPropagation(); setFolderDrill(fld.id); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
                         <Pencil size={12} />
                       </button>
                       <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-err)', fontSize: 11 }}
@@ -500,26 +518,11 @@ export default function MyFilesPage() {
                         )
                       )}
                       {ffiles.length === 0 && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 22px', gap: 8 }}>
-                        <svg viewBox="0 0 120 100" style={{ width: 64, height: 54, filter: 'drop-shadow(0 2px 8px rgba(255,200,0,0.3))' }}>
-                          <ellipse cx="60" cy="72" rx="34" ry="18" fill="#ffd43b" />
-                          <ellipse cx="60" cy="68" rx="30" ry="16" fill="#ffd43b" />
-                          <ellipse cx="60" cy="58" rx="24" ry="14" fill="#fcc419" />
-                          <g style={{ transformOrigin: '36px 64px', animation: 'duck-shl 2.2s ease-in-out infinite' }}>
-                            <ellipse cx="24" cy="60" rx="16" ry="6" fill="#ffd43b" transform="rotate(-20,24,60)" />
-                          </g>
-                          <g style={{ transformOrigin: '84px 64px', animation: 'duck-shr 2.2s ease-in-out infinite' }}>
-                            <ellipse cx="96" cy="60" rx="16" ry="6" fill="#ffd43b" transform="rotate(20,96,60)" />
-                          </g>
-                          <g style={{ transformOrigin: '56px 50px', animation: 'duck-bob 1.6s ease-in-out infinite' }}>
-                            <ellipse cx="56" cy="44" rx="14" ry="16" fill="#ffd43b" />
-                            <circle cx="56" cy="28" r="12" fill="#ffd43b" />
-                            <ellipse cx="49" cy="26" rx="3" ry="4" fill="#212529" />
-                            <ellipse cx="63" cy="26" rx="3" ry="4" fill="#212529" />
-                            <circle cx="49" cy="25" r="1.5" fill="#fff" />
-                            <circle cx="63" cy="25" r="1.5" fill="#fff" />
-                            <ellipse cx="68" cy="30" rx="2" ry="1.2" fill="#e67700" transform="rotate(20,68,30)" />
-                          </g>
-                        </svg>
+                        {duckAnim ? (
+                          <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                        ) : (
+                          <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
+                        )}
                         <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Здесь пока никого…</span>
                       </div>}
                     </div>
@@ -553,6 +556,30 @@ export default function MyFilesPage() {
               <button className="v3-btn" onClick={() => setShowCreateFolder(false)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)' }}>Отмена</button>
               <button className="v3-btn" onClick={confirmCreateFolder} style={{ background: 'var(--accent-1)', border: 'none', color: '#fff' }}>Создать</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {moveTarget !== null && (
+        <div className="mf-modal" onClick={() => setMoveTarget(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 320, maxHeight: '80vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{moveTarget.length > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '4px 0', padding: '0 4px' }}>Категории</div>
+            {CATEGORIES.map(c => (
+              <button key={'cat-'+c} className="v3-btn" onClick={() => confirmMoveFile('cat:'+c)}
+                style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {CAT_ICON[c]}
+                {c === 'Недавние' ? 'Недавние' : c}
+              </button>
+            ))}
+            {folders.length > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
+            {folders.map(f => (
+              <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
+                style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Folder size={16} style={{ flexShrink: 0, color: '#7c83ff' }} />
+                {f.name}
+              </button>
+            ))}
           </div>
         </div>
       )}

@@ -70,5 +70,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
     removeFile: (messageId: number) => ipcRenderer.invoke('folders:remove-file', messageId),
     moveFile: (messageId: number, folderId: string) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
+  },
+  tgs: {
+    read: () => ipcRenderer.invoke('tgs:read'),
   }
 })
