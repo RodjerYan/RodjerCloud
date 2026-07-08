@@ -21,6 +21,7 @@ let previewIdSeq = 0
 const telegramService = new TelegramService()
 const storageService = new StorageService()
 const autoSyncService = new AutoSyncService(telegramService)
+let initialFolderSyncDone = false
 
 autoSyncService.setEventCallback((event) => {
   if (mainWindow) {
@@ -427,9 +428,15 @@ ipcMain.handle('folders:load-from-telegram', async () => {
     const data = await telegramService.loadFoldersFromChannel()
     if (data) {
       if (data.folders && data.fileFolders) writeFolders(data)
+      initialFolderSyncDone = true
       return { success: true, data }
     }
-    return { success: true, data: readFolders() }
+    const local = readFolders()
+    if (!initialFolderSyncDone && (local.folders.length > 0 || Object.keys(local.fileFolders).length > 0)) {
+      try { await telegramService.syncFolders(local) } catch {}
+      initialFolderSyncDone = true
+    }
+    return { success: true, data: local }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
