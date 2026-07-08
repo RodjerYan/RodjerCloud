@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, screen } from 'electron'
 import * as fs from 'fs'
 import * as zlib from 'zlib'
 import * as pathMod from 'path'
@@ -7,7 +7,17 @@ import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 
+// Logger
+const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
+function log(level: string, msg: string) {
+  const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`
+  try { fs.appendFileSync(logFile, line) } catch(e) {}
+}
+
 let mainWindow: BrowserWindow | null = null
+
+const previewSessions = new Map<string, { files: any[]; idx: number; dir: string }>()
+let previewIdSeq = 0
 const telegramService = new TelegramService()
 const storageService = new StorageService()
 const autoSyncService = new AutoSyncService(telegramService)
@@ -44,6 +54,10 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+  mainWindow.webContents.on('console-message', (_e, level, msg) => {
+    const lvl = ['verbose','info','warning','error'][level] || 'info'
+    log(lvl, '[renderer] ' + msg)
+  })
 
   mainWindow.on('closed', () => { mainWindow = null })
 }
@@ -196,7 +210,9 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
             event.sender.send(channel, data)
             if (channel === 'telegram:upload-complete' && data.id === jobId) {
               resolve(data.success ? { success: true, data: data.data } : { success: false, error: data.error })
-            }
+  } else {
+    document.getElementById('bar').style.display = 'none'; video = null
+  }
           }
         }
       }})
@@ -367,6 +383,10 @@ ipcMain.handle('app:get-version', async () => {
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.on('app:log', (_, level: string, msg: string) => {
+  log(level, '[renderer] ' + msg)
+})
+
 ipcMain.handle('storage:get-sync-history', async () => {
   try {
     if (!fs.existsSync(historyPath())) return { success: true, data: [] }
@@ -439,14 +459,221 @@ ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: strin
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('tgs:read', async () => {
+ipcMain.handle('tgs:read', async (_, name?: string) => {
   try {
-    const tgsPath = path.join(app.getAppPath(), 'resources', 'duck.tgs')
+    const tgsPath = path.join(app.getAppPath(), 'resources', name || 'duck.tgs')
     if (!fs.existsSync(tgsPath)) return { success: false, error: 'File not found' }
     const compressed = fs.readFileSync(tgsPath)
     const decompressed = zlib.gunzipSync(compressed)
     return { success: true, data: JSON.parse(decompressed.toString('utf-8')) }
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+function toFileUrl(p: string): string {
+  return 'file:///' + p.replace(/\\/g, '/')
+}
+
+const previewWindows = new Map<number, BrowserWindow>()
+
+ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
+  try {
+    const f = files[idx]
+    if (!f) return { success: false, error: 'File not found' }
+    const winId = ++previewIdSeq
+    const downloadDir = pathMod.join(app.getPath('userData'), 'preview-cache')
+    if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true })
+    const cachedPath = pathMod.join(downloadDir, `${f.messageId}_${f.fileName}`)
+
+    previewSessions.set(winId.toString(), { files, idx, dir: downloadDir })
+
+    const pw = new BrowserWindow({
+      width: Math.min(1200, screen.getPrimaryDisplay().workAreaSize.width - 100),
+      height: Math.min(800, screen.getPrimaryDisplay().workAreaSize.height - 100),
+      minWidth: 400, minHeight: 300,
+      backgroundColor: '#0a0a14',
+      autoHideMenuBar: true,
+      frame: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, '../preload/index.js')
+      }
+    })
+    previewWindows.set(winId, pw)
+    pw.on('closed', () => { previewWindows.delete(winId); previewSessions.delete(winId.toString()) })
+
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Preview</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
+#loader{width:40px;height:40px;border:3px solid rgba(255,255,255,0.1);border-top-color:#7c83ff;border-radius:50%;animation:spin .8s linear infinite;position:fixed;top:50%;left:50%;margin:-20px 0 0 -20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(180deg,rgba(0,0,0,0.6),transparent);z-index:10;-webkit-app-region:drag}
+#top:hover{opacity:1}
+#close{position:fixed;top:12px;right:16px;z-index:20;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;line-height:1;-webkit-app-region:no-drag}
+#media{position:fixed;top:0;left:0;right:0;bottom:48px;display:flex;align-items:center;justify-content:center}
+#media video,#media img{max-width:100%;max-height:100%;border-radius:4px}
+#bar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(10,10,20,0.92);display:flex;align-items:center;gap:8px;padding:6px 12px;height:48px;border-top:1px solid rgba(255,255,255,0.06)}
+#bar button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:5px;padding:4px 10px;font:12px/1.2 sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s}
+#bar button:hover{background:rgba(255,255,255,0.18)}
+#progress{flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;cursor:pointer;position:relative;margin:0 8px}
+#progressFill{height:100%;background:#7c83ff;border-radius:3px;width:0%;pointer-events:none}
+#time{font:11px/1 monospace;color:rgba(255,255,255,0.45);min-width:70px;text-align:center}
+</style></head>
+<body>
+<div id="top"><span id="fname" style="color:#fff;font:13px/1 sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 sans-serif"></span></div>
+<button id="close" onclick="window.electronAPI.preview.close(sid)">✕</button>
+<div id="loader"></div>
+<div id="media"></div>
+<div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><button id="speedBtn" onclick="cycleSpeed()">1x</button><button onclick="toggleFs()">⛶</button></div>
+<script>
+let sid = '${winId}'
+let total = ${files.length}
+let baseUrl = '${toFileUrl(downloadDir)}/'
+let speed = 1
+let video = null
+function renderMedia(files, idx) {
+  if (!files || !files[idx]) return
+  const f = files[idx]
+  const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
+  const src = baseUrl + f.messageId + '_' + f.fileName
+  var el = document.getElementById('media')
+  var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  el.innerHTML = isVideo
+    ? '<video id="pv" src="' + src + '" autoplay muted style="max-width:100%;max-height:100%;border-radius:4px"></video>'
+    : '<img src="' + src + '" draggable="false" style="max-width:100%;max-height:100%;border-radius:4px">'
+  document.getElementById('fname').textContent = f.fileName
+  document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
+  if (isVideo) {
+    video = document.getElementById('pv')
+    document.getElementById('bar').style.display = 'flex'
+    video.playbackRate = speed
+    video.ontimeupdate = update
+    video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
+    video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
+    video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
+    video.onclick = function(e) { e.stopPropagation(); togglePlay() }
+  } else {
+    document.getElementById('bar').style.display = 'none'; video = null
+  }
+}
+function togglePlay() { if (!video) return; if (video.paused) video.play(); else video.pause() }
+function update() { if (!video||!video.duration) return; document.getElementById('progressFill').style.width = (video.currentTime/video.duration*100)+'%'; document.getElementById('time').textContent = fmt(video.currentTime)+' / '+fmt(video.duration) }
+function seek(e) { if (!video||!video.duration) return; var r=e.currentTarget.getBoundingClientRect(); video.currentTime = ((e.clientX-r.left)/r.width)*video.duration }
+function fmt(t) { if (!t||isNaN(t)) return '0:00'; var m=Math.floor(t/60),s=Math.floor(t%60); return m+':'+(s<10?'0':'')+s }
+function cycleSpeed() { var a=[0.5,0.75,1,1.25,1.5,2]; var i=a.indexOf(speed); speed=a[(i+1)%a.length]; document.getElementById('speedBtn').textContent=speed+'x'; if(video) video.playbackRate=speed }
+function toggleFs() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen() }
+function nav(dir) {
+  document.getElementById('media').innerHTML = ''; video = null
+  try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx) }) } catch(e) {}
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') window.electronAPI.preview.close(sid)
+  if (e.key === 'ArrowLeft') nav(-1)
+  if (e.key === 'ArrowRight') nav(1)
+  if (e.key === ' ' && video) { e.preventDefault(); togglePlay() }
+})
+document.getElementById('media').onclick = function(e) {
+  if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG') return
+  var w = window.innerWidth
+  if (e.clientX < w * 0.3) nav(-1)
+  else if (e.clientX > w * 0.7) nav(1)
+}
+// load first file
+window.electronAPI.preview.getSession(sid).then(r => {
+  if (r.success) {
+    window.electronAPI.preview.load(sid).then(r2 => {
+      if (r2.success) renderMedia(r2.data.files, r2.data.idx)
+    })
+  }
+})
+// show close on mouse move, hide after idle
+var closeTimer = null
+document.addEventListener('mousemove', function() {
+  document.getElementById('close').style.opacity = '1'
+  clearTimeout(closeTimer)
+  closeTimer = setTimeout(function() { document.getElementById('close').style.opacity = '0' }, 2000)
+})
+</script></body></html>`
+
+    const tmpDir = app.getPath('temp')
+    const tmpFile = pathMod.join(tmpDir, `preview-${winId}.html`)
+    fs.writeFileSync(tmpFile, html, 'utf-8')
+    pw.loadFile(tmpFile)
+    pw.show()
+
+    // start download in background - window.load IPC will wait for it
+    if (!fs.existsSync(cachedPath)) {
+      telegramService.downloadFile(f.messageId, f.fileName).then(r => {
+        if (r?.filePath) {
+          // move to cache dir
+          try {
+            const destPath = pathMod.join(downloadDir, `${f.messageId}_${f.fileName}`)
+            fs.copyFileSync(r.filePath, destPath)
+          } catch(e) { console.error('move failed', e) }
+        }
+      }).catch(e => console.error('bg download failed', e))
+    }
+
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('preview:load', async (_, sessionId: string) => {
+  try {
+    const s = previewSessions.get(sessionId)
+    if (!s) return { success: false, error: 'Session not found' }
+    const f = s.files[s.idx]
+    const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`)
+    // wait for the file to exist (poll up to 30s)
+    for (let i = 0; i < 60; i++) {
+      if (fs.existsSync(cachedPath)) break
+      await new Promise(r => setTimeout(r, 500))
+    }
+    return { success: true, data: { files: s.files, idx: s.idx } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('preview:get-session', async (_, sessionId: string) => {
+  try {
+    const s = previewSessions.get(sessionId)
+    if (!s) return { success: false, error: 'Session not found' }
+    return { success: true, data: { files: s.files, idx: s.idx } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => {
+  try {
+    const s = previewSessions.get(sessionId)
+    if (!s) return { success: false, error: 'Session not found' }
+    const all = s.files.filter((f: any) => {
+      const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
+      return ['jpg','jpeg','png','gif','webp','bmp','svg','mp4','mov','mkv','avi','webm'].includes(ext)
+    })
+    if (all.length === 0) return { success: false, error: 'No previewable files' }
+    const currInAll = all.findIndex((x: any) => x === s.files[s.idx])
+    const next = (currInAll + dir + all.length) % all.length
+    const nextFile = all[next]
+    const nextIdx = s.files.indexOf(nextFile)
+    s.idx = nextIdx
+    const cachedPath = pathMod.join(s.dir, `${nextFile.messageId}_${nextFile.fileName}`)
+    if (!fs.existsSync(cachedPath)) {
+      const messages = await (telegramService as any).client.getMessages((telegramService as any).channelId, { ids: [nextFile.messageId] })
+      if (messages && messages[0]?.file) {
+        await (telegramService as any).client.downloadMedia(messages[0], { outputFile: cachedPath })
+      }
+    }
+    return { success: true, data: { files: s.files, idx: s.idx } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.on('preview:close', (_, sessionId: string) => {
+  const id = parseInt(sessionId, 10)
+  if (!id) return
+  const win = previewWindows.get(id)
+  if (win && !win.isDestroyed()) win.close()
 })
 
 ipcMain.handle('dialog:pick-download-dir', async () => {

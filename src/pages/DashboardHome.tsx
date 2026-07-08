@@ -40,8 +40,10 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
   const avgSize = total ? totalSize / total : 0
 
   const typeMap: Record<string, number> = {}
+  const CATS = ['Изображения', 'Видео', 'Аудио', 'Документы', 'Архивы', 'Другое']
+  CATS.forEach(c => typeMap[c] = 0)
   files.forEach(f => { const t = typeOf(f.fileName || ''); typeMap[t] = (typeMap[t] || 0) + 1 })
-  const chartData = Object.entries(typeMap).map(([name, value]) => ({ name, value }))
+  const chartData = CATS.filter(c => typeMap[c] > 0).map(name => ({ name, value: typeMap[name] }))
 
   const recent = [...files].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 5)
 
@@ -82,10 +84,10 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
           <div className="dh-panel-head"><h2>Файлы по типам</h2></div>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer>
-              <BarChart data={chartData} margin={{ top: 28, right: 30, bottom: 5, left: 10 }}>
+              <BarChart data={chartData} margin={{ top: 28, right: 20, bottom: 50, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                <XAxis dataKey="name" stroke="#9ca3c4" fontSize={12} />
-                <YAxis stroke="#9ca3c4" fontSize={12} allowDecimals={false} />
+                <XAxis dataKey="name" stroke="#9ca3c4" fontSize={11} interval={0} tickLine={false} axisLine={false} />
+                <YAxis stroke="#9ca3c4" fontSize={12} allowDecimals={false} width={36} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(124,131,255,0.08)' }} />
                 <Bar dataKey="value" fill="url(#dhBarGrad)" radius={[6, 6, 0, 0]}
                   activeBar={{ fill: 'url(#dhBarGradActive)', radius: [6, 6, 0, 0] }}>

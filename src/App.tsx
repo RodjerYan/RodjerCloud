@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useCallback } from "react"
 import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom"
 import SplashScreen from "./components/SplashScreen"
+import DuckSplash from "./components/DuckSplash"
 import LoginScreen from "./components/LoginScreen"
 import Sidebar from "./components/Sidebar"
 import CommandPalette from "./components/CommandPalette"
@@ -38,6 +39,7 @@ import "./styles/settings.css"
 import "./styles/about.css"
 import "./styles/modal.css"
 import "./styles/v3-theme.css"
+import ErrorBoundary from "./components/ErrorBoundary"
 
 declare global { interface Window { electronAPI: any } }
 
@@ -45,7 +47,10 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [showSplash, setShowSplash] = useState(true)
+  const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
+
+  const handleDuckDone = useCallback(() => setShowDuckSplash(false), [])
 
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 1400)
@@ -65,6 +70,7 @@ function App() {
         const reconnectResult = await window.electronAPI.telegram.reconnect()
         if (reconnectResult.success) {
           setIsAuthenticated(true); setChannelInfo(reconnectResult.data)
+          setShowDuckSplash(true)
           v3store.logActivity("login", "Reconnected to Telegram channel")
         }
       }
@@ -74,6 +80,7 @@ function App() {
 
   const handleLoginSuccess = (channelData: any) => {
     setIsAuthenticated(true); setChannelInfo(channelData)
+    setShowDuckSplash(true)
     v3store.logActivity("login", "Login successful")
   }
   const handleLogout = async () => {
@@ -84,12 +91,14 @@ function App() {
     } catch (e) { console.error("Logout failed:", e) }
   }
 
-  if (showSplash || isLoading) return <SplashScreen />
+  if (showSplash || isLoading) return <ErrorBoundary><SplashScreen /></ErrorBoundary>
+  if (showDuckSplash) return <ErrorBoundary><DuckSplash onDone={handleDuckDone} /></ErrorBoundary>
   if (!isAuthenticated) {
-    return <div className="app-container"><LoginScreen onLoginSuccess={handleLoginSuccess} /></div>
+    return <ErrorBoundary><div className="app-container"><LoginScreen onLoginSuccess={handleLoginSuccess} /></div></ErrorBoundary>
   }
 
   return (
+    <ErrorBoundary>
     <MemoryRouter initialEntries={["/"]}>
       <div className="v2-shell">
         <Sidebar channelInfo={channelInfo} onLogout={handleLogout} />
@@ -125,6 +134,7 @@ function App() {
         <CommandPalette />
       </div>
     </MemoryRouter>
+    </ErrorBoundary>
   )
 }
 

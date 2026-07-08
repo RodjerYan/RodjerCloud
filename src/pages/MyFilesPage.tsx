@@ -58,8 +58,9 @@ export default function MyFilesPage() {
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [preview, setPreview] = useState<{ idx: number } | null>(null)
+  const [preview, setPreview] = useState<{ idx: number; list: any[] } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [previewIsVideo, setPreviewIsVideo] = useState(false)
   const [toast, setToast] = useState<string>('')
   const [drillDown, setDrillDown] = useState<string | null>(null)
   const [thumbs, setThumbs] = useState<Record<number, string>>({})
@@ -75,6 +76,17 @@ export default function MyFilesPage() {
   const [duckAnim, setDuckAnim] = useState<any>(null)
 
   useEffect(() => { window.electronAPI.tgs.read().then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
+
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null)
+      if (e.key === 'ArrowLeft') navPreview(-1)
+      if (e.key === 'ArrowRight') navPreview(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [preview])
 
   const loadFolders = async () => {
     const r = await window.electronAPI.folders.list()
@@ -213,19 +225,21 @@ export default function MyFilesPage() {
     await window.electronAPI.app.copyToClipboard(link)
     showToast('Ссылка скопирована')
   }
-  const handlePreview = async (f: any, idx: number) => {
-    if (typeOf(f.fileName) !== 'Изображения') return
-    setPreview({ idx })
-    const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    if (r.success && r.data?.filePath) setPreviewUrl('file://' + r.data.filePath)
+  const handlePreview = async (f: any, idx: number, list?: any[]) => {
+    const ft = typeOf(f.fileName)
+    if (ft !== 'Изображения' && ft !== 'Видео') return
+    const items = list || filtered
+    window.electronAPI.preview.open(items, items.indexOf(f))
   }
   const navPreview = (dir: number) => {
     if (!preview) return
-    const all = filtered.flatMap(f => typeOf(f.fileName) === 'Изображения' ? [f] : [])
+    const all = preview.list.filter((f: any) => {
+      const ft = typeOf(f.fileName); return ft === 'Изображения' || ft === 'Видео'
+    })
     if (all.length === 0) return
-    const curr = all.findIndex(x => x === filtered[preview.idx])
+    const curr = all.findIndex((x: any) => x === preview.list[preview.idx])
     const next = (curr + dir + all.length) % all.length
-    setPreviewUrl(''); handlePreview(all[next], filtered.indexOf(all[next]))
+    setPreviewUrl(''); handlePreview(all[next], preview.list.indexOf(all[next]), preview.list)
   }
 
   const bulkDelete = async () => {
@@ -337,7 +351,8 @@ export default function MyFilesPage() {
                           const thumbUrl = thumbs[f.messageId]
                           const isVideo = drillDown === 'Видео'
                           return (
-                            <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                            <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-gm-icon" data-type={drillDown}>
                               {thumbUrl ? (
@@ -353,7 +368,7 @@ export default function MyFilesPage() {
                             <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
                             <div className="mf-gm-actions">
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
-                              {drillDown === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={13} /></button>}
+                              {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
                               <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
@@ -390,14 +405,15 @@ export default function MyFilesPage() {
                     view === 'grid' ? (
                       <div className="mf-grid">
                         {items.map((f, i) => (
-                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                              {cat === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
+                              {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                               <button title="Переместить в папку" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
@@ -413,14 +429,15 @@ export default function MyFilesPage() {
                         </tr></thead>
                         <tbody>
                           {items.map((f, i) => (
-                            <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                            <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                               <td className="ellip" title={f.fileName}>{f.fileName}</td>
                               <td>{fmtSize(f.fileSize)}</td>
                               <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
                               <td>
                                 <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                                {cat === 'Изображения' && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
+                                {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                                 <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                                 <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                                 <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
@@ -534,14 +551,37 @@ export default function MyFilesPage() {
         </div>
       )}
 
-      {preview && (
-        <div className="mf-modal" onClick={() => setPreview(null)}>
-          <button className="mf-modal-close" onClick={() => setPreview(null)}><X size={18} /></button>
+      {preview && (() => {
+        const all = preview.list.filter((f: any) => {
+          const ft = typeOf(f.fileName); return ft === 'Изображения' || ft === 'Видео'
+        })
+        const currIdx = all.findIndex((x: any) => x === preview.list[preview.idx])
+        const currFile = all[currIdx]
+        return (
+        <div className="mf-modal" style={{ cursor: 'pointer' }} onClick={() => setPreview(null)}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(180deg,rgba(0,0,0,0.5),transparent)', zIndex: 10, userSelect: 'none' }}>
+            <span style={{ color: '#fff', fontSize: 13, opacity: 0.9 }}>{currFile?.fileName || ''}</span>
+            <span style={{ color: '#fff', fontSize: 12, opacity: 0.6 }}>{currIdx + 1} / {all.length}</span>
+          </div>
+          <button className="mf-modal-close" onClick={(e) => { e.stopPropagation(); setPreview(null) }}><X size={18} /></button>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '30%', zIndex: 5 }} onClick={(e) => { e.stopPropagation(); navPreview(-1) }} />
+          <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '30%', zIndex: 5 }} onClick={(e) => { e.stopPropagation(); navPreview(1) }} />
           <button className="mf-modal-nav left" onClick={(e) => { e.stopPropagation(); navPreview(-1) }}><ChevronLeft size={22} /></button>
-          {previewUrl ? <img src={previewUrl} onClick={e => e.stopPropagation()} /> : <div className="mf-modal-loading">Загрузка предпросмотра…</div>}
+          {previewUrl ? (
+            previewIsVideo ? (
+              <video src={previewUrl} controls autoPlay style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+            ) : (
+              <img src={previewUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }} />
+            )
+          ) : (
+            <div className="mf-modal-loading">Загрузка предпросмотра…</div>
+          )}
           <button className="mf-modal-nav right" onClick={(e) => { e.stopPropagation(); navPreview(1) }}><ChevronRight size={22} /></button>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '14px 20px', background: 'linear-gradient(0deg,rgba(0,0,0,0.5),transparent)', zIndex: 10 }}>
+            {previewUrl && <button onClick={(e) => { e.stopPropagation(); currFile && handleDownload(currFile) }} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}><Download size={14} /> Скачать</button>}
+          </div>
         </div>
-      )}
+      )})()}
 
       {showCreateFolder && (
         <div className="mf-modal" onClick={() => setShowCreateFolder(false)}>

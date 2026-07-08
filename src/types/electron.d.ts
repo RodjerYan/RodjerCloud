@@ -38,6 +38,7 @@ declare global {
       app: {
         copyToClipboard: (text: string) => Promise<{ success: boolean; error?: string }>
         getVersion: () => Promise<{ success: boolean; data?: string; error?: string }>
+        log: (level: string, msg: string) => void
       }
       getPathForFile: (file: File) => string
       folders: {
@@ -50,7 +51,14 @@ declare global {
         moveFile: (messageId: number, folderId: string) => Promise<{ success: boolean; error?: string }>
       }
       tgs: {
-        read: () => Promise<{ success: boolean; data?: any; error?: string }>
+        read: (name?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+      }
+      preview: {
+        open: (files: any[], idx: number) => Promise<{ success: boolean; error?: string }>
+        getSession: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
+        navigate: (sessionId: string, dir: number) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
+        load: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
+        close: (sessionId: string) => void
       }
     }
   }

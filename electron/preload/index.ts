@@ -57,7 +57,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   app: {
     copyToClipboard: (text: string) => ipcRenderer.invoke('app:copy-to-clipboard', text),
-    getVersion: () => ipcRenderer.invoke('app:get-version')
+    getVersion: () => ipcRenderer.invoke('app:get-version'),
+    log: (level: string, msg: string) => ipcRenderer.send('app:log', level, msg),
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }
@@ -72,6 +73,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     moveFile: (messageId: number, folderId: string) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
   },
   tgs: {
-    read: () => ipcRenderer.invoke('tgs:read'),
+    read: (name?: string) => ipcRenderer.invoke('tgs:read', name),
+  },
+  preview: {
+    open: (files: any[], idx: number) => ipcRenderer.invoke('preview:open', files, idx),
+    getSession: (sessionId: string) => ipcRenderer.invoke('preview:get-session', sessionId),
+    navigate: (sessionId: string, dir: number) => ipcRenderer.invoke('preview:navigate', sessionId, dir),
+    load: (sessionId: string) => ipcRenderer.invoke('preview:load', sessionId),
+    close: (id: string) => ipcRenderer.send('preview:close', id),
   }
 })
