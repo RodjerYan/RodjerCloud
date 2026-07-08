@@ -72,16 +72,18 @@ export default function UploadPage() {
   const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string } | null>(null)
 
   const pickFolder = async () => {
-    const r = await window.electronAPI.dialog.pickFolder()
+    const r = await window.electronAPI.dialog.pickFolderRecursive()
     if (!r.success || !r.data?.folderPath) return
     setArchiveInfo({ percent: 0, phase: 'compressing' })
     const off = window.electronAPI.folders.onArchiveProgress((d) => {
       setArchiveInfo({ percent: d.percent, phase: d.phase })
     })
-    const res = await window.electronAPI.folders.archiveAndUpload({ folderPath: r.data.folderPath })
+    let res: any
+    try { res = await window.electronAPI.folders.archiveAndUpload({ folderPath: r.data.folderPath }) }
+    catch (e) { res = { success: false, error: String(e) } }
     off()
     setArchiveInfo(null)
-    if (res.success && res.data) {
+    if (res?.success && res.data) {
       const archiveName = res.data.archiveName || (r.data.folderPath.split('/').pop() || 'folder') + '.zip'
       setQueue(prev => [...prev, {
         id: Math.random().toString(36).slice(2),
