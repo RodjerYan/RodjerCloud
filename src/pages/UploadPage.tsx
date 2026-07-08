@@ -31,7 +31,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     (async () => {
-      const r = await window.electronAPI.tgs.read('duck.tgs')
+      const r = await window.electronAPI.tgs.read('splash.tgs')
       if (r.success) setDuckAnim(r.data)
     })()
   }, [])

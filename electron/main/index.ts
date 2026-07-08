@@ -237,7 +237,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
 
     if (options.files && options.files.length > 0) {
       totalFiles = options.files.length
-      event.sender.send('archive-progress', { percent: 0, phase: 'downloading' })
+      try { event.sender.send('archive-progress', { percent: 0, phase: 'downloading' }) } catch {}
       for (let i = 0; i < options.files.length; i++) {
         const f = options.files[i]
         const r = await telegramService.downloadFile(f.messageId, f.fileName)
@@ -246,7 +246,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
           fs.copyFileSync(r.filePath, dest)
         }
         const p = Math.min(100, Math.floor(((i + 1) / options.files.length) * 100))
-        event.sender.send('archive-progress', { percent: p, phase: 'downloading' })
+        try { event.sender.send('archive-progress', { percent: p, phase: 'downloading' }) } catch {}
       }
     }
 
@@ -266,7 +266,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     }
 
     // Create archive
-    event.sender.send('archive-progress', { percent: 0, phase: 'compressing' })
+    try { event.sender.send('archive-progress', { percent: 0, phase: 'compressing' }) } catch {}
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(archivePath)
       const archive = new ZipArchive({ zlib: { level: 9 } })
@@ -279,7 +279,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
         archiveCount++
         if (totalFiles > 0) {
           const p = Math.min(99, Math.floor((archiveCount / totalFiles) * 100))
-          event.sender.send('archive-progress', { percent: p, phase: 'compressing' })
+          try { event.sender.send('archive-progress', { percent: p, phase: 'compressing' }) } catch {}
         }
       })
 
@@ -297,13 +297,13 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
       archive.finalize()
     })
 
-    event.sender.send('archive-progress', { percent: 0, phase: 'uploading' })
+    try { event.sender.send('archive-progress', { percent: 0, phase: 'uploading' }) } catch {}
 
     // Upload archive with progress
     const result = await telegramService.uploadFile(archivePath, (sent, total) => {
       const p = total > 0 ? Math.floor((sent / total) * 100) : 0
       if (p >= 0 && p <= 100) {
-        event.sender.send('archive-progress', { percent: p, phase: 'uploading' })
+        try { event.sender.send('archive-progress', { percent: p, phase: 'uploading' }) } catch {}
       }
     })
 

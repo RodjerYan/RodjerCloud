@@ -75,7 +75,7 @@ export default function MyFilesPage() {
   const [moveTarget, setMoveTarget] = useState<number[] | null>(null)
   const [duckAnim, setDuckAnim] = useState<any>(null)
 
-  useEffect(() => { window.electronAPI.tgs.read().then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
+  useEffect(() => { window.electronAPI.tgs.read('splash.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
   useEffect(() => {
     if (!preview) return
