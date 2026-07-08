@@ -528,7 +528,7 @@ export default function MyFilesPage() {
                                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                 <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                                <div className="mf-card-meta">{fmtSize(f.fileSize)}</div>
+                                <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
                                 <div className="mf-card-actions">
                                   <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                   <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
