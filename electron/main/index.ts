@@ -303,7 +303,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     const result = await telegramService.uploadFile(archivePath, (sent, total) => {
       const p = total > 0 ? Math.floor((sent / total) * 100) : 0
       if (p >= 0 && p <= 100) {
-        try { event.sender.send('archive-progress', { percent: p, phase: 'uploading' }) } catch {}
+        try { event.sender.send('archive-progress', { percent: p, phase: 'uploading', sent, total }) } catch {}
       }
     })
 

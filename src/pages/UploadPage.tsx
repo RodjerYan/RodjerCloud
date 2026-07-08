@@ -21,6 +21,12 @@ function fmtSize(n: number) {
 }
 const TG_LIMIT = 2 * 1024 * 1024 * 1024
 
+const ALL_STEPS = [
+  { key: 'downloading', label: 'Скачивание' },
+  { key: 'compressing', label: 'Архивация' },
+  { key: 'uploading', label: 'Загрузка' },
+]
+
 export default function UploadPage() {
   const location = useLocation() as any
   const [queue, setQueue] = useState<QueueItem[]>([])
@@ -31,7 +37,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     (async () => {
-      const r = await window.electronAPI.tgs.read('splash.tgs')
+      const r = await window.electronAPI.tgs.read('33.tgs')
       if (r.success) setDuckAnim(r.data)
     })()
   }, [])
@@ -78,20 +84,28 @@ export default function UploadPage() {
     const r = await window.electronAPI.dialog.pickMultipleFiles()
     if (r.success) addFiles(r.data)
   }
-  const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string } | null>(null)
+
+  const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string; sent?: number; total?: number } | null>(null)
   const [archivePhases, setArchivePhases] = useState<Set<string>>(new Set())
-  const [elapsed, setElapsed] = useState(0)
   const archiveStart = useRef(0)
+  const uploadStart = useRef(0)
 
   const pickFolder = async () => {
-    const r = await window.electronAPI.dialog.pickFolderRecursive()
+    const r = await window.electronAPI.dialog.pickFolder()
     if (!r.success || !r.data?.folderPath) return
     archiveStart.current = Date.now()
-    setElapsed(0)
+    uploadStart.current = 0
     setArchiveInfo({ percent: 0, phase: 'compressing' })
     setArchivePhases(new Set(['compressing']))
+    await new Promise(r => setTimeout(r, 0))
+
     const off = window.electronAPI.folders.onArchiveProgress((d) => {
-      setArchiveInfo({ percent: d.percent, phase: d.phase })
+      setArchiveInfo(prev => {
+        const next = { percent: d.percent, phase: d.phase }
+        if (d.sent !== undefined) { (next as any).sent = d.sent; (next as any).total = d.total }
+        if (d.phase === 'uploading' && prev?.phase !== 'uploading') uploadStart.current = Date.now()
+        return next
+      })
       setArchivePhases(prev => new Set(prev).add(d.phase))
     })
     let res: any
@@ -115,13 +129,6 @@ export default function UploadPage() {
   const removeItem = (id: string) => setQueue(prev => prev.filter(q => q.id !== id))
   const clearDone = () => setQueue(prev => prev.filter(q => q.status !== 'done'))
 
-  useEffect(() => {
-    if (!archiveInfo) return
-    archiveStart.current = archiveStart.current || Date.now()
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - archiveStart.current) / 1000)), 1000)
-    return () => clearInterval(t)
-  }, [archiveInfo])
-
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     const dropped: any[] = []
@@ -134,6 +141,59 @@ export default function UploadPage() {
 
   const doneCount = queue.filter(q => q.status === 'done').length
   const failedCount = queue.filter(q => q.status === 'failed').length
+
+  const fmtTime = (sec: number) =>
+    sec < 60 ? `${sec}с` : `${Math.floor(sec / 60)}м ${sec % 60}с`
+  const fmtBytes = (b: number) =>
+    b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`
+
+  const renderArchiveProgress = () => {
+    if (!archiveInfo) return null
+    const currentIdx = ALL_STEPS.findIndex(s => s.key === archiveInfo.phase)
+    const visibleSteps = ALL_STEPS.slice(Math.min(currentIdx, 1))
+    const now = Date.now()
+    const phaseStart = archiveInfo.phase === 'uploading' && uploadStart.current ? uploadStart.current : archiveStart.current
+    const elapsedSec = Math.floor((now - phaseStart) / 1000)
+    const etaSec = (archiveInfo.sent !== undefined && archiveInfo.total && elapsedSec > 0)
+      ? Math.round((archiveInfo.total - archiveInfo.sent) / (archiveInfo.sent / elapsedSec))
+      : 0
+    return (
+      <div className="up-archive">
+        <div className="up-archive-steps">
+          {visibleSteps.map((s, i) => (
+            <React.Fragment key={s.key}>
+              {i > 0 && <div className={'up-archive-step-line' + (archivePhases.has(s.key) || archiveInfo.phase === s.key ? ' done' : '')} />}
+              <div className={'up-archive-step' + (archiveInfo.phase === s.key ? ' active' : archivePhases.has(s.key) ? ' done' : '')}>
+                <span className="up-archive-step-dot" /> {s.label}
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+        <Archive size={28} style={{ color: '#7c83ff' }} />
+        <div className="up-archive-bar">
+          <div className="up-bar">
+            <div className="up-bar-fill up-archive-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-mute)', marginTop: 4 }}>
+            <span>{archiveInfo.percent}%</span>
+            <span>
+              {archiveInfo.sent !== undefined && archiveInfo.total
+                ? `${fmtBytes(archiveInfo.sent)} / ${fmtBytes(archiveInfo.total)}`
+                : fmtBytes(0)}
+            </span>
+            <span className="up-archive-time">
+              {etaSec > 0 ? `~${fmtTime(etaSec)}` : fmtTime(elapsedSec)}
+            </span>
+          </div>
+        </div>
+        {duckAnim ? (
+          <Player autoplay loop src={duckAnim} style={{ width: 90, height: 90 }} />
+        ) : (
+          <div style={{ width: 90, height: 90, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🐤</div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="up-root">
@@ -159,45 +219,7 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {archiveInfo && (() => {
-        const allSteps = [
-          { key: 'downloading', label: 'Скачивание' },
-          { key: 'compressing', label: 'Архивация' },
-          { key: 'uploading', label: 'Загрузка' },
-        ]
-        const currentIdx = allSteps.findIndex(s => s.key === archiveInfo.phase)
-        const visibleSteps = allSteps.slice(Math.min(currentIdx, 1))
-        return (
-        <div className="up-archive">
-          <div className="up-archive-steps">
-            {visibleSteps.map((s, i) => (
-              <React.Fragment key={s.key}>
-                {i > 0 && <div className={'up-archive-step-line' + (archivePhases.has(s.key) || archiveInfo.phase === s.key ? ' done' : '')} />}
-                <div className={'up-archive-step' + (archiveInfo.phase === s.key ? ' active' : archivePhases.has(s.key) ? ' done' : '')}>
-                  <span className="up-archive-step-dot" /> {s.label}
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-          <Archive size={28} style={{ color: '#7c83ff' }} />
-          <div className="up-archive-bar">
-            <div className="up-bar">
-              <div className="up-bar-fill up-archive-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-mute)' }}>
-              <span>{archiveInfo.percent}%</span>
-              <span className="up-archive-time">
-                {elapsed < 60 ? `${elapsed}с` : `${Math.floor(elapsed / 60)}м ${elapsed % 60}с`}
-              </span>
-            </div>
-          </div>
-          {duckAnim ? (
-            <Player autoplay loop src={duckAnim} style={{ width: 90, height: 90 }} />
-          ) : (
-            <div style={{ width: 90, height: 90, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🐤</div>
-          )}
-        </div>
-      )})()}
+      {renderArchiveProgress()}
 
       {queue.length > 0 && archiveInfo === null && (
         <div className="up-queue">

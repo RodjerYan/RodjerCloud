@@ -52,7 +52,7 @@ declare global {
         moveFile: (messageId: number, folderId: string) => Promise<{ success: boolean; error?: string }>
         archiveAndUpload: (opts: { folderPath?: string; folderName?: string; files?: Array<{ messageId: number; fileName: string }> }) =>
           Promise<{ success: boolean; data?: any; error?: string }>
-        onArchiveProgress: (cb: (data: { percent: number; phase: string; fileName?: string }) => void) => () => void
+        onArchiveProgress: (cb: (data: { percent: number; phase: string; fileName?: string; sent?: number; total?: number }) => void) => () => void
       }
       tgs: {
         read: (name?: string) => Promise<{ success: boolean; data?: any; error?: string }>
