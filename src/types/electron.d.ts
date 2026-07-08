@@ -43,6 +43,7 @@ declare global {
       getPathForFile: (file: File) => string
       folders: {
         list: () => Promise<{ success: boolean; data?: { folders: any[]; fileFolders: Record<number, string> }; error?: string }>
+        loadFromTelegram: () => Promise<{ success: boolean; data?: { folders: any[]; fileFolders: Record<number, string> }; error?: string }>
         create: (name: string) => Promise<{ success: boolean; error?: string }>
         rename: (id: string, name: string) => Promise<{ success: boolean; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>

@@ -380,6 +380,41 @@ export class TelegramService {
     return cachePath
   }
 
+  private folderSyncId: number | null = null
+
+  async syncFolders(data: { folders: any[]; fileFolders: Record<string, string> }) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const prefix = '__rf__'
+    const payload = prefix + JSON.stringify(data)
+
+    if (this.folderSyncId) {
+      try {
+        await this.client.editMessage(this.channelId as any, { ids: [this.folderSyncId], message: payload } as any)
+        return
+      } catch {}
+    }
+
+    const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+    const existing = msgs.find((m: any) => m.message?.startsWith?.(prefix))
+    if (existing) {
+      this.folderSyncId = typeof existing.id === 'object' ? Number(existing.id.toString()) : existing.id
+      await this.client.editMessage(this.channelId as any, { ids: [this.folderSyncId], message: payload } as any)
+      return
+    }
+
+    const sent: any = await this.client.sendMessage(this.channelId as any, { message: payload } as any)
+    this.folderSyncId = typeof sent.id === 'object' ? Number(sent.id.toString()) : sent.id
+  }
+
+  async loadFoldersFromChannel(): Promise<{ folders: any[]; fileFolders: Record<string, string> } | null> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+    const sync = msgs.find((m: any) => m.message?.startsWith?.('__rf__'))
+    if (!sync) return null
+    this.folderSyncId = typeof sync.id === 'object' ? Number(sync.id.toString()) : sync.id
+    try { return JSON.parse(sync.message.slice(6)) } catch { return null }
+  }
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes'
     const k = 1024

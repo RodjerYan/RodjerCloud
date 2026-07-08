@@ -89,7 +89,7 @@ export default function MyFilesPage() {
   }, [preview])
 
   const loadFolders = async () => {
-    const r = await window.electronAPI.folders.list()
+    const r = await window.electronAPI.folders.loadFromTelegram()
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
   }
 

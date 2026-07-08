@@ -410,9 +410,31 @@ function foldersPath(): string {
 function readFolders(): any { try { if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {} }; return JSON.parse(fs.readFileSync(foldersPath(), 'utf8')) } catch { return { folders: [], fileFolders: {} } } }
 function writeFolders(d: any) { fs.writeFileSync(foldersPath(), JSON.stringify(d, null, 2)) }
 
+function syncFoldersToTelegram() {
+  try {
+    const d = readFolders()
+    telegramService.syncFolders(d).catch(() => {})
+  } catch {}
+}
+
 ipcMain.handle('folders:list', async () => {
   try { const d = readFolders(); return { success: true, data: d } }
   catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:load-from-telegram', async () => {
+  try {
+    const data = await telegramService.loadFoldersFromChannel()
+    if (data) {
+      if (data.folders && data.fileFolders) writeFolders(data)
+      return { success: true, data }
+    }
+    const local = readFolders()
+    if (local.folders.length > 0 || Object.keys(local.fileFolders).length > 0) {
+      telegramService.syncFolders(local).catch(() => {})
+    }
+    return { success: true, data: local }
+  } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:create', async (_, name: string) => {
@@ -421,6 +443,7 @@ ipcMain.handle('folders:create', async (_, name: string) => {
     const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
     d.folders.push({ id, name, createdAt: Math.floor(Date.now() / 1000) })
     writeFolders(d)
+    syncFoldersToTelegram()
     return { success: true, data: { id, name } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -429,6 +452,7 @@ ipcMain.handle('folders:rename', async (_, id: string, name: string) => {
   try {
     const d = readFolders(); const f = d.folders.find((x: any) => x.id === id)
     if (!f) throw new Error('Folder not found'); f.name = name; writeFolders(d)
+    syncFoldersToTelegram()
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -437,25 +461,33 @@ ipcMain.handle('folders:delete', async (_, id: string) => {
   try {
     const d = readFolders(); d.folders = d.folders.filter((x: any) => x.id !== id)
     Object.keys(d.fileFolders).forEach(k => { if (d.fileFolders[k] === id) delete d.fileFolders[k] })
-    writeFolders(d); return { success: true }
+    writeFolders(d)
+    syncFoldersToTelegram()
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:add-file', async (_, folderId: string, messageId: number) => {
   try {
-    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d); return { success: true }
+    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d)
+    syncFoldersToTelegram()
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:remove-file', async (_, messageId: number) => {
   try {
-    const d = readFolders(); delete d.fileFolders[messageId]; writeFolders(d); return { success: true }
+    const d = readFolders(); delete d.fileFolders[messageId]; writeFolders(d)
+    syncFoldersToTelegram()
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string) => {
   try {
-    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d); return { success: true }
+    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d)
+    syncFoldersToTelegram()
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

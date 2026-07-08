@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   folders: {
     list: () => ipcRenderer.invoke('folders:list'),
+    loadFromTelegram: () => ipcRenderer.invoke('folders:load-from-telegram'),
     create: (name: string) => ipcRenderer.invoke('folders:create', name),
     rename: (id: string, name: string) => ipcRenderer.invoke('folders:rename', id, name),
     delete: (id: string) => ipcRenderer.invoke('folders:delete', id),
