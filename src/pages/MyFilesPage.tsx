@@ -288,12 +288,15 @@ export default function MyFilesPage() {
   }
 
   const [archiveProgress, setArchiveProgress] = useState<{ percent: number; phase: string } | null>(null)
+  const [archiveDonePhases, setArchiveDonePhases] = useState<Set<string>>(new Set())
 
   const handleArchive = async (catOrFolder: string, files: any[]) => {
     if (files.length === 0) return
     setArchiveProgress({ percent: 0, phase: 'downloading' })
+    setArchiveDonePhases(new Set())
     const off = window.electronAPI.folders.onArchiveProgress((d) => {
       setArchiveProgress({ percent: d.percent, phase: d.phase })
+      setArchiveDonePhases(prev => new Set(prev).add(d.phase))
     })
     const res = await window.electronAPI.folders.archiveAndUpload({
       folderName: catOrFolder,
@@ -674,13 +677,17 @@ export default function MyFilesPage() {
 
       {toast && <div className="mf-toast">{toast}</div>}
       {archiveProgress && (
-        <div className="mf-toast" style={{ bottom: 60, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Archive size={14} />
-          <span>{archiveProgress.phase === 'downloading' ? 'Скачивание...' : archiveProgress.phase === 'compressing' ? 'Архивация...' : 'Загрузка...'}</span>
-          <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2 }}>
-            <div style={{ width: archiveProgress.percent + '%', height: '100%', background: '#7c83ff', borderRadius: 2 }} />
+        <div className="mf-toast" style={{ bottom: 60, display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 16px', minWidth: 260 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <Archive size={14} style={{ color: '#7c83ff' }} />
+            <span style={{ fontWeight: 600, color: '#fff' }}>
+              {archiveProgress.phase === 'downloading' ? 'Скачивание файлов' : archiveProgress.phase === 'compressing' ? 'Архивация' : 'Загрузка архива'}
+            </span>
+            <span style={{ marginLeft: 'auto', color: 'var(--v3-text-dim)', fontSize: 11 }}>{archiveProgress.percent}%</span>
           </div>
-          <span style={{ fontSize: 10 }}>{archiveProgress.percent}%</span>
+          <div className="up-bar" style={{ height: 4 }}>
+            <div className="up-bar-fill" style={{ width: archiveProgress.percent + '%', background: '#7c83ff', transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)' }} />
+          </div>
         </div>
       )}
     </div>

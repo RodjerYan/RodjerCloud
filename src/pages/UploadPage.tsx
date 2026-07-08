@@ -79,13 +79,20 @@ export default function UploadPage() {
     if (r.success) addFiles(r.data)
   }
   const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string } | null>(null)
+  const [archivePhases, setArchivePhases] = useState<Set<string>>(new Set())
+  const [elapsed, setElapsed] = useState(0)
+  const archiveStart = useRef(0)
 
   const pickFolder = async () => {
     const r = await window.electronAPI.dialog.pickFolderRecursive()
     if (!r.success || !r.data?.folderPath) return
+    archiveStart.current = Date.now()
+    setElapsed(0)
     setArchiveInfo({ percent: 0, phase: 'compressing' })
+    setArchivePhases(new Set(['compressing']))
     const off = window.electronAPI.folders.onArchiveProgress((d) => {
       setArchiveInfo({ percent: d.percent, phase: d.phase })
+      setArchivePhases(prev => new Set(prev).add(d.phase))
     })
     let res: any
     try { res = await window.electronAPI.folders.archiveAndUpload({ folderPath: r.data.folderPath }) }
@@ -107,6 +114,13 @@ export default function UploadPage() {
 
   const removeItem = (id: string) => setQueue(prev => prev.filter(q => q.id !== id))
   const clearDone = () => setQueue(prev => prev.filter(q => q.status !== 'done'))
+
+  useEffect(() => {
+    if (!archiveInfo) return
+    archiveStart.current = archiveStart.current || Date.now()
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - archiveStart.current) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [archiveInfo])
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
@@ -145,23 +159,45 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {archiveInfo && (
-        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <Archive size={32} style={{ color: '#7c83ff' }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>
-            {archiveInfo.phase === 'compressing' ? 'Архивация...' : archiveInfo.phase === 'uploading' ? 'Загрузка архива...' : archiveInfo.phase === 'downloading' ? 'Скачивание файлов...' : 'Обработка...'}
+      {archiveInfo && (() => {
+        const allSteps = [
+          { key: 'downloading', label: 'Скачивание' },
+          { key: 'compressing', label: 'Архивация' },
+          { key: 'uploading', label: 'Загрузка' },
+        ]
+        const currentIdx = allSteps.findIndex(s => s.key === archiveInfo.phase)
+        const visibleSteps = allSteps.slice(Math.min(currentIdx, 1))
+        return (
+        <div className="up-archive">
+          <div className="up-archive-steps">
+            {visibleSteps.map((s, i) => (
+              <React.Fragment key={s.key}>
+                {i > 0 && <div className={'up-archive-step-line' + (archivePhases.has(s.key) || archiveInfo.phase === s.key ? ' done' : '')} />}
+                <div className={'up-archive-step' + (archiveInfo.phase === s.key ? ' active' : archivePhases.has(s.key) ? ' done' : '')}>
+                  <span className="up-archive-step-dot" /> {s.label}
+                </div>
+              </React.Fragment>
+            ))}
           </div>
-          <div className="up-bar" style={{ width: '100%', maxWidth: 400 }}>
-            <div className="up-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
+          <Archive size={28} style={{ color: '#7c83ff' }} />
+          <div className="up-archive-bar">
+            <div className="up-bar">
+              <div className="up-bar-fill up-archive-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-mute)' }}>
+              <span>{archiveInfo.percent}%</span>
+              <span className="up-archive-time">
+                {elapsed < 60 ? `${elapsed}с` : `${Math.floor(elapsed / 60)}м ${elapsed % 60}с`}
+              </span>
+            </div>
           </div>
-          <span style={{ fontSize: 11, color: 'var(--v3-text-dim)' }}>{archiveInfo.percent}%</span>
           {duckAnim ? (
-            <Player autoplay loop src={duckAnim} style={{ width: 100, height: 100, marginTop: 8 }} />
+            <Player autoplay loop src={duckAnim} style={{ width: 90, height: 90 }} />
           ) : (
-            <div style={{ width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, marginTop: 8 }}>🐤</div>
+            <div style={{ width: 90, height: 90, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🐤</div>
           )}
         </div>
-      )}
+      )})()}
 
       {queue.length > 0 && archiveInfo === null && (
         <div className="up-queue">
