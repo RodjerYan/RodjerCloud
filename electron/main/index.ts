@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import * as zlib from 'zlib'
 import * as pathMod from 'path'
 import path from 'path'
-import * as archiver from 'archiver'
+import { Archiver as ArchiverClass } from 'archiver'
 import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
@@ -273,7 +273,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     event.sender.send('archive-progress', { percent: 0, phase: 'compressing', fileName: '' })
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(archivePath)
-      const archive = archiver.create('zip', { zlib: { level: 9 } })
+      const archive = new ArchiverClass('zip', { zlib: { level: 9 } })
 
       output.on('close', () => resolve())
       archive.on('error', (err) => reject(err))
