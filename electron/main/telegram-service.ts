@@ -415,6 +415,37 @@ export class TelegramService {
     try { return JSON.parse(sync.message.slice(6)) } catch { return null }
   }
 
+  async getUserInfo(): Promise<{ firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }> {
+    if (!this.client) throw new Error('Client not initialized')
+    const me = await this.client.getMe() as any
+    const info: any = { firstName: me.firstName || '', lastName: me.lastName, username: me.username }
+
+    if (me.photo) {
+      const cacheDir = path.join(app.getPath('userData'), 'profile-cache')
+      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+      const tmpPath = path.join(cacheDir, 'avatar_tmp')
+      try {
+        await this.client.downloadProfilePhoto(me, { outputFile: tmpPath } as any)
+        if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
+          const buf = Buffer.alloc(8)
+          const fd = fs.openSync(tmpPath, 'r')
+          fs.readSync(fd, buf, 0, 8, 0)
+          fs.closeSync(fd)
+          const isMp4 = buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70
+          const ext = isMp4 ? '.mp4' : '.jpg'
+          const cachePath = path.join(cacheDir, `avatar${ext}`)
+          fs.renameSync(tmpPath, cachePath)
+          info.photoPath = cachePath
+          info.isVideo = isMp4
+        }
+      } catch (e) {
+        try { fs.rmSync(tmpPath, { force: true }) } catch {}
+      }
+    }
+
+    return info
+  }
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes'
     const k = 1024

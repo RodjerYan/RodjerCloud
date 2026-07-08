@@ -161,6 +161,13 @@ ipcMain.handle('telegram:reconnect', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:get-user-info', async () => {
+  try {
+    const info = await telegramService.getUserInfo()
+    return { success: true, data: info }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 // ===== Upload queue =====
 interface UploadJob { id: string; filePath: string; event: any }
 const uploadQueue: UploadJob[] = []

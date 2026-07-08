@@ -2,9 +2,9 @@ import React from "react"
 import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, BarChart3, Settings, Info,
   LogOut, Trash2, Star, Link2, Activity, Tag, Search, CalendarDays, Image as ImgIcon,
-  StickyNote, Wifi, Command, HelpCircle, Stethoscope, Headphones } from "lucide-react"
+  StickyNote, Wifi, Command, HelpCircle, Stethoscope, Headphones, Cloud } from "lucide-react"
 
-interface Props { channelInfo: any; onLogout: () => void }
+interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void }
 
 const items = [
   { to: "/", label: "Главная", icon: Home, end: true },
@@ -29,10 +29,29 @@ const items = [
   { to: "/about", label: "О программе", icon: Info }
 ]
 
-export default function Sidebar({ channelInfo, onLogout }: Props) {
+export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
+  const avatarSrc = userInfo?.photoPath ? 'file://' + userInfo.photoPath : null
   return (
     <aside className="v2-sidebar" data-testid="v3-sidebar">
-      <div className="v2-sidebar-head" style={{ minHeight: 40 }}></div>
+      <div className="v2-sidebar-profile">
+        {avatarSrc ? (userInfo?.isVideo ? (
+          <video className="v2-sidebar-avatar" src={avatarSrc} autoPlay loop muted playsInline />
+        ) : (
+          <img className="v2-sidebar-avatar" src={avatarSrc} alt="" />
+        )) : (
+          <div className="v2-sidebar-avatar v2-sidebar-avatar-fallback">
+            <Cloud size={20} />
+          </div>
+        )}
+        <div className="v2-sidebar-profile-info">
+          <div className="v2-sidebar-profile-name">
+            {userInfo?.firstName || channelInfo?.title || 'Аккаунт'}
+          </div>
+          <div className="v2-sidebar-profile-sub">
+            {userInfo ? 'В сети' : 'Подключено'}
+          </div>
+        </div>
+      </div>
       <nav className="v2-sidebar-nav">
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}

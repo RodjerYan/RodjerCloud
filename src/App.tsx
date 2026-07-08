@@ -49,6 +49,14 @@ function App() {
   const [showSplash, setShowSplash] = useState(true)
   const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
+  const [userInfo, setUserInfo] = useState<{ firstName: string; lastName?: string; username?: string; photoPath?: string } | null>(null)
+
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const r = await window.electronAPI.telegram.getUserInfo()
+      if (r.success && r.data) setUserInfo(r.data)
+    } catch {}
+  }, [])
 
   const handleDuckDone = useCallback(() => setShowDuckSplash(false), [])
 
@@ -70,6 +78,7 @@ function App() {
         const reconnectResult = await window.electronAPI.telegram.reconnect()
         if (reconnectResult.success) {
           setIsAuthenticated(true); setChannelInfo(reconnectResult.data)
+          fetchUserInfo()
           setShowDuckSplash(true)
           v3store.logActivity("login", "Reconnected to Telegram channel")
         }
@@ -80,6 +89,7 @@ function App() {
 
   const handleLoginSuccess = (channelData: any) => {
     setIsAuthenticated(true); setChannelInfo(channelData)
+    fetchUserInfo()
     setShowDuckSplash(true)
     v3store.logActivity("login", "Login successful")
   }
@@ -101,12 +111,12 @@ function App() {
     <ErrorBoundary>
     <MemoryRouter initialEntries={["/"]}>
       <div className="v2-shell">
-        <Sidebar channelInfo={channelInfo} onLogout={handleLogout} />
+        <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
         <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
           <AggregateProgress />
           <Routes>
-            <Route path="/" element={<DashboardHome channelInfo={channelInfo} />} />
+            <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
             <Route path="/files" element={<MyFilesPage />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/autosync" element={<AutoSyncPage />} />

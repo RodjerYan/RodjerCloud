@@ -19,6 +19,7 @@ declare global {
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>
+        getUserInfo: () => Promise<{ success: boolean; data?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }; error?: string }>
       }
       dialog: {
         pickFile: () => Promise<{ success: boolean; data?: { filePath: string; fileName: string; fileSize: number }; error?: string }>

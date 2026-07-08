@@ -20,7 +20,15 @@ function typeOf(name: string): string {
   return 'Другое'
 }
 
-export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
+function timeGreeting(): string {
+  const h = new Date().getHours()
+  if (h >= 6 && h < 12) return 'Доброе утро'
+  if (h >= 12 && h < 18) return 'Добрый день'
+  if (h >= 18 && h < 24) return 'Добрый вечер'
+  return 'Доброй ночи'
+}
+
+export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: any; userInfo?: { firstName?: string } | null }) {
   const navigate = useNavigate()
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,7 +44,7 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
   const total = files.length
   const totalSize = files.reduce((s, f) => s + (f.fileSize || 0), 0)
   const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600
-  const weekFiles = files.filter(f => (f.date || 0) >= oneWeekAgo).length
+  const weekFiles = files.filter(f => (f.uploadedAt || 0) >= oneWeekAgo).length
   const avgSize = total ? totalSize / total : 0
 
   const typeMap: Record<string, number> = {}
@@ -45,7 +53,7 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
   files.forEach(f => { const t = typeOf(f.fileName || ''); typeMap[t] = (typeMap[t] || 0) + 1 })
   const chartData = CATS.filter(c => typeMap[c] > 0).map(name => ({ name, value: typeMap[name] }))
 
-  const recent = [...files].sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 5)
+  const recent = [...files].sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0)).slice(0, 5)
 
   const onQuickUpload = async () => {
     const r = await window.electronAPI.dialog.pickMultipleFiles()
@@ -56,7 +64,7 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
     <div className="dh-root">
       <div className="dh-banner">
         <div>
-          <h1>Добро пожаловать в RodjerCloud</h1>
+          <h1>{timeGreeting()}{userInfo?.firstName ? `, ${userInfo.firstName}` : ''}</h1>
           <p>{channelInfo?.title ? `Подключено к ${channelInfo.title}` : 'Ваше приватное облако в Telegram'}</p>
         </div>
         <button className="dh-cta" onClick={() => navigate('/upload')}>
@@ -110,7 +118,7 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
               {recent.map(f => (
                 <li key={f.messageId}>
                   <div className="dh-recent-name" title={f.fileName}>{f.fileName}</div>
-                  <div className="dh-recent-meta">{fmtSize(f.fileSize)} • {new Date((f.date || 0) * 1000).toLocaleDateString()}</div>
+                  <div className="dh-recent-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
                 </li>
               ))}
             </ul>

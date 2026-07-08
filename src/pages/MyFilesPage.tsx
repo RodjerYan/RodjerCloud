@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil } from 'lucide-react'
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2 } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 
 const SIX_HOURS = 21600
@@ -74,8 +75,10 @@ export default function MyFilesPage() {
   const [newFolderName, setNewFolderName] = useState('')
   const [moveTarget, setMoveTarget] = useState<number[] | null>(null)
   const [duckAnim, setDuckAnim] = useState<any>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
+  const closeCtx = useCallback(() => setCtxMenu(null), [])
 
-  useEffect(() => { window.electronAPI.tgs.read('33.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
+  useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
   useEffect(() => {
     if (!preview) return
@@ -250,6 +253,34 @@ export default function MyFilesPage() {
     const items = list || filtered
     window.electronAPI.preview.open(items, items.indexOf(f))
   }
+  useEffect(() => {
+    const onMousedown = (e: MouseEvent) => {
+      if (e.button !== 2) return
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
+      if (!el) return
+      const mid = Number(el.dataset.mid)
+      const f = files.find(x => x.messageId === mid)
+      if (f) setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
+    }
+    const onContext = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('[data-mid]')) e.preventDefault()
+    }
+    document.addEventListener('mousedown', onMousedown)
+    document.addEventListener('contextmenu', onContext)
+    return () => {
+      document.removeEventListener('mousedown', onMousedown)
+      document.removeEventListener('contextmenu', onContext)
+    }
+  }, [files])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
+  }, [ctxMenu])
+
   const navPreview = (dir: number) => {
     if (!preview) return
     const all = preview.list.filter((f: any) => {
@@ -363,7 +394,7 @@ export default function MyFilesPage() {
                 </tr></thead>
                 <tbody>
                   {galleryFiles.map(f => (
-                    <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                    <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                       <td className="ellip" title={f.fileName}>{f.fileName}</td>
                       <td>{fmtSize(f.fileSize)}</td>
@@ -390,7 +421,7 @@ export default function MyFilesPage() {
                           const thumbUrl = thumbs[f.messageId]
                           const isVideo = drillDown === 'Видео'
                           return (
-                            <div key={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                            <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-gm-icon" data-type={drillDown}>
@@ -448,7 +479,7 @@ export default function MyFilesPage() {
                     view === 'grid' ? (
                       <div className="mf-grid">
                         {items.map((f, i) => (
-                          <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                          <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
@@ -472,7 +503,7 @@ export default function MyFilesPage() {
                         </tr></thead>
                         <tbody>
                           {items.map((f, i) => (
-                            <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                            <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                               <td className="ellip" title={f.fileName}>{f.fileName}</td>
@@ -552,7 +583,8 @@ export default function MyFilesPage() {
                         view === 'grid' ? (
                           <div className="mf-grid">
                             {ffiles.map(f => (
-                              <div key={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                              <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                >
                                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                 <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
@@ -570,7 +602,7 @@ export default function MyFilesPage() {
                             <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
                             <tbody>
                               {ffiles.map(f => (
-                                <tr key={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                                 <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                                   <td>{fmtSize(f.fileSize)}</td>
                                   <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
@@ -689,6 +721,33 @@ export default function MyFilesPage() {
             <div className="up-bar-fill" style={{ width: archiveProgress.percent + '%', background: '#7c83ff', transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)' }} />
           </div>
         </div>
+      )}
+
+      {ctxMenu && createPortal(
+        <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+          <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {selected.has(ctxMenu.file.messageId)
+                ? <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>
+                : <circle cx="12" cy="12" r="10"/>}
+            </svg>
+            Выбрать
+          </button>
+          <button onClick={() => { handleCopyLink(ctxMenu.file); closeCtx() }}>
+            <Share2 size={14} /> Поделиться
+          </button>
+          <button onClick={() => { handleDownload(ctxMenu.file); closeCtx() }}>
+            <Download size={14} /> Скачать
+          </button>
+          <button onClick={() => { moveFileToFolder(ctxMenu.file.messageId); closeCtx() }}>
+            <MoveRight size={14} /> Переместить
+          </button>
+          <div className="mf-ctx-divider" />
+          <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
+            <Trash2 size={14} /> Удалить
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   )

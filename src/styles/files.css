@@ -138,6 +138,31 @@ body.compact .mf-card-icon { height: 60px; }
 .mf-gm-actions button:hover { color: var(--text); border-color: var(--border-strong); }
 .mf-gm-actions button.danger:hover { color: var(--err); border-color: rgba(255,107,122,0.4); }
 .mf-gm-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.mf-ctx {
+  position: fixed; z-index: 9999; min-width: 200px; max-width: 260px;
+  background: rgba(22, 24, 42, 0.92); backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 6px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
+  display: flex; flex-direction: column; gap: 1px;
+  transform-origin: top left;
+  animation: mf-ctx-in 0.12s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes mf-ctx-in {
+  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.mf-ctx button {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: transparent; border: none; color: rgba(226, 228, 240, 0.85); font-size: 13px;
+  border-radius: 10px; cursor: pointer; width: 100%; text-align: left;
+  transition: background 0.1s; font-family: inherit;
+}
+.mf-ctx button:hover { background: rgba(124, 131, 255, 0.14); color: #e2e4f0; }
+.mf-ctx button svg { flex-shrink: 0; opacity: 0.6; }
+.mf-ctx button:hover svg { opacity: 0.9; }
+.mf-ctx button.danger:hover { background: rgba(239, 68, 68, 0.14); color: #f87171; }
+.mf-ctx button.danger:hover svg { opacity: 0.9; }
+.mf-ctx-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 4px 8px; }
 .mf-gm-play {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,0.3); color: #fff; border-radius: 8px;
