@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive } from 'lucide-react'
 
 interface QueueItem {
   id: string
@@ -69,10 +69,31 @@ export default function UploadPage() {
     const r = await window.electronAPI.dialog.pickMultipleFiles()
     if (r.success) addFiles(r.data)
   }
+  const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string } | null>(null)
+
   const pickFolder = async () => {
-    const r = await window.electronAPI.dialog.pickFolderRecursive()
-    if (r.success) addFiles(r.data.files)
+    const r = await window.electronAPI.dialog.pickFolder()
+    if (!r.success || !r.data?.folderPath) return
+    setArchiveInfo({ percent: 0, phase: 'compressing' })
+    const off = window.electronAPI.folders.onArchiveProgress((d) => {
+      setArchiveInfo({ percent: d.percent, phase: d.phase })
+    })
+    const res = await window.electronAPI.folders.archiveAndUpload({ folderPath: r.data.folderPath })
+    off()
+    setArchiveInfo(null)
+    if (res.success && res.data) {
+      const archiveName = res.data.archiveName || (r.data.folderPath.split('/').pop() || 'folder') + '.zip'
+      setQueue(prev => [...prev, {
+        id: Math.random().toString(36).slice(2),
+        filePath: '',
+        fileName: archiveName,
+        fileSize: res.data.fileSize || 0,
+        status: 'done' as const,
+        percent: 100,
+      }])
+    }
   }
+
   const removeItem = (id: string) => setQueue(prev => prev.filter(q => q.id !== id))
   const clearDone = () => setQueue(prev => prev.filter(q => q.status !== 'done'))
 
@@ -113,7 +134,20 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {queue.length > 0 && (
+      {archiveInfo && (
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <Archive size={32} style={{ color: '#7c83ff' }} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>
+            {archiveInfo.phase === 'compressing' ? 'Архивация...' : archiveInfo.phase === 'uploading' ? 'Загрузка архива...' : archiveInfo.phase === 'downloading' ? 'Скачивание файлов...' : 'Обработка...'}
+          </div>
+          <div className="up-bar" style={{ width: '100%', maxWidth: 400 }}>
+            <div className="up-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--v3-text-dim)' }}>{archiveInfo.percent}%</span>
+        </div>
+      )}
+
+      {queue.length > 0 && archiveInfo === null && (
         <div className="up-queue">
           <div className="up-queue-head">
             <h2>Очередь загрузки</h2>

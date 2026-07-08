@@ -72,6 +72,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
     removeFile: (messageId: number) => ipcRenderer.invoke('folders:remove-file', messageId),
     moveFile: (messageId: number, folderId: string) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
+    archiveAndUpload: (opts: { folderPath?: string; folderName?: string; files?: Array<{ messageId: number; fileName: string }> }) =>
+      ipcRenderer.invoke('folder:archive-and-upload', opts),
+    onArchiveProgress: (cb: (data: { percent: number; phase: string; fileName?: string }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('archive-progress', listener)
+      return () => ipcRenderer.removeListener('archive-progress', listener)
+    },
   },
   tgs: {
     read: (name?: string) => ipcRenderer.invoke('tgs:read', name),

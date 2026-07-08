@@ -287,6 +287,23 @@ export default function MyFilesPage() {
     showToast('Скачивание завершено')
   }
 
+  const [archiveProgress, setArchiveProgress] = useState<{ percent: number; phase: string } | null>(null)
+
+  const handleArchive = async (catOrFolder: string, files: any[]) => {
+    if (files.length === 0) return
+    setArchiveProgress({ percent: 0, phase: 'downloading' })
+    const off = window.electronAPI.folders.onArchiveProgress((d) => {
+      setArchiveProgress({ percent: d.percent, phase: d.phase })
+    })
+    const res = await window.electronAPI.folders.archiveAndUpload({
+      folderName: catOrFolder,
+      files: files.map(f => ({ messageId: f.messageId, fileName: f.fileName })),
+    })
+    off()
+    setArchiveProgress(null)
+    showToast(res.success ? `Архив ${catOrFolder}.zip загружен` : 'Ошибка архивации: ' + (res.error || ''))
+  }
+
   const toggleCategory = (cat: string) => {
     if (cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио') {
       setDrillDown(cat)
@@ -417,6 +434,10 @@ export default function MyFilesPage() {
                   <span className="mf-section-icon">{CAT_ICON[cat]}</span>
                   <span className="mf-section-title">{cat}</span>
                   <span className="mf-section-count">{items.length}</span>
+                  {items.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginLeft: 4 }}
+                    onClick={(e) => { e.stopPropagation(); handleArchive(cat, items) }} title="Архивировать и загрузить">
+                    <Archive size={12} />
+                  </button>}
                   {isDrillable && <span className="mf-section-drill">Открыть →</span>}
                 </div>
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
@@ -498,6 +519,10 @@ export default function MyFilesPage() {
                       <Folder size={16} style={{ color: '#7c83ff' }} />
                       <span className="mf-section-title">{fld.name}</span>
                       <span className="mf-section-count">{ffiles.length}</span>
+                      {ffiles.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginRight: 4 }}
+                        onClick={(e) => { e.stopPropagation(); handleArchive(fld.name, ffiles) }} title="Архивировать и загрузить">
+                        <Archive size={12} />
+                      </button>}
                       <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
                         onClick={(e) => { e.stopPropagation(); setFolderDrill(fld.id); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
                         <Pencil size={12} />
@@ -648,6 +673,16 @@ export default function MyFilesPage() {
       )}
 
       {toast && <div className="mf-toast">{toast}</div>}
+      {archiveProgress && (
+        <div className="mf-toast" style={{ bottom: 60, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Archive size={14} />
+          <span>{archiveProgress.phase === 'downloading' ? 'Скачивание...' : archiveProgress.phase === 'compressing' ? 'Архивация...' : 'Загрузка...'}</span>
+          <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2 }}>
+            <div style={{ width: archiveProgress.percent + '%', height: '100%', background: '#7c83ff', borderRadius: 2 }} />
+          </div>
+          <span style={{ fontSize: 10 }}>{archiveProgress.percent}%</span>
+        </div>
+      )}
     </div>
   )
 }

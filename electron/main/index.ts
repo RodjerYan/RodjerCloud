@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as zlib from 'zlib'
 import * as pathMod from 'path'
 import path from 'path'
+import * as archiver from 'archiver'
 import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
@@ -218,6 +219,102 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
       processQueue()
     })
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folder:archive-and-upload', async (event, options: {
+  folderPath?: string
+  folderName?: string
+  files?: Array<{ messageId: number; fileName: string }>
+}) => {
+  const tmpDir = fs.mkdtempSync(pathMod.join(app.getPath('temp'), 'rodjercloud-archive-'))
+  try {
+    const name = options.folderName || (options.folderPath ? pathMod.basename(options.folderPath) : 'archive')
+    const archivePath = pathMod.join(tmpDir, `${name}.zip`)
+    const downloadDir = pathMod.join(tmpDir, 'files')
+    fs.mkdirSync(downloadDir, { recursive: true })
+
+    let totalBytes = 0
+
+    if (options.files && options.files.length > 0) {
+      // Download files from Telegram
+      event.sender.send('archive-progress', { percent: 0, phase: 'downloading', fileName: '' })
+      for (let i = 0; i < options.files.length; i++) {
+        const f = options.files[i]
+        const r = await telegramService.downloadFile(f.messageId, f.fileName)
+        if (r?.filePath) {
+          const dest = pathMod.join(downloadDir, f.fileName)
+          fs.copyFileSync(r.filePath, dest)
+        }
+        totalBytes += 0
+        const p = Math.min(100, Math.floor(((i + 1) / options.files.length) * 100))
+        event.sender.send('archive-progress', { percent: p, phase: 'downloading', fileName: f.fileName })
+      }
+    }
+
+    if (options.folderPath) {
+      // Calculate total size for progress
+      function walkDir(dir: string): string[] {
+        const out: string[] = []
+        const items = fs.readdirSync(dir, { withFileTypes: true })
+        for (const item of items) {
+          const full = pathMod.join(dir, item.name)
+          if (item.isDirectory()) out.push(...walkDir(full))
+          else if (item.isFile()) out.push(full)
+        }
+        return out
+      }
+      const allFiles = walkDir(options.folderPath)
+      totalBytes = allFiles.reduce((s, f) => s + fs.statSync(f).size, 0)
+    } else if (options.files) {
+      totalBytes = 1
+    }
+
+    // Create archive
+    event.sender.send('archive-progress', { percent: 0, phase: 'compressing', fileName: '' })
+    await new Promise<void>((resolve, reject) => {
+      const output = fs.createWriteStream(archivePath)
+      const archive = archiver.create('zip', { zlib: { level: 9 } })
+
+      output.on('close', () => resolve())
+      archive.on('error', (err) => reject(err))
+
+      if (totalBytes > 0) {
+        archive.on('progress', (p) => {
+          const percent = p.fs.totalBytes > 0 ? Math.min(99, Math.floor((p.fs.processedBytes / p.fs.totalBytes) * 100)) : 0
+          event.sender.send('archive-progress', { percent, phase: 'compressing' })
+        })
+      }
+
+      archive.pipe(output)
+
+      if (options.folderPath) {
+        archive.directory(options.folderPath, name)
+      } else if (options.files) {
+        for (const f of options.files) {
+          const fp = pathMod.join(downloadDir, f.fileName)
+          if (fs.existsSync(fp)) archive.file(fp, { name: f.fileName })
+        }
+      }
+
+      archive.finalize()
+    })
+
+    event.sender.send('archive-progress', { percent: 100, phase: 'uploading', fileName: '' })
+
+    // Upload archive
+    const result = await telegramService.uploadFile(archivePath, (sent, total) => {
+      const p = total > 0 ? Math.min(99, Math.floor((sent / total) * 100)) : 0
+      event.sender.send('archive-progress', { percent: p, phase: 'uploading' })
+    })
+
+    // Cleanup
+    try { fs.rmSync(tmpDir, { recursive: true }) } catch {}
+
+    return { success: true, data: { ...result, archiveName: `${name}.zip` } }
+  } catch (error) {
+    try { fs.rmSync(tmpDir, { recursive: true }) } catch {}
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 ipcMain.handle('telegram:list-files', async () => {
