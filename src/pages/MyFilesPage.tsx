@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
-import { Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil } from 'lucide-react'
+import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play,
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Upload } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 
 const SIX_HOURS = 21600
@@ -111,6 +111,18 @@ export default function MyFilesPage() {
     if (!renameVal.trim()) return
     await window.electronAPI.folders.rename(id, renameVal.trim())
     setRenameId(null); loadFolders()
+  }
+
+  const uploadToFolder = async (folderId: string) => {
+    const pick = await window.electronAPI.dialog.pickMultipleFiles()
+    if (!pick.success || !pick.data?.length) return
+    for (const f of pick.data) {
+      const res = await window.electronAPI.telegram.uploadFile(f.filePath)
+      if (res.success && res.data?.messageId) {
+        await window.electronAPI.folders.addFile(folderId, res.data.messageId)
+      }
+    }
+    loadFolders(); load()
   }
 
   const moveFileToFolder = (messageId: number) => { setMoveTarget([messageId]) }
@@ -487,6 +499,10 @@ export default function MyFilesPage() {
                       <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
                         onClick={(e) => { e.stopPropagation(); setFolderDrill(fld.id); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
                         <Pencil size={12} />
+                      </button>
+                      <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#34d399', fontSize: 11 }}
+                        onClick={(e) => { e.stopPropagation(); uploadToFolder(fld.id) }} title="Загрузить в папку">
+                        <Upload size={12} />
                       </button>
                       <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-err)', fontSize: 11 }}
                         onClick={(e) => { e.stopPropagation(); deleteFolder(fld.id) }} title="Удалить папку">
