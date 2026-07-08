@@ -211,9 +211,7 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
             event.sender.send(channel, data)
             if (channel === 'telegram:upload-complete' && data.id === jobId) {
               resolve(data.success ? { success: true, data: data.data } : { success: false, error: data.error })
-  } else {
-    document.getElementById('bar').style.display = 'none'; video = null
-  }
+            }
           }
         }
       }})
