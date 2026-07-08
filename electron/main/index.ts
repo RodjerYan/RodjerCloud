@@ -233,11 +233,11 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     const downloadDir = pathMod.join(tmpDir, 'files')
     fs.mkdirSync(downloadDir, { recursive: true })
 
-    let totalBytes = 0
+    let totalFiles = 0
 
     if (options.files && options.files.length > 0) {
-      // Download files from Telegram
-      event.sender.send('archive-progress', { percent: 0, phase: 'downloading', fileName: '' })
+      totalFiles = options.files.length
+      event.sender.send('archive-progress', { percent: 0, phase: 'downloading' })
       for (let i = 0; i < options.files.length; i++) {
         const f = options.files[i]
         const r = await telegramService.downloadFile(f.messageId, f.fileName)
@@ -245,14 +245,12 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
           const dest = pathMod.join(downloadDir, f.fileName)
           fs.copyFileSync(r.filePath, dest)
         }
-        totalBytes += 0
         const p = Math.min(100, Math.floor(((i + 1) / options.files.length) * 100))
-        event.sender.send('archive-progress', { percent: p, phase: 'downloading', fileName: f.fileName })
+        event.sender.send('archive-progress', { percent: p, phase: 'downloading' })
       }
     }
 
     if (options.folderPath) {
-      // Calculate total size for progress
       function walkDir(dir: string): string[] {
         const out: string[] = []
         const items = fs.readdirSync(dir, { withFileTypes: true })
@@ -264,26 +262,26 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
         return out
       }
       const allFiles = walkDir(options.folderPath)
-      totalBytes = allFiles.reduce((s, f) => s + fs.statSync(f).size, 0)
-    } else if (options.files) {
-      totalBytes = 1
+      totalFiles = allFiles.length
     }
 
     // Create archive
-    event.sender.send('archive-progress', { percent: 0, phase: 'compressing', fileName: '' })
+    event.sender.send('archive-progress', { percent: 0, phase: 'compressing' })
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(archivePath)
       const archive = new ZipArchive({ zlib: { level: 9 } })
+      let archiveCount = 0
 
       output.on('close', () => resolve())
       archive.on('error', (err) => reject(err))
 
-      if (totalBytes > 0) {
-        archive.on('progress', (p) => {
-          const percent = p.fs.totalBytes > 0 ? Math.min(99, Math.floor((p.fs.processedBytes / p.fs.totalBytes) * 100)) : 0
-          event.sender.send('archive-progress', { percent, phase: 'compressing' })
-        })
-      }
+      archive.on('entry', () => {
+        archiveCount++
+        if (totalFiles > 0) {
+          const p = Math.min(99, Math.floor((archiveCount / totalFiles) * 100))
+          event.sender.send('archive-progress', { percent: p, phase: 'compressing' })
+        }
+      })
 
       archive.pipe(output)
 
@@ -299,12 +297,14 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
       archive.finalize()
     })
 
-    event.sender.send('archive-progress', { percent: 100, phase: 'uploading', fileName: '' })
+    event.sender.send('archive-progress', { percent: 0, phase: 'uploading' })
 
-    // Upload archive
+    // Upload archive with progress
     const result = await telegramService.uploadFile(archivePath, (sent, total) => {
-      const p = total > 0 ? Math.min(99, Math.floor((sent / total) * 100)) : 0
-      event.sender.send('archive-progress', { percent: p, phase: 'uploading' })
+      const p = total > 0 ? Math.floor((sent / total) * 100) : 0
+      if (p >= 0 && p <= 100) {
+        event.sender.send('archive-progress', { percent: p, phase: 'uploading' })
+      }
     })
 
     // Cleanup

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive } from 'lucide-react'
+import { Player } from '@lottiefiles/react-lottie-player'
 
 interface QueueItem {
   id: string
@@ -24,8 +25,16 @@ export default function UploadPage() {
   const location = useLocation() as any
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [dragOver, setDragOver] = useState(false)
+  const [duckAnim, setDuckAnim] = useState<any>(null)
   const queueRef = useRef<QueueItem[]>([])
   queueRef.current = queue
+
+  useEffect(() => {
+    (async () => {
+      const r = await window.electronAPI.tgs.read('duck.tgs')
+      if (r.success) setDuckAnim(r.data)
+    })()
+  }, [])
 
   useEffect(() => {
     const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
@@ -146,6 +155,11 @@ export default function UploadPage() {
             <div className="up-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
           </div>
           <span style={{ fontSize: 11, color: 'var(--v3-text-dim)' }}>{archiveInfo.percent}%</span>
+          {duckAnim ? (
+            <Player autoplay loop src={duckAnim} style={{ width: 100, height: 100, marginTop: 8 }} />
+          ) : (
+            <div style={{ width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, marginTop: 8 }}>🐤</div>
+          )}
         </div>
       )}
 
