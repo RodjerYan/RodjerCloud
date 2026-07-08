@@ -148,6 +148,11 @@ export default function MyFilesPage() {
   }
   useEffect(() => { load(); loadFolders() }, [])
 
+  useEffect(() => {
+    const interval = setInterval(() => loadFolders(), 3000)
+    return () => clearInterval(interval)
+  }, [])
+
   const now = Math.floor(Date.now() / 1000)
   const SIX_HOURS = 21600
 
