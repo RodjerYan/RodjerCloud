@@ -429,11 +429,7 @@ ipcMain.handle('folders:load-from-telegram', async () => {
       if (data.folders && data.fileFolders) writeFolders(data)
       return { success: true, data }
     }
-    const local = readFolders()
-    if (local.folders.length > 0 || Object.keys(local.fileFolders).length > 0) {
-      telegramService.syncFolders(local).catch(() => {})
-    }
-    return { success: true, data: local }
+    return { success: true, data: readFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
