@@ -1,3 +1,8 @@
+@keyframes mfIconPulse { 0%, 100% { transform: scale(1); opacity: 0.9 } 50% { transform: scale(1.12); opacity: 1 } }
+@keyframes duck-shr { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(-25deg); } 75% { transform: rotate(20deg); } }
+@keyframes duck-shl { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(25deg); } 75% { transform: rotate(-20deg); } }
+@keyframes duck-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.mf-cat-anim { animation: mfIconPulse 2.5s ease-in-out infinite; filter: drop-shadow(0 0 4px currentColor); }
 .mf-root { animation: fadeInUp 0.3s ease both; }
 .mf-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .mf-search { display: flex; align-items: center; gap: 8px; background: var(--panel);

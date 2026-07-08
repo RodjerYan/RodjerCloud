@@ -61,5 +61,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }
+  },
+  folders: {
+    list: () => ipcRenderer.invoke('folders:list'),
+    create: (name: string) => ipcRenderer.invoke('folders:create', name),
+    rename: (id: string, name: string) => ipcRenderer.invoke('folders:rename', id, name),
+    delete: (id: string) => ipcRenderer.invoke('folders:delete', id),
+    addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
+    removeFile: (messageId: number) => ipcRenderer.invoke('folders:remove-file', messageId),
+    moveFile: (messageId: number, folderId: string) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
   }
 })

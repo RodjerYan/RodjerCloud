@@ -27,6 +27,7 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 640,
     backgroundColor: '#0a0a14',
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -380,6 +381,61 @@ ipcMain.handle('storage:append-sync-history', async (_, entry: any) => {
 ipcMain.handle('storage:clear-sync-history', async () => {
   try { if (fs.existsSync(historyPath())) fs.unlinkSync(historyPath()); return { success: true } }
   catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+function foldersPath(): string {
+  return pathMod.join(app.getPath('userData'), 'rodjercloud-folders.json')
+}
+function readFolders(): any { try { if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {} }; return JSON.parse(fs.readFileSync(foldersPath(), 'utf8')) } catch { return { folders: [], fileFolders: {} } } }
+function writeFolders(d: any) { fs.writeFileSync(foldersPath(), JSON.stringify(d, null, 2)) }
+
+ipcMain.handle('folders:list', async () => {
+  try { const d = readFolders(); return { success: true, data: d } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:create', async (_, name: string) => {
+  try {
+    const d = readFolders()
+    const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    d.folders.push({ id, name, createdAt: Math.floor(Date.now() / 1000) })
+    writeFolders(d)
+    return { success: true, data: { id, name } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:rename', async (_, id: string, name: string) => {
+  try {
+    const d = readFolders(); const f = d.folders.find((x: any) => x.id === id)
+    if (!f) throw new Error('Folder not found'); f.name = name; writeFolders(d)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:delete', async (_, id: string) => {
+  try {
+    const d = readFolders(); d.folders = d.folders.filter((x: any) => x.id !== id)
+    Object.keys(d.fileFolders).forEach(k => { if (d.fileFolders[k] === id) delete d.fileFolders[k] })
+    writeFolders(d); return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:add-file', async (_, folderId: string, messageId: number) => {
+  try {
+    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d); return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:remove-file', async (_, messageId: number) => {
+  try {
+    const d = readFolders(); delete d.fileFolders[messageId]; writeFolders(d); return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string) => {
+  try {
+    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d); return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('dialog:pick-download-dir', async () => {

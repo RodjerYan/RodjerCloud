@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts'
 import { Upload, HardDrive, FileText, TrendingUp } from 'lucide-react'
 
 function fmtSize(n: number) {
@@ -82,14 +82,19 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
           <div className="dh-panel-head"><h2>Файлы по типам</h2></div>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer>
-              <BarChart data={chartData}>
+              <BarChart data={chartData} margin={{ top: 28, right: 30, bottom: 5, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                 <XAxis dataKey="name" stroke="#9ca3c4" fontSize={12} />
                 <YAxis stroke="#9ca3c4" fontSize={12} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: 'rgba(20,22,38,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
-                <Bar dataKey="value" fill="url(#dhBarGrad)" radius={[6, 6, 0, 0]} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(124,131,255,0.08)' }} />
+                <Bar dataKey="value" fill="url(#dhBarGrad)" radius={[6, 6, 0, 0]}
+                  activeBar={{ fill: 'url(#dhBarGradActive)', radius: [6, 6, 0, 0] }}>
+                  <LabelList dataKey="value" position="top" fill="#e2e4f0" fontSize={13} fontWeight={600} />
+                </Bar>
                 <defs><linearGradient id="dhBarGrad" x1="0" x2="0" y1="0" y2="1">
                   <stop offset="0%" stopColor="#7c83ff" /><stop offset="100%" stopColor="#3a3fa4" />
+                </linearGradient><linearGradient id="dhBarGradActive" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#a5aaff" /><stop offset="100%" stopColor="#5c61d4" />
                 </linearGradient></defs>
               </BarChart>
             </ResponsiveContainer>
@@ -122,4 +127,18 @@ export default function DashboardHome({ channelInfo }: { channelInfo: any }) {
 
 function BarChart3Icon() {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M7 16V8"/><path d="M12 16v-5"/><path d="M17 16v-3"/></svg>
+}
+
+function CustomTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const { name, value } = payload[0].payload
+  return (
+    <div style={{
+      background: 'rgba(16,18,32,0.94)', border: '1px solid rgba(124,131,255,0.25)',
+      borderRadius: 10, padding: '8px 14px', boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+    }}>
+      <div style={{ fontSize: 12, color: '#9ca3c4', marginBottom: 2 }}>{name}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e4f0' }}>{value}</div>
+    </div>
+  )
 }
