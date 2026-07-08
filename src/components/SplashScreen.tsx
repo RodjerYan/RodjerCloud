@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import iconUrl from '../assets/icon.png'
 
 export default function SplashScreen() {
   const [ver, setVer] = useState('')
@@ -16,7 +17,7 @@ export default function SplashScreen() {
       <div className="splash-bg" />
       <div className="splash-inner">
         <div className="splash-logo">
-          <div className="splash-logo-mark">RC</div>
+          <img src={iconUrl} alt="RodjerCloud" className="splash-logo-mark" />
         </div>
         <h1 className="splash-title">RodjerCloud</h1>
         <p className="splash-subtitle">Облачное хранилище в Telegram</p>

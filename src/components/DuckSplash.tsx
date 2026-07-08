@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Player } from '@lottiefiles/react-lottie-player'
+import iconUrl from '../assets/icon.png'
 
 export default function DuckSplash({ onDone }: { onDone: () => void }) {
   const [anim, setAnim] = useState<any>(null)
