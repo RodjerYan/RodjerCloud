@@ -81,11 +81,9 @@ app.whenReady().then(async () => {
 
   // Background duplicate scan at startup
   setTimeout(() => {
-    if (botService.getHashDb().length === 0) {
-      botService.scanChannel(telegramService, (p) => {
-        mainWindow?.webContents.send('bot:scan-progress', p)
-      }).catch(() => {})
-    }
+    botService.scanChannel(telegramService, (p) => {
+      mainWindow?.webContents.send('bot:scan-progress', p)
+    }).catch(() => {})
   }, 10000)
 
   app.on('activate', () => {

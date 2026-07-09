@@ -131,28 +131,14 @@ export default function AlbumsPage() {
       window.electronAPI.telegram.listFiles().then((r: any) => { if (r?.success) setAllFiles(r.data || []) })
       const isDuplicates = SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates
       if (isDuplicates) {
+        setHashing(true)
         window.electronAPI.bot.getHashDb().then((r: any) => {
           if (r.success && r.data) {
             for (const e of r.data) {
               if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
             }
-            // Auto-scan if db is empty
-            if (r.data.length === 0) {
-              setHashing(true)
-              window.electronAPI.bot.scanDuplicates().then((res: any) => {
-                if (res.success) {
-                  window.electronAPI.bot.getHashDb().then((r2: any) => {
-                    if (r2.success && r2.data) {
-                      for (const e of r2.data) {
-                        if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
-                      }
-                    }
-                    setHashing(false)
-                  })
-                }
-              })
-            }
           }
+          setHashing(false)
         })
       }
       if (albumFiles.length > 0) loadThumbs(albumFiles.slice(0, 50))
@@ -245,6 +231,26 @@ export default function AlbumsPage() {
                 })
                 const groups: [string, any[]][] = []
                 hashGroups.forEach((group, hash) => { if (group.length > 1) groups.push([hash, group]) })
+                if (groups.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: 40 }}>
+                      <div className="v3-sub" style={{ marginBottom: 12 }}>Дубликаты ещё не найдены</div>
+                      <button className="v3-btn primary" onClick={async () => {
+                        setHashing(true)
+                        const res = await window.electronAPI.bot.scanDuplicates()
+                        if (res.success) {
+                          const r = await window.electronAPI.bot.getHashDb()
+                          if (r.success && r.data) {
+                            for (const e of r.data) {
+                              if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
+                            }
+                          }
+                        }
+                        setHashing(false)
+                      }}>Сканировать сейчас</button>
+                    </div>
+                  )
+                }
                 return groups.map(([hash, files]) => (
                   <div key={hash} className="mf-gy">
                     <div className="mf-gy-title">{files.length} дубликата</div>
