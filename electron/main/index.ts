@@ -10,7 +10,7 @@ import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
-import { init as initHashDb, getDuplicates, getDb, removeEntry, computeFileHash } from './hash-db'
+import { init as initHashDb, getDuplicates, getDb, removeEntry, computeFileHash, addEntry } from './hash-db'
 
 // Logger
 const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
@@ -79,6 +79,21 @@ app.whenReady().then(async () => {
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
   initHashDb()
+  setTimeout(() => {
+    telegramService.listFiles().then(all => {
+      if (!all) return
+      const existing = new Set(getDb().map((e: any) => e.messageId))
+      for (const f of all) {
+        if (existing.has(f.messageId)) continue
+        telegramService.downloadMediaToTemp(f.messageId).then(tmp => {
+          computeFileHash(tmp).then(hash => {
+            fs.rmSync(tmp, { force: true })
+            addEntry({ messageId: f.messageId, hash, fileName: f.fileName, fileSize: f.fileSize })
+          }).catch(() => fs.rmSync(tmp, { force: true }))
+        }).catch(() => {})
+      }
+    }).catch(() => {})
+  }, 5000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
