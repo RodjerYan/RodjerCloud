@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
@@ -410,6 +410,16 @@ export default function MyFilesPage() {
   const hasFiles = Object.values(grouped).some(g => g.length > 0)
 
   const [isDragOver, setIsDragOver] = useState(false)
+  const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number } | null>(null)
+  const dropDoneRef = useRef<NodeJS.Timeout>()
+
+  useEffect(() => {
+    const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
+      if (!d.id) return
+      setDropProgress(prev => prev ? { ...prev, pct: d.percent } : null)
+    })
+    return () => { off(); clearTimeout(dropDoneRef.current) }
+  }, [])
 
   const onQuickUpload = async () => {
     const r = await window.electronAPI.dialog.pickMultipleFiles()
@@ -424,10 +434,14 @@ export default function MyFilesPage() {
       if (p) dropped.push({ filePath: p, fileName: file.name })
     }
     if (dropped.length === 0) return
-    for (const f of dropped) {
+    setDropProgress({ current: 0, total: dropped.length, pct: 0 })
+    for (let i = 0; i < dropped.length; i++) {
+      const f = dropped[i]
+      setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
       await window.electronAPI.telegram.uploadFile(f.filePath)
     }
-    showToast(`Загружено ${dropped.length} файл(ов)`)
+    setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
+    dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
     load()
   }
 
@@ -477,6 +491,53 @@ export default function MyFilesPage() {
           </div>
         </div>
       </div>
+
+      <div style={{
+        maxHeight: dropProgress ? 48 : 0,
+        opacity: dropProgress ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'max-height 0.35s ease, opacity 0.3s ease',
+        width: '100%',
+      }}>
+        <div style={{
+          width: '100%',
+          background: dropProgress && dropProgress.pct >= 100
+            ? 'rgba(52,211,153,0.08)'
+            : 'rgba(124,131,255,0.08)',
+          borderBottom: '1px solid ' + (dropProgress && dropProgress.pct >= 100
+            ? 'rgba(52,211,153,0.2)'
+            : 'rgba(124,131,255,0.15)'),
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '8px 16px',
+            fontSize: 13, color: dropProgress && dropProgress.pct >= 100 ? '#6ee7b7' : '#bcc0ff',
+            fontWeight: 500,
+          }}>
+            <div style={{
+              width: 80, height: 4,
+              background: 'rgba(255,255,255,0.08)',
+              borderRadius: 2, overflow: 'hidden', flexShrink: 0,
+            }}>
+              <div style={{
+                height: '100%', width: (dropProgress?.pct ?? 0) + '%',
+                background: dropProgress && dropProgress.pct >= 100
+                  ? 'linear-gradient(90deg, #34d399, #6ee7b7)'
+                  : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
+                borderRadius: 2,
+                transition: 'width 0.25s ease',
+                boxShadow: dropProgress && dropProgress.pct >= 100
+                  ? '0 0 6px rgba(52,211,153,0.4)'
+                  : '0 0 6px rgba(124,131,255,0.4)',
+              }} />
+            </div>
+            {dropProgress && dropProgress.pct >= 100
+              ? 'Загрузка завершена'
+              : `Загрузка... ${dropProgress?.pct ?? 0}%`}
+          </div>
+        </div>
+      </div>
+
       <div className="mf-toolbar">
         <div className="mf-search">
           <Search size={16} />
@@ -774,7 +835,7 @@ export default function MyFilesPage() {
         style={{ marginTop: 12 }}>
         <Upload size={28} />
         <div className="dh-quick-title">Быстрая загрузка</div>
-        <div className="dh-quick-sub">{isDragOver ? 'Отпустите для загрузки' : 'Нажмите или перетащите файлы'}</div>
+        <div className="dh-quick-sub">{isDragOver ? 'Отпустите для загрузки' : 'Нажмите или перетащите файлы'}        </div>
       </div>
 
       {preview && (() => {

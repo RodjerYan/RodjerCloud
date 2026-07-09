@@ -262,6 +262,8 @@ export class TelegramService {
       throw new Error('File splitting not implemented yet. Files must be under 2GB.')
     }
 
+    let lastSent = 0
+
     const result = await this.client.sendFile(this.channelId as any, {
       file: filePath,
       caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(fileStats.mtimeMs).toISOString()}`,
@@ -269,8 +271,10 @@ export class TelegramService {
       workers: 4,
       progressCallback: (progress: any) => {
         try {
-          const fraction = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
-          onProgress?.(Math.round(fraction * sizeBytes), sizeBytes)
+          const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
+          const sent = val <= 1 ? Math.round(val * sizeBytes) : Math.min(val, sizeBytes)
+          if (sent > (lastSent ?? 0)) lastSent = sent
+          onProgress?.(lastSent, sizeBytes)
         } catch (err) {
           console.error('Progress callback error:', err)
         }

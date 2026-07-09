@@ -214,22 +214,20 @@ async function processQueue() {
 }
 async function runUpload(job: UploadJob): Promise<void> {
   try {
-    job.event.sender.send('telegram:upload-progress', {
-      id: job.id, sent: 0, total: 0, percent: 0
-    })
-    const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
+    let lastPct = -1
+    const sendProgress = (sent: number, total: number) => {
+      const pct = total > 0 ? Math.floor((sent / total) * 100) : 0
+      if (pct <= lastPct) return
+      lastPct = pct
       try {
-        job.event.sender.send('telegram:upload-progress', {
-          id: job.id, sent, total,
-          percent: total > 0 ? Math.min(99, Math.floor((sent / total) * 100)) : 0,
-        })
+        job.event.sender.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct })
       } catch {}
+    }
+    sendProgress(0, 1)
+    const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
+      sendProgress(sent, total)
     })
-    try {
-      job.event.sender.send('telegram:upload-progress', {
-        id: job.id, sent: result.fileSize, total: result.fileSize, percent: 100,
-      })
-    } catch {}
+    sendProgress(result.fileSize, result.fileSize)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
