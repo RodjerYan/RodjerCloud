@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('app:download-progress', listener)
       return () => ipcRenderer.removeListener('app:download-progress', listener)
     },
+    onUpdateAvailable: (cb: (data: { version: string }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('app:update-available', listener)
+      return () => ipcRenderer.removeListener('app:update-available', listener)
+    },
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }

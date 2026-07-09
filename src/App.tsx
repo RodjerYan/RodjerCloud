@@ -46,6 +46,7 @@ function App() {
   const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ firstName: string; lastName?: string; username?: string; photoPath?: string } | null>(null)
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null)
 
   const fetchUserInfo = useCallback(async () => {
     try {
@@ -65,6 +66,13 @@ function App() {
     document.documentElement.dataset.animations = p.animations
     document.documentElement.style.setProperty("--v3-sans-active", p.font || "var(--v3-sans)")
     return () => clearTimeout(t)
+  }, [])
+
+  useEffect(() => {
+    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string }) => {
+      setUpdateAvailable(data.version)
+    })
+    return () => unsub?.()
   }, [])
 
   const checkSession = async () => {
@@ -112,6 +120,19 @@ function App() {
         <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
         <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
+          {updateAvailable && (
+            <div style={{
+              background: 'linear-gradient(135deg, #7c83ff, #b14aff)',
+              padding: '8px 16px', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: 10, fontSize: 13, fontWeight: 500,
+              cursor: 'pointer',
+            }} onClick={() => { setUpdateAvailable(null); window.open('https://github.com/RodjerYan/RodjerCloud/releases', '_blank') }}>
+              <span>Доступно обновление v{updateAvailable}</span>
+              <span style={{ textDecoration: 'underline', fontSize: 12 }}>Установить</span>
+              <span style={{ marginLeft: 'auto', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: 0.6 }}
+                onClick={e => { e.stopPropagation(); setUpdateAvailable(null) }}>×</span>
+            </div>
+          )}
           <AggregateProgress />
           <Routes>
             <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />

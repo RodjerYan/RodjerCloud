@@ -47,6 +47,7 @@ declare global {
         downloadUpdate: (url: string) => Promise<{ success: boolean; data?: { filePath: string; fileName: string }; error?: string }>
         installUpdate: (filePath: string) => Promise<{ success: boolean; error?: string }>
         onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => () => void
+        onUpdateAvailable: (cb: (data: { version: string }) => void) => () => void
       }
       getPathForFile: (file: File) => string
       folders: {
