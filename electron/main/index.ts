@@ -583,6 +583,17 @@ function isNewer(latest: string, current: string): boolean {
   return false
 }
 
+function platformAssetPattern(): (name: string) => boolean {
+  const plat = process.platform
+  const arch = process.arch
+  if (plat === 'darwin') {
+    if (arch === 'arm64') return (n: string) => n.endsWith('-arm64.dmg') || n.endsWith('-arm64-mac.zip')
+    return (n: string) => n.endsWith('.dmg') && !n.includes('-arm64') || n.endsWith('-mac.zip') && !n.includes('-arm64')
+  }
+  if (plat === 'win32') return (n: string) => n.endsWith('.exe') || n.endsWith('-win.zip')
+  return () => false
+}
+
 ipcMain.handle('app:check-update', async () => {
   try {
     const currentVersion = app.getVersion()
@@ -601,9 +612,8 @@ ipcMain.handle('app:check-update', async () => {
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (!tag) return { success: true, data: { hasUpdate: false } }
     const hasUpdate = isNewer(tag, currentVersion)
-    const asset = (res.assets || []).find((a: any) =>
-      a.name.endsWith('-arm64.dmg') || a.name.endsWith('-arm64-mac.zip')
-    )
+    const matchFn = platformAssetPattern()
+    const asset = (res.assets || []).find((a: any) => matchFn(a.name))
     return {
       success: true,
       data: {
