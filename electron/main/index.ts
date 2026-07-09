@@ -76,6 +76,7 @@ app.whenReady().then(async () => {
   const prefs = await readPrefs()
   if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
   if (prefs.autoSync?.enabled) autoSyncService.start()
+  telegramService.startTrashCleanup()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -384,7 +385,28 @@ ipcMain.handle('telegram:cache-audio', async (_, messageId: number, fileName: st
 
 ipcMain.handle('telegram:delete-file', async (_, messageId: number) => {
   try {
-    await telegramService.deleteFile(messageId)
+    await telegramService.trashFile(messageId)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:list-trash', async () => {
+  try {
+    const data = await telegramService.listTrash()
+    return { success: true, data }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:restore-file', async (_, messageId: number) => {
+  try {
+    await telegramService.restoreFile(messageId)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:perm-delete-file', async (_, messageId: number) => {
+  try {
+    await telegramService.permanentDelete(messageId)
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -472,7 +494,7 @@ ipcMain.handle('telegram:bulk-download', async (event, items: Array<{ messageId:
 ipcMain.handle('telegram:bulk-delete', async (event, messageIds: number[]) => {
   const results: any[] = []
   for (let i = 0; i < messageIds.length; i++) {
-    try { await telegramService.deleteFile(messageIds[i]); results.push({ success: true }) }
+    try { await telegramService.trashFile(messageIds[i]); results.push({ success: true }) }
     catch (e) { results.push({ success: false, error: (e as Error).message }) }
     event.sender.send('telegram:bulk-progress', { kind: 'delete', index: i + 1, total: messageIds.length })
   }

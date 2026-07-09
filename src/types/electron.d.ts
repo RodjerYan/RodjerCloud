@@ -16,6 +16,9 @@ declare global {
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
         downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
         deleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        listTrash: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        permDeleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>

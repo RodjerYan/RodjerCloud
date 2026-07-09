@@ -264,12 +264,12 @@ export default function MyFilesPage() {
     showToast(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
   }
   const handleDelete = async (f: any) => {
-    if (!confirm('Удалить ' + f.fileName + '?')) return
+    if (!confirm('Переместить ' + f.fileName + ' в корзину?')) return
     setDeletingIds(prev => new Set(prev).add(f.messageId))
-    showToast('Удаление…')
+    showToast('Перемещение в корзину…')
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
-      showToast('Удалено')
+      showToast('Перемещено в корзину')
       setTimeout(() => {
         setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
         setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
@@ -354,10 +354,10 @@ export default function MyFilesPage() {
 
   const bulkDelete = async () => {
     if (selected.size === 0) return
-    if (!confirm(`Удалить ${selected.size} файлов?`)) return
+    if (!confirm(`Переместить ${selected.size} файлов в корзину?`)) return
     const ids = Array.from(selected)
     setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
-    showToast('Удаление…')
+    showToast('Перемещение в корзину…')
     const r = await window.electronAPI.telegram.bulkDelete(ids)
     if (r.success) {
       setTimeout(() => {

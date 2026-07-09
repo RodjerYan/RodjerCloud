@@ -292,37 +292,134 @@ export class TelegramService {
     }
   }
 
+  private TRASH_MARKER = 'Trashed: '
+  private TRASH_DAYS = 3
+  private trashCleanupInterval: ReturnType<typeof setInterval> | null = null
+
+  startTrashCleanup() {
+    this.trashCleanupInterval = setInterval(() => this.autoCleanTrash(), 60 * 60 * 1000)
+  }
+
+  stopTrashCleanup() {
+    if (this.trashCleanupInterval) { clearInterval(this.trashCleanupInterval); this.trashCleanupInterval = null }
+  }
+
+  private async autoCleanTrash() {
+    if (!this.client || !this.channelId) return
+    try {
+      const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
+      const now = Date.now()
+      for (const m of messages) {
+        const caption: string = m.message || ''
+        const match = caption.match(new RegExp(`${this.TRASH_MARKER}(\\d+)`))
+        if (!match) continue
+        const trashedAt = parseInt(match[1], 10)
+        if (now - trashedAt > this.TRASH_DAYS * 24 * 3600 * 1000) {
+          try {
+            await this.client.invoke(
+              new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [this.msgId(m)] })
+            )
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  private toNum(v: any): number {
+    if (v == null) return 0
+    if (typeof v === 'number') return v
+    if (typeof v === 'bigint') return Number(v)
+    if (typeof v === 'string') return Number(v)
+    if (typeof v === 'object' && typeof v.toString === 'function') {
+      const n = Number(v.toString())
+      return isFinite(n) ? n : 0
+    }
+    return 0
+  }
+
   async listFiles() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
-    const toNum = (v: any): number => {
-      if (v == null) return 0
-      if (typeof v === 'number') return v
-      if (typeof v === 'bigint') return Number(v)
-      if (typeof v === 'string') return Number(v)
-      if (typeof v === 'object' && typeof v.toString === 'function') {
-        const n = Number(v.toString())
-        return isFinite(n) ? n : 0
-      }
-      return 0
-    }
     return messages
-      .filter((m: any) => m.file && m.message !== TelegramService.STATE_CAPTION)
+      .filter((m: any) => {
+        if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+        const caption: string = m.message || ''
+        return !caption.includes(this.TRASH_MARKER)
+      })
       .map((m: any) => {
         const caption = m.message || ''
         const createdMatch = caption.match(/Created:\s*(.+)/)
         const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
         return {
-          messageId: typeof m.id === 'object' ? Number(m.id.toString()) : m.id,
+          messageId: this.msgId(m),
           fileName: m.file?.name || 'Unknown',
-          fileSize: toNum(m.file?.size),
+          fileSize: this.toNum(m.file?.size),
           mimeType: m.file?.mimeType || 'application/octet-stream',
-          uploadedAt: typeof m.date === 'number' ? m.date : toNum(m.date),
+          uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
           originalDate: originalDate || undefined,
           caption,
           chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
         }
       })
+  }
+
+  async listTrash() {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
+    return messages
+      .filter((m: any) => {
+        if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+        const caption: string = m.message || ''
+        return caption.includes(this.TRASH_MARKER)
+      })
+      .map((m: any) => {
+        const caption = m.message || ''
+        const createdMatch = caption.match(/Created:\s*(.+)/)
+        const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
+        const trashedMatch = caption.match(new RegExp(this.TRASH_MARKER + '(\\d+)'))
+        return {
+          messageId: this.msgId(m),
+          fileName: m.file?.name || 'Unknown',
+          fileSize: this.toNum(m.file?.size),
+          mimeType: m.file?.mimeType || 'application/octet-stream',
+          uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
+          originalDate: originalDate || undefined,
+          trashedAt: trashedMatch ? parseInt(trashedMatch[1], 10) : 0,
+          caption,
+          chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+        }
+      })
+  }
+
+  async trashFile(messageId: number) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const m = messages[0]
+    const oldCaption = m.message || ''
+    const newCaption = oldCaption.includes(this.TRASH_MARKER)
+      ? oldCaption
+      : oldCaption + `\n${this.TRASH_MARKER}${Date.now()}`
+    await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
+  }
+
+  async restoreFile(messageId: number) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const m = messages[0]
+    const oldCaption = m.message || ''
+    const newCaption = oldCaption.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
+    if (newCaption !== oldCaption) {
+      await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
+    }
+  }
+
+  async permanentDelete(messageId: number) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    await this.client.invoke(
+      new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [messageId] })
+    )
   }
 
   async downloadFile(messageId: number, fileName: string) {

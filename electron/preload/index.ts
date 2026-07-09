@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     downloadThumbnail: (messageId: number) =>
       ipcRenderer.invoke('telegram:download-thumbnail', messageId),
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
+    listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
+    restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),
+    permDeleteFile: (messageId: number) => ipcRenderer.invoke('telegram:perm-delete-file', messageId),
     cacheAudio: (messageId: number, fileName: string) => ipcRenderer.invoke('telegram:cache-audio', messageId, fileName),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
       ipcRenderer.invoke('telegram:bulk-download', items),
