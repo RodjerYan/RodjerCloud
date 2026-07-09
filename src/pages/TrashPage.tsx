@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react"
-import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon } from "lucide-react"
+import { createPortal } from "react-dom"
+import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2, Trash2 as DeleteIcon, Circle } from "lucide-react"
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -18,6 +19,8 @@ export default function TrashPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [toast, setToast] = useState('')
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
+  const closeCtx = useCallback(() => setCtxMenu(null), [])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
 
@@ -29,6 +32,34 @@ export default function TrashPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const onMousedown = (e: MouseEvent) => {
+      if (e.button !== 2) return
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
+      if (!el) return
+      const mid = Number(el.dataset.mid)
+      const f = files.find(x => x.messageId === mid)
+      if (f) setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
+    }
+    const onContext = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('[data-mid]')) e.preventDefault()
+    }
+    document.addEventListener('mousedown', onMousedown)
+    document.addEventListener('contextmenu', onContext)
+    return () => {
+      document.removeEventListener('mousedown', onMousedown)
+      document.removeEventListener('contextmenu', onContext)
+    }
+  }, [files])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
+  }, [ctxMenu])
 
   const toggleSelect = (id: number) => {
     const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s)
@@ -176,6 +207,27 @@ export default function TrashPage() {
       )}
 
       {toast && <div className="mf-toast">{toast}</div>}
+
+      {ctxMenu && createPortal(
+        <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+          <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {selected.has(ctxMenu.file.messageId)
+                ? <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>
+                : <circle cx="12" cy="12" r="10"/>}
+            </svg>
+            Выбрать
+          </button>
+          <button onClick={() => { handleRestore(ctxMenu.file.messageId); closeCtx() }}>
+            <RotateCcw size={14} /> Восстановить
+          </button>
+          <div className="mf-ctx-divider" />
+          <button className="danger" onClick={() => { handlePurge(ctxMenu.file.messageId); closeCtx() }}>
+            <X size={14} /> Удалить навсегда
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
