@@ -55,11 +55,6 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
 
   const recent = [...files].sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0)).slice(0, 5)
 
-  const onQuickUpload = async () => {
-    const r = await window.electronAPI.dialog.pickMultipleFiles()
-    if (r.success) navigate('/upload', { state: { initialFiles: r.data } })
-  }
-
   return (
     <div className="dh-root">
       <div className="dh-banner">
@@ -124,12 +119,6 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
             </ul>
           )}
         </div>
-      </div>
-
-      <div className="dh-quick" onClick={onQuickUpload}>
-        <Upload size={28} />
-        <div className="dh-quick-title">Быстрая загрузка</div>
-        <div className="dh-quick-sub">Нажмите, чтобы выбрать файлы</div>
       </div>
     </div>
   )

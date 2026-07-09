@@ -97,5 +97,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getBotToken: () => ipcRenderer.invoke('share:get-bot-token'),
     ensureBot: () => ipcRenderer.invoke('share:ensure-bot'),
     downloadFile: (url: string, fileName: string) => ipcRenderer.invoke('share:download-file', url, fileName),
+  },
+  state: {
+    sync: (jsonStr: string) => ipcRenderer.invoke('state:sync', jsonStr),
+    load: () => ipcRenderer.invoke('state:load'),
+  },
+  file: {
+    computeHash: (messageId: number) => ipcRenderer.invoke('file:compute-hash', messageId),
   }
 })

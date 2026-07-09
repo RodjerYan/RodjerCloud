@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload } from 'lucide-react'
+import { v3store } from '../lib/v3store'
+import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
 
 const SIX_HOURS = 21600
@@ -38,20 +41,26 @@ const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
 
-function groupByMonth(items: any[]) {
-  const years: Record<number, Record<number, any[]>> = {}
+function fileDate(f: any): number {
+  return f.originalDate || f.uploadedAt || 0
+}
+
+function groupByDay(items: any[]) {
+  const years: Record<number, Record<number, Record<number, any[]>>> = {}
   items.forEach(f => {
-    const d = new Date((f.uploadedAt || 0) * 1000)
+    const d = new Date(fileDate(f) * 1000)
     if (!isFinite(d.getTime())) return
-    const y = d.getFullYear(), m = d.getMonth()
+    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate()
     if (!years[y]) years[y] = {}
-    if (!years[y][m]) years[y][m] = []
-    years[y][m].push(f)
+    if (!years[y][m]) years[y][m] = {}
+    if (!years[y][m][day]) years[y][m][day] = []
+    years[y][m][day].push(f)
   })
   return years
 }
 
 export default function MyFilesPage() {
+  const navigate = useNavigate()
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -76,11 +85,14 @@ export default function MyFilesPage() {
   const [moveTarget, setMoveTarget] = useState<number[] | null>(null)
   const [duckAnim, setDuckAnim] = useState<any>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
-  const closeCtx = useCallback(() => setCtxMenu(null), [])
-  const [showBotSetup, setShowBotSetup] = useState(false)
+  const closeCtx = useCallback(() => { setCtxMenu(null); setShowSub(null) }, [])
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
   const [shareProgress, setShareProgress] = useState<'generating' | 'done' | null>(null)
+  const [favs, setFavs] = useState(v3store.getFavs())
+  const [renameTarget, setRenameTarget] = useState<any>(null)
+  const [renameInput, setRenameInput] = useState('')
+  const [showSub, setShowSub] = useState<string | null>(null)
 
   useEffect(() => {
     window.electronAPI.share.getBotToken().then((r: any) => {
@@ -99,19 +111,6 @@ export default function MyFilesPage() {
       }
     })
   }, [])
-
-  const confirmBotToken = async () => {
-    const token = botToken.trim()
-    if (!token) return
-    const r = await window.electronAPI.share.setBotToken(token)
-    if (r.success) {
-      setBotConfigured(true)
-      setShowBotSetup(false)
-      showToast('Токен бота сохранён')
-    } else {
-      showToast('Ошибка: ' + (r.error || ''))
-    }
-  }
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -239,7 +238,7 @@ export default function MyFilesPage() {
     return filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
   }, [drillDown, filtered, fileFolders])
 
-  const galleryByYear = useMemo(() => groupByMonth(galleryFiles), [galleryFiles])
+  const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles])
 
   useEffect(() => {
     if (drillDown) {
@@ -332,7 +331,10 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     if (!ctxMenu) return
-    const close = () => setCtxMenu(null)
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
+      setCtxMenu(null)
+    }
     window.addEventListener('click', close)
     window.addEventListener('scroll', close, true)
     return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
@@ -406,6 +408,28 @@ export default function MyFilesPage() {
   }
 
   const hasFiles = Object.values(grouped).some(g => g.length > 0)
+
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const onQuickUpload = async () => {
+    const r = await window.electronAPI.dialog.pickMultipleFiles()
+    if (r.success) navigate('/upload', { state: { initialFiles: r.data } })
+  }
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); setIsDragOver(false)
+    const dropped: { filePath: string; fileName: string }[] = []
+    for (const file of Array.from(e.dataTransfer.files)) {
+      const p = window.electronAPI.getPathForFile(file)
+      if (p) dropped.push({ filePath: p, fileName: file.name })
+    }
+    if (dropped.length === 0) return
+    for (const f of dropped) {
+      await window.electronAPI.telegram.uploadFile(f.filePath)
+    }
+    showToast(`Загружено ${dropped.length} файл(ов)`)
+    load()
+  }
 
   return (
     <div className="mf-root">
@@ -511,42 +535,47 @@ export default function MyFilesPage() {
                 </tbody>
               </table>
             ) : (
-              Object.entries(galleryByYear).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+              Object.entries(galleryByDay).sort(([a], [b]) => +b - +a).map(([year, months]) => (
                 <div key={year} className="mf-gy">
                   <div className="mf-gy-title">{year}</div>
-                  {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, items]) => (
+                  {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
                     <div key={year + '-' + month} className="mf-gm">
-                      <div className="mf-gm-title">{MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
-                      <div className="mf-gm-items">
-                        {items.map((f: any) => {
-                          const thumbUrl = thumbs[f.messageId]
-                          const isVideo = drillDown === 'Видео'
-                          return (
-                            <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                              onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
-                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                            <div className="mf-gm-icon" data-type={drillDown}>
-                              {thumbUrl ? (
-                                <>
-                                  <img src={thumbUrl} className="mf-gm-img" />
-                                  {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
-                                </>
-                              ) : (
-                                isVideo ? '🎬' : '🖼️'
-                              )}
-                            </div>
-                            <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
-                            <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
-                            <div className="mf-gm-actions">
-                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
-                              {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
-                              <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
-                              <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
-                              <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
-                            </div>
+                      <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
+                      {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
+                        <div key={`${year}-${month}-${day}`} className="mf-gd">
+                          <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                          <div className="mf-gm-items">
+                            {items.map((f: any) => {
+                              const thumbUrl = thumbs[f.messageId]
+                              const isVideo = drillDown === 'Видео'
+                              return (
+                                <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                  onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
+                                <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                                <div className="mf-gm-icon" data-type={drillDown}>
+                                  {thumbUrl ? (
+                                    <>
+                                      <img src={thumbUrl} className="mf-gm-img" />
+                                      {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
+                                    </>
+                                  ) : (
+                                    isVideo ? '🎬' : '🖼️'
+                                  )}
+                                </div>
+                                <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+                                <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+                                <div className="mf-gm-actions">
+                                  <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                                  {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
+                                  <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
+                                  <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
+                                  <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                                </div>
+                              </div>
+                            )})}
                           </div>
-                        )})}
-                      </div>
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -587,6 +616,7 @@ export default function MyFilesPage() {
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
+                              <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                               {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
@@ -607,7 +637,7 @@ export default function MyFilesPage() {
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
-                              <td className="ellip" title={f.fileName}>{f.fileName}</td>
+                                  <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
                               <td>{fmtSize(f.fileSize)}</td>
                               <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
                               <td>
@@ -691,6 +721,7 @@ export default function MyFilesPage() {
                                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                                 <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
                                 <div className="mf-card-actions">
+                                  <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                                   <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                   <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                                   <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
@@ -704,7 +735,7 @@ export default function MyFilesPage() {
                             <tbody>
                               {ffiles.map(f => (
                                  <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
-                                  <td className="ellip" title={f.fileName}>{f.fileName}</td>
+                              <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
                                   <td>{fmtSize(f.fileSize)}</td>
                                   <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
                                   <td>
@@ -734,6 +765,17 @@ export default function MyFilesPage() {
           )}
         </div>
       )}
+
+      <div className={"dh-quick" + (isDragOver ? " drag-over" : "")}
+        onClick={onQuickUpload}
+        onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={onDrop}
+        style={{ marginTop: 12 }}>
+        <Upload size={28} />
+        <div className="dh-quick-title">Быстрая загрузка</div>
+        <div className="dh-quick-sub">{isDragOver ? 'Отпустите для загрузки' : 'Нажмите или перетащите файлы'}</div>
+      </div>
 
       {preview && (() => {
         const all = preview.list.filter((f: any) => {
@@ -824,29 +866,22 @@ export default function MyFilesPage() {
         </div>
       )}
 
-      {showBotSetup && (
-        <div className="mf-modal" onClick={() => setShowBotSetup(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 380, maxWidth: '90vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>Настройка бота для ссылок</div>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-              Бот создаётся автоматически при входе в аккаунт.<br />
-              Если что-то пошло не так — вставьте токен вручную:<br /><br />
-              1. @BotFather → создать бота<br />
-              2. Добавить бота администратором канала «My area»<br />
-              3. Написать боту /start<br />
-              4. Вставить токен ниже
-            </div>
-            <input value={botToken} onChange={e => setBotToken(e.target.value)}
-              placeholder="Введите токен бота: 123456:ABCdef..."
-              style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'monospace' }} />
+      {renameTarget && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }} onClick={() => setRenameTarget(null)}>
+          <div className="v3-card" style={{ padding: 16, minWidth: 300 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Переименовать</div>
+            <input className="v3-input" value={renameInput} onChange={e => setRenameInput(e.target.value)} style={{ marginBottom: 10 }} autoFocus />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="v3-btn" onClick={() => setShowBotSetup(false)}
-                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)' }}>Отмена</button>
-              <button className="v3-btn" onClick={confirmBotToken}
-                style={{ background: 'var(--accent-1)', border: 'none', color: '#fff' }}>Сохранить</button>
+              <button className="v3-btn" onClick={() => setRenameTarget(null)}>Отмена</button>
+              <button className="v3-btn primary" onClick={() => {
+                v3store.setMeta({ messageId: renameTarget.messageId, displayName: renameInput.trim() || undefined })
+                setRenameTarget(null); showToast('Переименовано')
+                setFiles(prev => prev.map(f => f.messageId === renameTarget.messageId ? { ...f, fileName: renameInput.trim() || f.fileName } : f))
+              }}>Сохранить</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {ctxMenu && createPortal(
@@ -868,11 +903,38 @@ export default function MyFilesPage() {
           <button onClick={() => { moveFileToFolder(ctxMenu.file.messageId); closeCtx() }}>
             <MoveRight size={14} /> Переместить
           </button>
-          <div className="mf-ctx-divider" />
-          <button onClick={() => { setShowBotSetup(true); closeCtx() }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            {botConfigured ? 'Сменить токен бота' : 'Настроить бота'}
+          <button onClick={(e) => { e.stopPropagation(); setShowSub(showSub === 'albums' ? null : 'albums') } }
+            style={{ position: 'relative' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M21 9H3"/></svg>
+            В альбом {showSub === 'albums' && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5 }}>‹</span>}
           </button>
+          {showSub === 'albums' && (
+            <>
+              {v3store.getAlbums().length === 0 && (
+                <div style={{ paddingLeft: 36, fontSize: 11, color: 'var(--text-dim)' }}>Нет пользовательских альбомов</div>
+              )}
+              {v3store.getAlbums().map(a => {
+                const inAlbum = a.messageIds.includes(ctxMenu.file.messageId)
+                return (
+                  <button key={a.id} onClick={() => {
+                    if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
+                    else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
+                    showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
+                    closeCtx()
+                  }} style={{ paddingLeft: 36, fontSize: 12 }}>
+                    <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                      {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
+                    </span>
+                    {a.name}
+                  </button>
+                )
+              }              )}
+            </>
+          )}
+          <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}>
+            <Pencil size={14} /> Переименовать
+          </button>
+          <div className="mf-ctx-divider" />
           <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
             <Trash2 size={14} /> Удалить
           </button>

@@ -264,7 +264,7 @@ export class TelegramService {
 
     const result = await this.client.sendFile(this.channelId as any, {
       file: filePath,
-      caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}`,
+      caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(fileStats.mtimeMs).toISOString()}`,
       forceDocument: true,
       workers: 4,
       progressCallback: (progress: any) => {
@@ -300,16 +300,22 @@ export class TelegramService {
       return 0
     }
     return messages
-      .filter((m: any) => m.file)
-      .map((m: any) => ({
-        messageId: typeof m.id === 'object' ? Number(m.id.toString()) : m.id,
-        fileName: m.file?.name || 'Unknown',
-        fileSize: toNum(m.file?.size),
-        mimeType: m.file?.mimeType || 'application/octet-stream',
-        uploadedAt: typeof m.date === 'number' ? m.date : toNum(m.date),
-        caption: m.message || '',
-        chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
-      }))
+      .filter((m: any) => m.file && m.message !== TelegramService.STATE_CAPTION)
+      .map((m: any) => {
+        const caption = m.message || ''
+        const createdMatch = caption.match(/Created:\s*(.+)/)
+        const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
+        return {
+          messageId: typeof m.id === 'object' ? Number(m.id.toString()) : m.id,
+          fileName: m.file?.name || 'Unknown',
+          fileSize: toNum(m.file?.size),
+          mimeType: m.file?.mimeType || 'application/octet-stream',
+          uploadedAt: typeof m.date === 'number' ? m.date : toNum(m.date),
+          originalDate: originalDate || undefined,
+          caption,
+          chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+        }
+      })
   }
 
   async downloadFile(messageId: number, fileName: string) {
@@ -322,6 +328,19 @@ export class TelegramService {
     const downloadPath = path.join(downloadsPath, fileName)
     await this.client.downloadMedia(message, { outputFile: downloadPath } as any)
     return { filePath: downloadPath, fileName }
+  }
+
+  async downloadMediaToTemp(messageId: number): Promise<string> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const message: any = messages[0]
+    if (!message.file) throw new Error('No file attached to message')
+    const tmpDir = app.getPath('temp')
+    const tmpFile = path.join(tmpDir, `_hash_${messageId}`)
+    if (fs.existsSync(tmpFile)) fs.rmSync(tmpFile, { force: true })
+    await this.client.downloadMedia(message, { outputFile: tmpFile } as any)
+    return tmpFile
   }
 
   async downloadThumbnail(messageId: number): Promise<string | null> {
@@ -581,6 +600,7 @@ export class TelegramService {
       if (m) {
         token = m[1]
         await this.addBotToChannel(botUsername)
+        await this.createCloudFolder(botUsername)
         return { token, username: botUsername }
       }
 
@@ -634,6 +654,76 @@ export class TelegramService {
     }
   }
 
+  async createCloudFolder(botUsername?: string) {
+    if (!this.client || !this.channelId) return
+
+    try {
+      const filters = await this.client.invoke(
+        new Api.messages.GetDialogFilters()
+      ) as any
+      const existing = (filters?.filters || []).find((f: any) =>
+        f.title?.text === 'Облако'
+      )
+      if (existing) return
+
+      const channelEntity = await this.client.getEntity(this.channelId) as any
+      const channelPeer = new Api.InputPeerChannel({
+        channelId: this.channelId,
+        accessHash: channelEntity.accessHash,
+      })
+
+      let botPeer: any = null
+      if (botUsername) {
+        try {
+          const botEntity = await this.client.getEntity(botUsername) as any
+          botPeer = new Api.InputPeerUser({
+            userId: botEntity.id,
+            accessHash: botEntity.accessHash,
+          })
+        } catch {}
+      }
+      if (!botPeer) {
+        try {
+          const participants = await this.client.invoke(
+            new Api.channels.GetParticipants({
+              channel: this.channelId as any,
+              filter: new Api.ChannelParticipantsBots(),
+              offset: 0,
+              limit: 200,
+              hash: 0,
+            })
+          ) as any
+          const bot = participants?.users?.find((u: any) => u.bot)
+          if (bot) {
+            botPeer = new Api.InputPeerUser({
+              userId: BigInt(bot.id.toString()),
+              accessHash: bot.accessHash || 0,
+            })
+          }
+        } catch {}
+      }
+
+      const usedIds = new Set((filters?.filters || []).map((f: any) => f.id))
+      let folderId = 2
+      while (usedIds.has(folderId)) folderId++
+
+      await this.client.invoke(
+        new Api.messages.UpdateDialogFilter({
+          id: folderId,
+          filter: new Api.DialogFilter({
+            id: folderId,
+            title: new Api.TextWithEntities({ text: 'Облако', entities: [] }),
+            pinnedPeers: [],
+            includePeers: botPeer ? [channelPeer, botPeer] : [channelPeer],
+            excludePeers: [],
+          }),
+        })
+      )
+    } catch (e) {
+      console.warn('Failed to create cloud folder:', (e as Error).message)
+    }
+  }
+
   async getUserInfo(): Promise<{ firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }> {
     if (!this.client) throw new Error('Client not initialized')
     const me = await this.client.getMe() as any
@@ -671,5 +761,100 @@ export class TelegramService {
     const sizes = ['Bytes', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+  }
+
+  private static STATE_FILENAME = '_rc_state.json'
+  private static STATE_CAPTION = '_rc_state_v1'
+  private stateMsgId: number | null = null
+
+  private get stateIdPath(): string {
+    return path.join(app.getPath('userData'), 'state-msg-id.json')
+  }
+
+  private saveStateMsgId(id: number) {
+    this.stateMsgId = id
+    try { fs.writeFileSync(this.stateIdPath, JSON.stringify({ id })) } catch {}
+  }
+
+  private loadStateMsgId(): number | null {
+    try {
+      if (fs.existsSync(this.stateIdPath)) {
+        const data = JSON.parse(fs.readFileSync(this.stateIdPath, 'utf8'))
+        return data.id || null
+      }
+    } catch {}
+    return null
+  }
+
+  async syncState(jsonStr: string) {
+    if (!this.client || !this.channelId) throw new Error('Not initialized')
+
+    const tmpDir = app.getPath('temp')
+    const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
+    fs.writeFileSync(tmpFile, jsonStr, 'utf8')
+
+    // Delete old sync file if known
+    if (this.stateMsgId === null) this.stateMsgId = this.loadStateMsgId()
+    if (this.stateMsgId) {
+      try {
+        await this.client.invoke(
+          new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [this.stateMsgId] })
+        )
+      } catch {}
+    }
+
+    // Upload new state file
+    const result = await this.client.sendFile(this.channelId as any, {
+      file: tmpFile,
+      caption: TelegramService.STATE_CAPTION,
+      forceDocument: true,
+      workers: 4,
+    } as any)
+
+    fs.rmSync(tmpFile, { force: true })
+
+    const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
+    this.saveStateMsgId(msgId)
+  }
+
+  async loadStateFromChannel(): Promise<string | null> {
+    if (!this.client || !this.channelId) throw new Error('Not initialized')
+
+    // Try cached message ID first
+    if (this.stateMsgId === null) this.stateMsgId = this.loadStateMsgId()
+    if (this.stateMsgId) {
+      try {
+        const msgs = await this.client.getMessages(this.channelId as any, { ids: [this.stateMsgId] })
+        if (msgs && msgs.length > 0 && (msgs[0] as any).file) {
+          const tmpDir = app.getPath('temp')
+          const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
+          await this.client.downloadMedia(msgs[0] as any, { outputFile: tmpFile } as any)
+          if (fs.existsSync(tmpFile)) {
+            const content = fs.readFileSync(tmpFile, 'utf8')
+            fs.rmSync(tmpFile, { force: true })
+            return content
+          }
+        }
+      } catch {}
+    }
+
+    // Fallback: search by caption
+    const allMsgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+    for (const m of allMsgs) {
+      const msg = m as any
+      if (msg.file && msg.message === TelegramService.STATE_CAPTION) {
+        this.saveStateMsgId(this.msgId(msg))
+        const tmpDir = app.getPath('temp')
+        const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
+        await this.client.downloadMedia(msg, { outputFile: tmpFile } as any)
+        if (fs.existsSync(tmpFile)) {
+          const content = fs.readFileSync(tmpFile, 'utf8')
+          fs.rmSync(tmpFile, { force: true })
+          return content
+        }
+      }
+    }
+
+    return null
   }
 }

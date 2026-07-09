@@ -7,7 +7,7 @@ const COMMANDS = [
   { id: "go-files", label: "Мои файлы", path: "/files" },
   { id: "go-upload", label: "Загрузить", path: "/upload" },
   { id: "go-autosync", label: "Авто-синхронизация", path: "/autosync" },
-  { id: "go-statistics", label: "Статистика", path: "/statistics" },
+
   { id: "go-trash", label: "Корзина", path: "/trash" },
   { id: "go-favorites", label: "Избранное", path: "/favorites" },
   { id: "go-shared", label: "Общие ссылки", path: "/shared" },
@@ -16,12 +16,7 @@ const COMMANDS = [
   { id: "go-search", label: "Поиск", path: "/search" },
   { id: "go-calendar", label: "Календарь", path: "/calendar" },
   { id: "go-albums", label: "Альбомы", path: "/albums" },
-  { id: "go-notes", label: "Заметки", path: "/notes" },
-  { id: "go-network", label: "Сеть", path: "/network" },
-  { id: "go-diagnostics", label: "Диагностика", path: "/diagnostics" },
   { id: "go-settings", label: "Настройки", path: "/settings" },
-  { id: "go-help", label: "Горячие клавиши", path: "/help" },
-  { id: "go-about", label: "О RodjerCloud", path: "/about" },
 ]
 
 export default function CommandPalette() {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Copy, AlertTriangle } from 'lucide-react'
+import { FolderOpen, Copy, AlertTriangle, Bot, Info } from 'lucide-react'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
   const [downloadPath, setDownloadPath] = useState('')
@@ -8,6 +8,9 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [reduceAnim, setReduceAnim] = useState(false)
   const [compact, setCompact] = useState(false)
   const [toast, setToast] = useState('')
+  const [botToken, setBotToken] = useState('')
+  const [botConfigured, setBotConfigured] = useState(false)
+  const [version, setVersion] = useState("3.0.0")
 
   useEffect(() => {
     (async () => {
@@ -20,7 +23,12 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       setCompact(localStorage.getItem('v2.compact') === '1')
       if (localStorage.getItem('v2.reduceAnim') === '1') document.body.classList.add('reduce-anim')
       if (localStorage.getItem('v2.compact') === '1') document.body.classList.add('compact')
+      const v = await window.electronAPI.app.getVersion()
+      if (v.success && v.data) setVersion(v.data)
     })()
+    window.electronAPI.share.getBotToken().then((r: any) => {
+      if (r.success && r.data) { setBotConfigured(true); setBotToken(r.data) }
+    })
   }, [])
 
   const show = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
@@ -60,6 +68,9 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     await window.electronAPI.storage.factoryReset()
     localStorage.clear()
     onChangeChannel()
+  }
+  const checkUpdates = () => {
+    show('У вас последняя версия')
   }
 
   return (
@@ -106,10 +117,53 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
         <button className="se-secondary" onClick={onChangeChannel}>Сменить канал</button>
       </section>
 
+      <section className="se-card">
+        <h2><Bot size={16} /> Бот для ссылок</h2>
+        <div className="se-row"><span>Токен бота</span>
+          {botConfigured ? <span style={{ color: 'var(--accent-1)' }}>✓ Настроен</span> : <span style={{ color: 'var(--red)' }}>Не настроен</span>}
+        </div>
+        <div className="se-row" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
+          <input value={botToken} onChange={e => setBotToken(e.target.value)}
+            placeholder="Введите токен бота: 123456:ABCdef..."
+            style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'monospace' }} />
+          <button className="se-secondary" onClick={async () => {
+            if (!botToken.trim()) return show('Введите токен')
+            const r = await window.electronAPI.share.setBotToken(botToken.trim())
+            if (r.success) { setBotConfigured(true); show('Токен сохранён') }
+            else show(r.error || 'Ошибка')
+          }}>Сохранить токен</button>
+        </div>
+        <div className="se-row" style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          @BotFather → создать бота → добавить администратором канала «My area» → написать боту /start
+        </div>
+      </section>
+
       <section className="se-card se-danger">
         <h2><AlertTriangle size={16} /> Опасная зона</h2>
         <button className="se-warn" onClick={clearAll}>Очистить локальные данные</button>
         <button className="se-warn" onClick={factoryReset}>Сброс настроек</button>
+      </section>
+
+      <section className="se-card">
+        <h2><Info size={16} /> О программе</h2>
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: 'var(--accent)', display: 'inline-flex',
+            alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 8 }}>CS</div>
+          <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
+          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>v{version} — 100+ возможностей</div>
+          <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
+            RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
+            Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
+          </p>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+            {['Electron','React','TypeScript','gramjs','chokidar'].map(s => (
+              <span key={s} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--v3-border-soft)',
+                padding: '4px 10px', borderRadius: 99, fontSize: 11, color: 'var(--v3-text-mute)' }}>{s}</span>
+            ))}
+          </div>
+          <button className="se-secondary" onClick={checkUpdates}>Проверить обновления</button>
+          <div style={{ marginTop: 16, fontSize: 12, color: 'var(--v3-text-mute)' }}>Распространяется под лицензией MIT</div>
+        </div>
       </section>
 
       {toast && <div className="mf-toast">{toast}</div>}

@@ -65,6 +65,20 @@ declare global {
         load: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
         close: (sessionId: string) => void
       }
+      share: {
+        generateLink: (messageId: number, channelId: string, originalFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        setBotToken: (token: string) => Promise<{ success: boolean; error?: string }>
+        getBotToken: () => Promise<{ success: boolean; data?: string; error?: string }>
+        ensureBot: () => Promise<{ success: boolean; data?: any; error?: string }>
+        downloadFile: (url: string, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
+      }
+      state: {
+        sync: (jsonStr: string) => Promise<{ success: boolean; error?: string }>
+        load: () => Promise<{ success: boolean; data?: string | null; error?: string }>
+      }
+      file: {
+        computeHash: (messageId: number) => Promise<{ success: boolean; data?: string; error?: string }>
+      }
     }
   }
 }

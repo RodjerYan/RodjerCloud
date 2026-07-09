@@ -1,8 +1,8 @@
 import React from "react"
 import { NavLink } from "react-router-dom"
-import { Home, FolderOpen, Upload, RefreshCw, BarChart3, Settings, Info,
-  LogOut, Trash2, Star, Link2, Activity, Tag, Search, CalendarDays, Image as ImgIcon,
-  StickyNote, Wifi, Command, HelpCircle, Stethoscope, Headphones, Cloud } from "lucide-react"
+import { Home, FolderOpen, Upload, RefreshCw, Settings,
+  LogOut, Trash2, Star, Link2, Image as ImgIcon,
+  Command, Headphones, Cloud } from "lucide-react"
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void }
 
@@ -10,23 +10,14 @@ const items = [
   { to: "/", label: "Главная", icon: Home, end: true },
   { to: "/files", label: "Мои файлы", icon: FolderOpen },
   { to: "/upload", label: "Загрузить", icon: Upload },
+  { to: "/audioplayer", label: "Аудиоплеер", icon: Headphones },
+  { to: "/albums", label: "Альбомы", icon: ImgIcon },
   { to: "/autosync", label: "Авто-синх.", icon: RefreshCw },
-  { to: "/statistics", label: "Статистика", icon: BarChart3 },
+
   { to: "/trash", label: "Корзина", icon: Trash2 },
   { to: "/favorites", label: "Избранное", icon: Star },
   { to: "/shared", label: "Общее", icon: Link2 },
-  { to: "/activity", label: "Активность", icon: Activity },
-  { to: "/tags", label: "Теги", icon: Tag },
-  { to: "/search", label: "Поиск", icon: Search },
-  { to: "/calendar", label: "Календарь", icon: CalendarDays },
-  { to: "/albums", label: "Альбомы", icon: ImgIcon },
-  { to: "/audioplayer", label: "Аудиоплеер", icon: Headphones },
-  { to: "/notes", label: "Заметки", icon: StickyNote },
-  { to: "/network", label: "Сеть", icon: Wifi },
-  { to: "/diagnostics", label: "Диагностика", icon: Stethoscope },
-  { to: "/help", label: "Горячие клавиши", icon: HelpCircle },
-  { to: "/settings", label: "Настройки", icon: Settings },
-  { to: "/about", label: "О программе", icon: Info }
+  { to: "/settings", label: "Настройки", icon: Settings }
 ]
 
 export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {

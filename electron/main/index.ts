@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell } from 'e
 import * as fs from 'fs'
 import * as https from 'https'
 import * as zlib from 'zlib'
+import * as crypto from 'crypto'
 import * as pathMod from 'path'
 import path from 'path'
 import { ZipArchive } from 'archiver'
@@ -182,6 +183,7 @@ ipcMain.handle('telegram:reconnect', async () => {
         log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
       }
     }
+    await telegramService.createCloudFolder()
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -988,6 +990,30 @@ ipcMain.handle('share:download-file', async (_, url: string, fileName: string) =
     const result = await downloadAndSave(url, filePath)
     shell.showItemInFolder(filePath)
     return { success: true, data: { filePath } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('state:sync', async (_, jsonStr: string) => {
+  try {
+    await telegramService.syncState(jsonStr)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('state:load', async () => {
+  try {
+    const data = await telegramService.loadStateFromChannel()
+    return { success: true, data }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('file:compute-hash', async (_, messageId: number) => {
+  try {
+    const tmpFile = await telegramService.downloadMediaToTemp(messageId)
+    const buf = fs.readFileSync(tmpFile)
+    const hash = crypto.createHash('sha256').update(buf).digest('hex')
+    fs.rmSync(tmpFile, { force: true })
+    return { success: true, data: hash }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

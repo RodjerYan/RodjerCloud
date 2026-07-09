@@ -108,6 +108,14 @@ body.compact .mf-card-icon { height: 60px; }
   letter-spacing: -0.3px;
 }
 .mf-gm { margin-bottom: 6px; }
+.mf-gm-month {
+  font-size: 14px; font-weight: 600; color: var(--text-dim); margin-bottom: 10px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.mf-gd { margin-bottom: 20px; }
+.mf-gd-title {
+  font-size: 13px; font-weight: 500; color: var(--text-mute); margin-bottom: 8px;
+}
 .mf-gm-title {
   font-size: 14px; font-weight: 600; color: var(--text-dim); margin-bottom: 10px;
   text-transform: uppercase; letter-spacing: 0.3px;

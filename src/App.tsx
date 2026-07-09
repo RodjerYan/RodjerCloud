@@ -12,9 +12,8 @@ import DashboardHome from "./pages/DashboardHome"
 import MyFilesPage from "./pages/MyFilesPage"
 import UploadPage from "./pages/UploadPage"
 import AutoSyncPage from "./pages/AutoSyncPage"
-import StatisticsPage from "./pages/StatisticsPage"
+
 import SettingsPage from "./pages/SettingsPage"
-import AboutPage from "./pages/AboutPage"
 import TrashPage from "./pages/TrashPage"
 import FavoritesPage from "./pages/FavoritesPage"
 import SharedPage from "./pages/SharedPage"
@@ -24,11 +23,7 @@ import SearchPage from "./pages/SearchPage"
 import CalendarPage from "./pages/CalendarPage"
 import AlbumsPage from "./pages/AlbumsPage"
 import AudioPlayerPage from "./pages/AudioPlayerPage"
-import NotesPage from "./pages/NotesPage"
-import NetworkPage from "./pages/NetworkPage"
-import DiagnosticsPage from "./pages/DiagnosticsPage"
-import HelpPage from "./pages/HelpPage"
-import { v3store } from "./lib/v3store"
+import { v3store, loadStateFromTelegram } from "./lib/v3store"
 import "./styles/glass.css"
 import "./styles/sidebar.css"
 import "./styles/dashboard-home.css"
@@ -81,6 +76,7 @@ function App() {
           fetchUserInfo()
           setShowDuckSplash(true)
           v3store.logActivity("login", "Reconnected to Telegram channel")
+          loadStateFromTelegram()
         }
       }
     } catch (e) { console.error("Session check failed:", e) }
@@ -92,6 +88,7 @@ function App() {
     fetchUserInfo()
     setShowDuckSplash(true)
     v3store.logActivity("login", "Login successful")
+    loadStateFromTelegram()
   }
   const handleLogout = async () => {
     try {
@@ -120,7 +117,7 @@ function App() {
             <Route path="/files" element={<MyFilesPage />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/autosync" element={<AutoSyncPage />} />
-            <Route path="/statistics" element={<StatisticsPage />} />
+
             <Route path="/trash" element={<TrashPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/shared" element={<SharedPage />} />
@@ -130,12 +127,7 @@ function App() {
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/audioplayer" element={<AudioPlayerPage />} />
-            <Route path="/notes" element={<NotesPage />} />
-            <Route path="/network" element={<NetworkPage />} />
-            <Route path="/diagnostics" element={<DiagnosticsPage />} />
-            <Route path="/help" element={<HelpPage />} />
             <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
-            <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

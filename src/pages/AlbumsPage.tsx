@@ -1,36 +1,377 @@
-import React, { useState } from "react"
-import { Image as ImgIcon, Plus, Trash2 } from "lucide-react"
+import React, { useEffect, useState, useMemo, useCallback } from "react"
+import { createPortal } from 'react-dom'
+import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil } from "lucide-react"
 import { v3store } from "../lib/v3store"
+import { SMART_ALBUMS } from "../lib/albums"
+
+const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
+
+function fmtSize(n: number) {
+  if (!n) return '0 B'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
+}
+
+function fileDate(f: any): number {
+  return f.originalDate || f.uploadedAt || 0
+}
+
+function groupByDay(items: any[]) {
+  const years: Record<number, Record<number, Record<number, any[]>>> = {}
+  items.forEach(f => {
+    const d = new Date(fileDate(f) * 1000)
+    if (!isFinite(d.getTime())) return
+    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate()
+    if (!years[y]) years[y] = {}
+    if (!years[y][m]) years[y][m] = {}
+    if (!years[y][m][day]) years[y][m][day] = []
+    years[y][m][day].push(f)
+  })
+  return years
+}
 
 export default function AlbumsPage() {
+  const [allFiles, setAllFiles] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [albums, setAlbums] = useState(v3store.getAlbums())
-  const [name, setName] = useState("")
-  const create = () => {
-    if (!name.trim()) return
-    v3store.addAlbum({ id: Math.random().toString(36).slice(2), name: name.trim(), messageIds: [], createdAt: Date.now() })
-    setAlbums(v3store.getAlbums()); setName("")
+  const [newName, setNewName] = useState('')
+  const [openAlbum, setOpenAlbum] = useState<string | null>(null)
+  const [thumbs, setThumbs] = useState<Record<number, string>>({})
+  const [hashing, setHashing] = useState(false)
+  const [hashProgress, setHashProgress] = useState({ done: 0, total: 0 })
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
+  const [toast, setToast] = useState('')
+  const [renameTarget, setRenameTarget] = useState<any>(null)
+  const [renameInput, setRenameInput] = useState('')
+  const [showSub, setShowSub] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+
+  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
+  const closeCtx = useCallback(() => { setCtxMenu(null); setShowSub(null) }, [])
+
+  useEffect(() => {
+    window.electronAPI.telegram.listFiles().then((r: any) => {
+      if (r?.success) setAllFiles(r.data || [])
+      setLoading(false)
+    })
+    setAlbums(v3store.getAlbums())
+  }, [])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
+      setCtxMenu(null)
+    }
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [ctxMenu])
+
+  const onContextMenu = useCallback((e: React.MouseEvent, f: any) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
+  }, [])
+
+  const loadThumbs = useCallback(async (files: any[]) => {
+    const map: Record<number, string> = {}
+    await Promise.all(files.map(async (f) => {
+      try {
+        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId)
+        if (r.success && r.data) map[f.messageId] = 'file://' + r.data
+      } catch {}
+    }))
+    setThumbs(prev => ({ ...prev, ...map }))
+  }, [])
+
+  const currentAlbum: SmartAlbum | { id: string; name: string; messageIds: number[] } | null = openAlbum
+    ? SMART_ALBUMS.find(a => a.id === openAlbum) || albums.find(a => a.id === openAlbum) || null
+    : null
+
+  const computeHashes = useCallback(async (files: any[]) => {
+    let done = 0; const total = files.length
+    setHashProgress({ done, total }); setHashing(true)
+    for (const f of files) {
+      const existing = v3store.metaFor(f.messageId)
+      if (existing?.hash) { done++; setHashProgress({ done, total }); continue }
+      try {
+        const r = await window.electronAPI.file.computeHash(f.messageId)
+        if (r.success && r.data) v3store.setMeta({ messageId: f.messageId, hash: r.data })
+      } catch {}
+      done++; setHashProgress({ done, total })
+    }
+    setHashing(false); setAlbums(v3store.getAlbums())
+  }, [])
+
+  const albumFiles = useMemo(() => {
+    if (!currentAlbum) return []
+    const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
+    if (isDuplicates) {
+      const metaMap = new Map<number, any>()
+      v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
+      const hashGroups = new Map<string, any[]>()
+      allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
+        const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
+      })
+      const dups: any[] = []
+      hashGroups.forEach(group => { if (group.length > 1) dups.push(...group) })
+      return dups
+    }
+    const smart = SMART_ALBUMS.find(a => a.id === currentAlbum.id)
+    if (smart?.filter) return allFiles.filter(smart.filter)
+    const ua = albums.find(a => a.id === currentAlbum.id)
+    if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
+  }, [currentAlbum, allFiles, albums])
+
+  const grouped = useMemo(() => groupByDay(albumFiles), [albumFiles])
+
+  useEffect(() => {
+    if (openAlbum) {
+      window.electronAPI.telegram.listFiles().then((r: any) => { if (r?.success) setAllFiles(r.data || []) })
+      const isDuplicates = SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates
+      if (isDuplicates) {
+        const toHash = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+        computeHashes(toHash)
+      }
+      if (albumFiles.length > 0) loadThumbs(albumFiles.slice(0, 50))
+    }
+  }, [openAlbum])
+
+  const createAlbum = () => {
+    if (!newName.trim()) return
+    v3store.addAlbum({ id: Math.random().toString(36).slice(2), name: newName.trim(), messageIds: [], createdAt: Date.now() })
+    setAlbums(v3store.getAlbums()); setNewName(''); setShowCreateModal(false)
   }
-  const remove = (id: string) => { v3store.removeAlbum(id); setAlbums(v3store.getAlbums()) }
-  return (
-    <div className="v3-page" data-testid="albums-page">
-      <h1 className="v3-h1">Альбомы</h1>
-      <div className="v3-sub">Группируйте изображения в альбомы и показывайте как слайд-шоу.</div>
-      <div className="v3-card" style={{ marginTop: 18 }}>
-        <div className="v3-row">
-          <input className="v3-input" placeholder="Название альбома" value={name} onChange={e => setName(e.target.value)} data-testid="album-name"/>
-          <button className="v3-btn primary" onClick={create} data-testid="album-create"><Plus size={14}/> Создать</button>
+
+  const removeAlbum = (id: string) => {
+    if (!confirm('Удалить альбом?')) return; v3store.removeAlbum(id); setAlbums(v3store.getAlbums())
+    if (openAlbum === id) setOpenAlbum(null)
+  }
+
+  const removeFile = (messageId: number) => {
+    if (!currentAlbum || SMART_ALBUMS.find(a => a.id === currentAlbum.id)) return
+    v3store.removeFromAlbum(currentAlbum.id, messageId); setAlbums(v3store.getAlbums())
+  }
+
+  const handleDownload = async (f: any) => {
+    const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
+    if (!r.success) alert(r.error || 'Ошибка')
+  }
+
+  const handleDelete = async (f: any) => {
+    if (!confirm('Удалить ' + f.fileName + '?')) return
+    const r = await window.electronAPI.telegram.deleteFile(f.messageId)
+    if (r.success) setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+  }
+
+  const handlePreview = (f: any) => {
+    const idx = albumFiles.indexOf(f)
+    window.electronAPI.preview.open(albumFiles, idx)
+  }
+
+  const handleCopyLink = async (f: any) => {
+    try {
+      const r = await window.electronAPI.share.generateLink(f.messageId, f.chatId || '', f.fileName)
+      if (r.success) { const url = r.data.url || r.data; window.electronAPI.app.copyToClipboard(url); showToast('Ссылка скопирована') }
+      else showToast(r.error || 'Ошибка')
+    } catch { showToast('Ошибка') }
+  }
+
+  const renderCard = (f: any, isSmart: boolean, isDup?: boolean) => {
+    const thumbUrl = thumbs[f.messageId]; const isVid = f.mimeType?.startsWith('video/')
+    return (
+      <div key={f.messageId} className="mf-gm-card" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
+        <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
+          {thumbUrl ? (<><img src={thumbUrl} className="mf-gm-img" />{isVid && <div className="mf-gm-play"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 24 24' fill='white'%3E%3Cpolygon points='5,3 19,12 5,21'/%3E%3C/svg%3E" /></div>}</>) : isVid ? '🎬' : '🖼️'}
         </div>
-        <div className="v3-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", marginTop: 16 }}>
-          {albums.map(a => (
-            <div key={a.id} className="v3-card" style={{ padding: 14 }}>
-              <div className="v3-row"><ImgIcon size={16}/><div style={{ flex: 1, fontWeight: 600 }}>{a.name}</div>
-                <button className="v3-btn ghost" onClick={() => remove(a.id)}><Trash2 size={14}/></button>
-              </div>
-              <div className="v3-sub v3-num">{a.messageIds.length} элементов · {new Date(a.createdAt).toLocaleDateString()}</div>
-            </div>
-          ))}
+        <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+        <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+        <div className="mf-gm-actions">
+          <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+          <button title="Просмотр" onClick={() => handlePreview(f)}><Eye size={13} /></button>
+          {isSmart ? <button title="Удалить из Telegram" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button> : <button title="Удалить из альбома" className="danger" onClick={() => removeFile(f.messageId)}><X size={13} /></button>}
         </div>
       </div>
+    )
+  }
+
+  if (openAlbum && currentAlbum) {
+    const isSmart = !!SMART_ALBUMS.find(a => a.id === currentAlbum.id)
+    const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
+    return (
+      <div className="v3-page">
+        {toast && <div className="mf-toast">{toast}</div>}
+        <div className="v3-row" style={{ marginBottom: 14 }}>
+          <button className="v3-btn ghost" onClick={() => setOpenAlbum(null)}><ArrowLeft size={18} /></button>
+          <h1 className="v3-h1" style={{ margin: 0 }}>{currentAlbum.name}</h1>
+          <span className="v3-sub" style={{ marginLeft: 8 }}>{isDuplicates ? `${albumFiles.length} дубликатов` : albumFiles.length}</span>
+        </div>
+        {hashing && (
+          <div className="v3-row" style={{ marginBottom: 12, gap: 8 }}>
+            <Loader2 size={16} className="spin" /><span className="v3-sub">Поиск дубликатов… {hashProgress.done}/{hashProgress.total}</span>
+          </div>
+        )}
+        <div className="mf-gallery-body">
+          {isDuplicates && !hashing ? (
+            <div className="mf-gallery-body">
+              {(() => {
+                const metaMap = new Map<number, any>()
+                v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
+                const hashGroups = new Map<string, any[]>()
+                allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
+                  const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
+                })
+                const groups: [string, any[]][] = []
+                hashGroups.forEach((group, hash) => { if (group.length > 1) groups.push([hash, group]) })
+                return groups.map(([hash, files]) => (
+                  <div key={hash} className="mf-gy">
+                    <div className="mf-gy-title">{files.length} дубликата</div>
+                    <div className="mf-gm-items">{files.map(f => renderCard(f, true, true))}</div>
+                  </div>
+                ))
+              })()}
+            </div>
+          ) : (
+            Object.entries(grouped).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+              <div key={year} className="mf-gy">
+                <div className="mf-gy-title">{year}</div>
+                {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
+                  <div key={year + '-' + month} className="mf-gm">
+                    <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
+                    {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
+                      <div key={`${year}-${month}-${day}`} className="mf-gd">
+                        <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                        <div className="mf-gm-items">{items.map(f => renderCard(f, isSmart))}</div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+          {albumFiles.length === 0 && !hashing && <div className="v3-sub" style={{ padding: 30, textAlign: 'center' }}>Нет файлов</div>}
+        </div>
+
+        {renameTarget && createPortal(
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }} onClick={() => setRenameTarget(null)}>
+            <div className="v3-card" style={{ padding: 16, minWidth: 300 }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Переименовать</div>
+              <input className="v3-input" value={renameInput} onChange={e => setRenameInput(e.target.value)} style={{ marginBottom: 10 }} autoFocus />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="v3-btn" onClick={() => setRenameTarget(null)}>Отмена</button>
+                <button className="v3-btn primary" onClick={() => {
+                  v3store.setMeta({ messageId: renameTarget.messageId, displayName: renameInput.trim() || undefined })
+                  setRenameTarget(null); showToast('Переименовано')
+                  setAllFiles(prev => prev.map(f => f.messageId === renameTarget.messageId ? { ...f, fileName: renameInput.trim() || f.fileName } : f))
+                }}>Сохранить</button>
+              </div>
+            </div>
+          </div>, document.body
+        )}
+
+        {ctxMenu && createPortal(
+          <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+            <button onClick={() => { handleCopyLink(ctxMenu.file); closeCtx() }}><Share2 size={14} /> Поделиться</button>
+            <button onClick={() => { handleDownload(ctxMenu.file); closeCtx() }}><Download size={14} /> Скачать</button>
+            <button onClick={(e) => { e.stopPropagation(); setShowSub(showSub === 'albums' ? null : 'albums') }}
+              style={{ position: 'relative' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M21 9H3"/></svg> В альбом {showSub === 'albums' && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5 }}>‹</span>}
+            </button>
+            {showSub === 'albums' && (
+              <>
+                {v3store.getAlbums().length === 0 && (
+                  <div style={{ paddingLeft: 36, fontSize: 11, color: 'var(--text-dim)' }}>Нет пользовательских альбомов</div>
+                )}
+                {v3store.getAlbums().map(a => {
+                  const inAlbum = a.messageIds.includes(ctxMenu.file.messageId)
+                  return (
+                    <button key={a.id} onClick={() => {
+                      if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
+                      else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
+                      showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
+                      closeCtx()
+                    }} style={{ paddingLeft: 36, fontSize: 12 }}>
+                      <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                        {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
+                      </span>
+                      {a.name}
+                    </button>
+                  )
+                })}
+              </>
+            )}
+            <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}><Pencil size={14} /> Переименовать</button>
+            <div className="mf-ctx-divider" />
+            <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}><Trash2 size={14} /> Удалить</button>
+          </div>, document.body
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="v3-page" data-testid="albums-page">
+      <div className="v3-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 className="v3-h1" style={{ margin: 0 }}>Альбомы</h1>
+          <div className="v3-sub">Автоматические и пользовательские альбомы.</div>
+        </div>
+        <button className="v3-btn primary" style={{ padding: 10, borderRadius: '50%' }} onClick={() => setShowCreateModal(true)}><Plus size={20} /></button>
+      </div>
+      <div className="v3-card" style={{ marginTop: 18 }}>
+        <div className="v3-sub" style={{ marginBottom: 12 }}>Системные альбомы</div>
+        <div className="v3-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+          {SMART_ALBUMS.map(sa => {
+            let count = 0
+            if (sa.isDuplicates) {
+              const metas = v3store.getMeta().filter(m => m.hash)
+              const hashCounts = new Map<string, number>()
+              metas.forEach(m => hashCounts.set(m.hash!, (hashCounts.get(m.hash!) || 0) + 1))
+              hashCounts.forEach(c => { if (c > 1) count += c })
+            } else if (sa.filter) count = allFiles.filter(sa.filter).length
+            return (
+              <div key={sa.id} className="v3-card" style={{ padding: 14, cursor: 'pointer' }} onClick={() => setOpenAlbum(sa.id)}>
+                <div className="v3-row">{sa.id === '_photos' ? <Image size={18} /> : sa.id === '_videos' ? <Film size={18} /> : sa.id === '_screenshots' ? <Camera size={18} /> : <Copy size={18} />}<div style={{ flex: 1, fontWeight: 600, marginLeft: 8 }}>{sa.name}</div></div>
+                <div className="v3-sub v3-num" style={{ marginLeft: 26 }}>{count > 0 ? `${count} файлов` : '—'}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div className="v3-card" style={{ marginTop: 18 }}>
+        <div className="v3-sub" style={{ marginBottom: 12 }}>Мои альбомы</div>
+        {albums.length === 0 ? (
+          <div className="v3-sub" style={{ padding: 20, textAlign: 'center' }}>Нет альбомов. Создайте первый!</div>
+        ) : (
+          <div className="v3-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+            {albums.map(a => (
+              <div key={a.id} className="v3-card" style={{ padding: 14, cursor: 'pointer' }} onClick={() => setOpenAlbum(a.id)}>
+                <div className="v3-row"><Image size={18} /><div style={{ flex: 1, fontWeight: 600, marginLeft: 8 }}>{a.name}</div>
+                  <button className="v3-btn ghost" style={{ padding: 4 }} onClick={(e) => { e.stopPropagation(); removeAlbum(a.id) }}><Trash2 size={14} /></button>
+                </div>
+                <div className="v3-sub v3-num" style={{ marginLeft: 26 }}>{a.messageIds.length} файлов · {new Date(a.createdAt).toLocaleDateString()}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showCreateModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }} onClick={() => setShowCreateModal(false)}>
+          <div className="v3-card" style={{ padding: 16, minWidth: 260 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Название альбома</div>
+            <input className="v3-input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Введите название" style={{ marginBottom: 10 }} autoFocus onKeyDown={e => e.key === 'Enter' && createAlbum()} />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="v3-btn" onClick={() => setShowCreateModal(false)}>Отмена</button>
+              <button className="v3-btn primary" onClick={createAlbum}>Ок</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {toast && <div className="mf-toast">{toast}</div>}
     </div>
   )
 }
