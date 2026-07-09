@@ -107,5 +107,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   file: {
     computeHash: (messageId: number) => ipcRenderer.invoke('file:compute-hash', messageId),
+  },
+  duplicates: {
+    list: () => ipcRenderer.invoke('duplicates:list'),
+    remove: (messageId: number) => ipcRenderer.invoke('duplicates:remove', messageId),
+    scanAll: () => ipcRenderer.invoke('duplicates:scan-all'),
+    onProgress: (cb: (data: { done: number; total: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('duplicates:scan-progress', listener)
+      return () => ipcRenderer.removeListener('duplicates:scan-progress', listener)
+    },
   }
 })

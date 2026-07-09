@@ -82,6 +82,12 @@ declare global {
       file: {
         computeHash: (messageId: number) => Promise<{ success: boolean; data?: string; error?: string }>
       }
+      duplicates: {
+        list: () => Promise<{ success: boolean; data?: Array<{ hash: string; files: Array<{ messageId: number; hash: string; fileName: string; fileSize: number }> }>; error?: string }>
+        remove: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        scanAll: () => Promise<{ success: boolean; data?: any; error?: string }>
+        onProgress: (cb: (data: { done: number; total: number }) => void) => () => void
+      }
     }
   }
 }

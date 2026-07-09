@@ -2,9 +2,10 @@ import { TelegramClient } from 'telegram'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
 import * as fs from 'fs'
-import * as path from 'path'
 import * as crypto from 'crypto'
+import * as path from 'path'
 import { app } from 'electron'
+import { addEntry, computeFileHash } from './hash-db'
 
 const API_ID = 35766547
 const API_HASH = '5e37a0cba3964d7ca0814147562452ce'
@@ -284,8 +285,12 @@ export class TelegramService {
     const fileTime = fileStats.birthtimeMs && fileStats.birthtimeMs > 0
       ? Math.floor(fileStats.birthtimeMs / 1000)
       : Math.floor(fileStats.mtimeMs / 1000)
+    const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
+    computeFileHash(filePath).then(hash => {
+      addEntry({ messageId: msgId, hash, fileName, fileSize: sizeBytes })
+    }).catch(() => {})
     return {
-      messageId: typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id,
+      messageId: msgId,
       fileName,
       fileSize: sizeBytes,
       uploadedAt: fileTime,

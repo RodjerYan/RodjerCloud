@@ -10,6 +10,7 @@ import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
+import { init as initHashDb, getDuplicates, getDb, removeEntry, computeFileHash } from './hash-db'
 
 // Logger
 const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
@@ -77,6 +78,7 @@ app.whenReady().then(async () => {
   if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
+  initHashDb()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1034,6 +1036,41 @@ ipcMain.handle('file:compute-hash', async (_, messageId: number) => {
     const hash = crypto.createHash('sha256').update(buf).digest('hex')
     fs.rmSync(tmpFile, { force: true })
     return { success: true, data: hash }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('duplicates:list', async () => {
+  try {
+    const groups = getDuplicates()
+    return { success: true, data: groups }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('duplicates:remove', async (_, messageId: number) => {
+  removeEntry(messageId)
+  return { success: true }
+})
+
+ipcMain.handle('duplicates:scan-all', async (event) => {
+  try {
+    const all = await telegramService.listFiles()
+    if (!all) return { success: false, error: 'No files' }
+    const existing = new Set(getDb().map((e: any) => e.messageId))
+    const total = all.filter((f: any) => !existing.has(f.messageId)).length
+    let done = 0
+    for (const f of all) {
+      if (existing.has(f.messageId)) continue
+      try {
+        const tmp = await telegramService.downloadMediaToTemp(f.messageId)
+        const hash = await computeFileHash(tmp)
+        fs.rmSync(tmp, { force: true })
+        const { addEntry } = await import('./hash-db')
+        addEntry({ messageId: f.messageId, hash, fileName: f.fileName, fileSize: f.fileSize })
+      } catch {}
+      done++
+      event.sender.send('duplicates:scan-progress', { done, total })
+    }
+    return { success: true, data: getDuplicates() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
