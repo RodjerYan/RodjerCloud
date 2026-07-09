@@ -90,5 +90,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     navigate: (sessionId: string, dir: number) => ipcRenderer.invoke('preview:navigate', sessionId, dir),
     load: (sessionId: string) => ipcRenderer.invoke('preview:load', sessionId),
     close: (id: string) => ipcRenderer.send('preview:close', id),
+  },
+  share: {
+    generateLink: (messageId: number, channelId: string, originalFileName?: string) => ipcRenderer.invoke('share:generate-link', messageId, channelId, originalFileName),
+    setBotToken: (token: string) => ipcRenderer.invoke('share:set-bot-token', token),
+    getBotToken: () => ipcRenderer.invoke('share:get-bot-token'),
+    ensureBot: () => ipcRenderer.invoke('share:ensure-bot'),
+    downloadFile: (url: string, fileName: string) => ipcRenderer.invoke('share:download-file', url, fileName),
   }
 })

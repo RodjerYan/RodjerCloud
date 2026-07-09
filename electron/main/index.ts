@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell } from 'electron'
 import * as fs from 'fs'
+import * as https from 'https'
 import * as zlib from 'zlib'
 import * as pathMod from 'path'
 import path from 'path'
@@ -7,6 +8,7 @@ import { ZipArchive } from 'archiver'
 import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
+import { BotService } from './bot-service'
 
 // Logger
 const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
@@ -22,6 +24,8 @@ let previewIdSeq = 0
 const telegramService = new TelegramService()
 const storageService = new StorageService()
 const autoSyncService = new AutoSyncService(telegramService)
+const botService = new BotService()
+botService.loadToken()
 let initialFolderSyncDone = false
 
 autoSyncService.setEventCallback((event) => {
@@ -133,6 +137,12 @@ ipcMain.handle('telegram:verify-code', async (_, code: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
+      try {
+        const botResult = await telegramService.createBotAndAddToChannel()
+        botService.setToken(botResult.token)
+      } catch (e) {
+        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+      }
       return { success: true, data: channelResult }
     }
     return result
@@ -146,6 +156,12 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
+      try {
+        const botResult = await telegramService.createBotAndAddToChannel()
+        botService.setToken(botResult.token)
+      } catch (e) {
+        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+      }
       return { success: true, data: channelResult }
     }
     return result
@@ -157,6 +173,15 @@ ipcMain.handle('telegram:reconnect', async () => {
     const sessionData = await storageService.getSession()
     if (!sessionData) return { success: false, error: 'No session found' }
     const result = await telegramService.reconnect(sessionData.session)
+    if (!botService.getToken()) {
+      try {
+        const botResult = await telegramService.createBotAndAddToChannel()
+        botService.setToken(botResult.token)
+        log('info', 'Bot created automatically after reconnect')
+      } catch (e) {
+        log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
+      }
+    }
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -917,3 +942,71 @@ ipcMain.handle('autosync:reset-uploaded', async () => {
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
+
+// ===== Share / Bot link IPC =====
+ipcMain.handle('share:set-bot-token', async (_, token: string) => {
+  try {
+    botService.setToken(token)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('share:get-bot-token', async () => {
+  try {
+    return { success: true, data: botService.getToken() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('share:generate-link', async (_, messageId: number, channelId: string, originalFileName?: string) => {
+  try {
+    const result = await botService.generateLink(telegramService, messageId, channelId, originalFileName)
+    return { success: true, data: result }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('share:ensure-bot', async () => {
+  try {
+    if (botService.getToken()) return { success: true, data: { created: false } }
+    const botResult = await telegramService.createBotAndAddToChannel()
+    botService.setToken(botResult.token)
+    return { success: true, data: { created: true, username: botResult.username } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('share:download-file', async (_, url: string, fileName: string) => {
+  try {
+    const downloadsPath = app.getPath('downloads')
+    let filePath = pathMod.join(downloadsPath, fileName)
+    let suffix = 1
+    const ext = pathMod.extname(fileName)
+    const base = pathMod.basename(fileName, ext)
+    while (fs.existsSync(filePath)) {
+      const name = `${base} (${suffix})${ext}`
+      filePath = pathMod.join(downloadsPath, name)
+      suffix++
+    }
+    const result = await downloadAndSave(url, filePath)
+    shell.showItemInFolder(filePath)
+    return { success: true, data: { filePath } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+function downloadAndSave(url: string, destPath: string): Promise<{ success: true; data: { filePath: string } }> {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath)
+    https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Download failed with status ${res.statusCode}`))
+        return
+      }
+      res.pipe(file)
+      file.on('finish', () => {
+        file.close()
+        resolve({ success: true, data: { filePath: destPath } })
+      })
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {})
+      reject(err)
+    })
+  })
+}

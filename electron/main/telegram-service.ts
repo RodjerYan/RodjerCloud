@@ -308,6 +308,7 @@ export class TelegramService {
         mimeType: m.file?.mimeType || 'application/octet-stream',
         uploadedAt: typeof m.date === 'number' ? m.date : toNum(m.date),
         caption: m.message || '',
+        chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
       }))
   }
 
@@ -525,6 +526,112 @@ export class TelegramService {
 
     this.debugLog('NO sync message found!')
     return null
+  }
+
+  async forwardMessages(toPeer: bigint, messageIds: number[], fromPeer: bigint) {
+    if (!this.client) throw new Error('Client not initialized')
+    const ids = messageIds.map((id) => id)
+    await this.client.forwardMessages(fromPeer, { messages: ids, toPeer })
+  }
+
+  async getUserId(): Promise<bigint> {
+    if (!this.client) throw new Error('Client not initialized')
+    const me = await this.client.getMe() as any
+    return BigInt(me.id.toString())
+  }
+
+  async createBotAndAddToChannel(): Promise<{ token: string; username: string }> {
+    if (!this.client || !this.channelId) throw new Error('Not initialized')
+
+    const botFather = await this.client.getEntity('BotFather') as any
+    if (!botFather) throw new Error('Cannot find BotFather')
+
+    const sendAndWait = async (msg: string): Promise<string> => {
+      const before = (await this.client!.getMessages(botFather, { limit: 1 })) as any[] | undefined
+      const lastId = before && before.length > 0 ? before[0]!.id : 0
+      await this.client!.sendMessage(botFather, { message: msg, silent: true } as any)
+      const start = Date.now()
+      while (Date.now() - start < 15000) {
+        const msgs = (await this.client!.getMessages(botFather, { limit: 5 })) as any[] | undefined
+        if (msgs) {
+          for (const m of msgs) {
+            if (!m.out && m.id > lastId) {
+              return m.message || ''
+            }
+          }
+        }
+        await new Promise((r) => setTimeout(r, 400))
+      }
+      throw new Error('Timeout waiting for BotFather reply')
+    }
+
+    await sendAndWait('/newbot')
+    const nameResp = await sendAndWait('RodjerCloud Bot')
+    if (nameResp.toLowerCase().includes('sorry') || nameResp.toLowerCase().includes('too many')) {
+      throw new Error('BotFather: ' + nameResp)
+    }
+
+    let token = ''
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const suffix = Math.random().toString(36).slice(2, 8)
+      const botUsername = `rodjercloud_${suffix}_bot`
+      const resp = await sendAndWait(botUsername)
+
+      const m = resp.match(/Use this token to access the HTTP API:\s*(\S+)/)
+      if (m) {
+        token = m[1]
+        await this.addBotToChannel(botUsername)
+        return { token, username: botUsername }
+      }
+
+      if (!resp.toLowerCase().includes('already')) {
+        throw new Error('Bot creation failed: ' + resp)
+      }
+    }
+
+    throw new Error('Failed to create bot: unable to find unique username')
+  }
+
+  private async addBotToChannel(botUsername: string) {
+    if (!this.client || !this.channelId) throw new Error('Not initialized')
+    const botEntity = await this.client.getEntity(botUsername) as any
+    if (!botEntity) throw new Error('Cannot find bot: ' + botUsername)
+
+    try {
+      await this.client.invoke(
+        new Api.channels.InviteToChannel({
+          channel: this.channelId as any,
+          users: [botEntity],
+        } as any)
+      )
+    } catch {
+      // bot may already be in channel
+    }
+
+    await this.client.invoke(
+      new Api.channels.EditAdmin({
+        channel: this.channelId as any,
+        userId: botEntity,
+        adminRights: new Api.ChatAdminRights({
+          changeInfo: true,
+          postMessages: true,
+          editMessages: true,
+          deleteMessages: true,
+          inviteUsers: true,
+          pinMessages: true,
+          addAdmins: false,
+          manageCall: true,
+          other: true,
+        }),
+        rank: 'Bot',
+      })
+    )
+
+    try {
+      await this.client.sendMessage(botEntity, { message: '/start', silent: true } as any)
+    } catch {
+      // non-critical
+    }
   }
 
   async getUserInfo(): Promise<{ firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }> {

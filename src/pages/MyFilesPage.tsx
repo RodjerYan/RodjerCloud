@@ -77,6 +77,41 @@ export default function MyFilesPage() {
   const [duckAnim, setDuckAnim] = useState<any>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
+  const [showBotSetup, setShowBotSetup] = useState(false)
+  const [botToken, setBotToken] = useState('')
+  const [botConfigured, setBotConfigured] = useState(false)
+  const [shareProgress, setShareProgress] = useState<'generating' | 'done' | null>(null)
+
+  useEffect(() => {
+    window.electronAPI.share.getBotToken().then((r: any) => {
+      if (r.success && r.data) {
+        setBotConfigured(true)
+        setBotToken(r.data)
+      } else {
+        window.electronAPI.share.ensureBot().then(() => {
+          window.electronAPI.share.getBotToken().then((r3: any) => {
+            if (r3.success && r3.data) {
+              setBotConfigured(true)
+              setBotToken(r3.data)
+            }
+          })
+        })
+      }
+    })
+  }, [])
+
+  const confirmBotToken = async () => {
+    const token = botToken.trim()
+    if (!token) return
+    const r = await window.electronAPI.share.setBotToken(token)
+    if (r.success) {
+      setBotConfigured(true)
+      setShowBotSetup(false)
+      showToast('Токен бота сохранён')
+    } else {
+      showToast('Ошибка: ' + (r.error || ''))
+    }
+  }
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -216,7 +251,7 @@ export default function MyFilesPage() {
     }
   }, [drillDown, filtered, loadThumbs, fileFolders])
 
-  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
+  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
 
   const toggleSelect = (id: number) => {
     const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s)
@@ -245,9 +280,29 @@ export default function MyFilesPage() {
     }
   }
   const handleCopyLink = async (f: any) => {
-    const link = `https://t.me/c/${f.chatId || ''}/${f.messageId}`
-    await window.electronAPI.app.copyToClipboard(link)
-    showToast('Ссылка скопирована')
+    if (botConfigured && botToken) {
+      setShareProgress('generating')
+      try {
+        const r = await window.electronAPI.share.generateLink(f.messageId, f.chatId || '', f.fileName)
+        if (r.success && r.data) {
+          const data = r.data
+          const downloadUrl = data.url || data
+          await window.electronAPI.app.copyToClipboard(downloadUrl)
+          setShareProgress('done')
+          setTimeout(() => setShareProgress(null), 2500)
+        } else {
+          setShareProgress(null)
+          showToast('Ошибка: ' + (r.error || ''))
+        }
+      } catch (e: any) {
+        setShareProgress(null)
+        showToast('Ошибка: ' + (e.message || ''))
+      }
+    } else {
+      const link = `https://t.me/c/${f.chatId || ''}/${f.messageId}`
+      await window.electronAPI.app.copyToClipboard(link)
+      showToast('Ссылка скопирована (требуется подписка на канал)')
+    }
   }
   const handlePreview = async (f: any, idx: number, list?: any[]) => {
     const ft = typeOf(f.fileName)
@@ -354,6 +409,50 @@ export default function MyFilesPage() {
 
   return (
     <div className="mf-root">
+      <div style={{
+        maxHeight: shareProgress ? 48 : 0,
+        opacity: shareProgress ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'max-height 0.35s ease, opacity 0.3s ease',
+        width: '100%',
+      }}>
+        <div style={{
+          width: '100%',
+          background: shareProgress === 'done'
+            ? 'rgba(52,211,153,0.08)'
+            : 'rgba(124,131,255,0.08)',
+          borderBottom: '1px solid ' + (shareProgress === 'done'
+            ? 'rgba(52,211,153,0.2)'
+            : 'rgba(124,131,255,0.15)'),
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '8px 16px',
+            fontSize: 13, color: shareProgress === 'done' ? '#6ee7b7' : '#bcc0ff',
+            fontWeight: 500,
+          }}>
+            <div style={{
+              width: 80, height: 4,
+              background: 'rgba(255,255,255,0.08)',
+              borderRadius: 2, overflow: 'hidden', flexShrink: 0,
+            }}>
+              <div style={{
+                height: '100%', width: shareProgress === 'done' ? '100%' : '60%',
+                background: shareProgress === 'done'
+                  ? 'linear-gradient(90deg, #34d399, #6ee7b7)'
+                  : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
+                borderRadius: 2,
+                transition: 'width 0.4s ease',
+                animation: shareProgress === 'generating' ? 'mf-shimmer 1.5s infinite' : 'none',
+                boxShadow: shareProgress === 'done'
+                  ? '0 0 6px rgba(52,211,153,0.4)'
+                  : '0 0 6px rgba(124,131,255,0.4)',
+              }} />
+            </div>
+            {shareProgress === 'generating' ? 'Генерация ссылки…' : 'Ссылка скопирована в буфер обмена'}
+          </div>
+        </div>
+      </div>
       <div className="mf-toolbar">
         <div className="mf-search">
           <Search size={16} />
@@ -725,6 +824,31 @@ export default function MyFilesPage() {
         </div>
       )}
 
+      {showBotSetup && (
+        <div className="mf-modal" onClick={() => setShowBotSetup(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 380, maxWidth: '90vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Настройка бота для ссылок</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+              Бот создаётся автоматически при входе в аккаунт.<br />
+              Если что-то пошло не так — вставьте токен вручную:<br /><br />
+              1. @BotFather → создать бота<br />
+              2. Добавить бота администратором канала «My area»<br />
+              3. Написать боту /start<br />
+              4. Вставить токен ниже
+            </div>
+            <input value={botToken} onChange={e => setBotToken(e.target.value)}
+              placeholder="Введите токен бота: 123456:ABCdef..."
+              style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'monospace' }} />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="v3-btn" onClick={() => setShowBotSetup(false)}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)' }}>Отмена</button>
+              <button className="v3-btn" onClick={confirmBotToken}
+                style={{ background: 'var(--accent-1)', border: 'none', color: '#fff' }}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {ctxMenu && createPortal(
         <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
           <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
@@ -745,6 +869,10 @@ export default function MyFilesPage() {
             <MoveRight size={14} /> Переместить
           </button>
           <div className="mf-ctx-divider" />
+          <button onClick={() => { setShowBotSetup(true); closeCtx() }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            {botConfigured ? 'Сменить токен бота' : 'Настроить бота'}
+          </button>
           <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
             <Trash2 size={14} /> Удалить
           </button>
