@@ -71,6 +71,44 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
+let _githubToken = process.env.GITHUB_TOKEN || ''
+async function githubFetch(path: string): Promise<any> {
+  if (!_githubToken) {
+    try {
+      const gc = fs.readFileSync(pathMod.join(os.homedir(), '.git-credentials'), 'utf8')
+      const m = gc.match(/https:\/\/[^:]+:([^@]+)@github\.com/)
+      if (m) _githubToken = m[1]
+    } catch {}
+    if (!_githubToken) {
+      const prefs = await readPrefs()
+      _githubToken = prefs.githubToken || ''
+    }
+  }
+  return new Promise<any>((resolve, reject) => {
+    const opts: any = {
+      headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
+    }
+    if (_githubToken) opts.headers['Authorization'] = `token ${_githubToken}`
+    https.get(`https://api.github.com${path}`, opts, (res) => {
+      let data = ''
+      res.on('data', (chunk) => data += chunk)
+      res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+    }).on('error', reject)
+  })
+}
+
+async function checkUpdate() {
+  try {
+    const current = app.getVersion()
+    const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
+    const tag = (res.tag_name || '').replace(/^v/, '')
+    if (tag && isNewer(tag, current)) {
+      const wins = BrowserWindow.getAllWindows()
+      if (wins.length > 0) wins[0].webContents.send('app:update-available', { version: tag, url: res.html_url })
+    }
+  } catch {}
+}
+
 app.whenReady().then(async () => {
   createWindow()
 
@@ -87,43 +125,6 @@ app.whenReady().then(async () => {
     }).catch(() => {})
   }, 10000)
 
-  // Periodic update check
-  let _githubToken = process.env.GITHUB_TOKEN || ''
-  async function githubFetch(path: string): Promise<any> {
-    if (!_githubToken) {
-      try {
-        const gc = fs.readFileSync(pathMod.join(os.homedir(), '.git-credentials'), 'utf8')
-        const m = gc.match(/https:\/\/[^:]+:([^@]+)@github\.com/)
-        if (m) _githubToken = m[1]
-      } catch {}
-      if (!_githubToken) {
-        const prefs = await readPrefs()
-        _githubToken = prefs.githubToken || ''
-      }
-    }
-    return new Promise<any>((resolve, reject) => {
-      const opts: any = {
-        headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
-      }
-      if (_githubToken) opts.headers['Authorization'] = `token ${_githubToken}`
-      https.get(`https://api.github.com${path}`, opts, (res) => {
-        let data = ''
-        res.on('data', (chunk) => data += chunk)
-        res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
-      }).on('error', reject)
-    })
-  }
-
-  async function checkUpdate() {
-    try {
-      const current = app.getVersion()
-      const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
-      const tag = (res.tag_name || '').replace(/^v/, '')
-      if (tag && isNewer(tag, current)) {
-        mainWindow?.webContents.send('app:update-available', { version: tag, url: res.html_url })
-      }
-    } catch {}
-  }
   setTimeout(checkUpdate, 15000)
   setInterval(checkUpdate, 3600000)
 
