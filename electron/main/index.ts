@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell } from 'electron'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as https from 'https'
 import * as zlib from 'zlib'
 import * as crypto from 'crypto'
@@ -87,18 +88,34 @@ app.whenReady().then(async () => {
   }, 10000)
 
   // Periodic update check
+  async function githubFetch(path: string): Promise<any> {
+    const prefs = await readPrefs()
+    let token = prefs.githubToken || ''
+    if (!token) {
+      try {
+        const gc = fs.readFileSync(pathMod.join(os.homedir(), '.git-credentials'), 'utf8')
+        const m = gc.match(/https:\/\/[^:]+:([^@]+)@github\.com/)
+        if (m) token = m[1]
+      } catch {}
+    }
+    token = token || process.env.GITHUB_TOKEN || ''
+    return new Promise<any>((resolve, reject) => {
+      const opts: any = {
+        headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
+      }
+      if (token) opts.headers['Authorization'] = `token ${token}`
+      https.get(`https://api.github.com${path}`, opts, (res) => {
+        let data = ''
+        res.on('data', (chunk) => data += chunk)
+        res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+      }).on('error', reject)
+    })
+  }
+
   async function checkUpdate() {
     try {
       const current = app.getVersion()
-      const res = await new Promise<any>((resolve, reject) => {
-        https.get(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-          headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
-        }, (res) => {
-          let data = ''
-          res.on('data', (chunk) => data += chunk)
-          res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
-        }).on('error', reject)
-      })
+      const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
       const tag = (res.tag_name || '').replace(/^v/, '')
       if (tag && isNewer(tag, current)) {
         mainWindow?.webContents.send('app:update-available', { version: tag, url: res.html_url })
@@ -597,18 +614,7 @@ function platformAssetPattern(): (name: string) => boolean {
 ipcMain.handle('app:check-update', async () => {
   try {
     const currentVersion = app.getVersion()
-    const res = await new Promise<any>((resolve, reject) => {
-      https.get(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-        headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
-      }, (res) => {
-        let data = ''
-        res.on('data', (chunk) => data += chunk)
-        res.on('end', () => {
-          try { resolve(JSON.parse(data)) }
-          catch (e) { reject(e) }
-        })
-      }).on('error', reject)
-    })
+    const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (!tag) return { success: true, data: { hasUpdate: false } }
     const hasUpdate = isNewer(tag, currentVersion)
@@ -666,6 +672,22 @@ ipcMain.handle('app:install-update', async (_, filePath: string) => {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
+})
+
+ipcMain.handle('app:set-github-token', async (_, token: string) => {
+  try {
+    const prefs = await readPrefs()
+    prefs.githubToken = token
+    await writePrefs(prefs)
+    return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('app:get-github-token', async () => {
+  try {
+    const prefs = await readPrefs()
+    return { success: true, data: prefs.githubToken || '' }
+  } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('storage:get-sync-history', async () => {
