@@ -63,6 +63,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     copyToClipboard: (text: string) => ipcRenderer.invoke('app:copy-to-clipboard', text),
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     log: (level: string, msg: string) => ipcRenderer.send('app:log', level, msg),
+    checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+    downloadUpdate: (url: string) => ipcRenderer.invoke('app:download-update', url),
+    installUpdate: (filePath: string) => ipcRenderer.invoke('app:install-update', filePath),
+    onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('app:download-progress', listener)
+      return () => ipcRenderer.removeListener('app:download-progress', listener)
+    },
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }

@@ -86,6 +86,28 @@ app.whenReady().then(async () => {
     }).catch(() => {})
   }, 10000)
 
+  // Periodic update check
+  async function checkUpdate() {
+    try {
+      const current = app.getVersion()
+      const res = await new Promise<any>((resolve, reject) => {
+        https.get(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+          headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
+        }, (res) => {
+          let data = ''
+          res.on('data', (chunk) => data += chunk)
+          res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+        }).on('error', reject)
+      })
+      const tag = (res.tag_name || '').replace(/^v/, '')
+      if (tag && isNewer(tag, current)) {
+        mainWindow?.webContents.send('app:update-available', { version: tag, url: res.html_url })
+      }
+    } catch {}
+  }
+  setTimeout(checkUpdate, 15000)
+  setInterval(checkUpdate, 3600000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -544,6 +566,96 @@ ipcMain.handle('app:get-version', async () => {
 
 ipcMain.on('app:log', (_, level: string, msg: string) => {
   log(level, '[renderer] ' + msg)
+})
+
+const GITHUB_REPO = 'RodjerYan/RodjerCloud'
+
+function parseVersion(v: string): number[] {
+  return (v || '').replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0)
+}
+
+function isNewer(latest: string, current: string): boolean {
+  const lv = parseVersion(latest), cv = parseVersion(current)
+  for (let i = 0; i < Math.max(lv.length, cv.length); i++) {
+    if ((lv[i] || 0) > (cv[i] || 0)) return true
+    if ((lv[i] || 0) < (cv[i] || 0)) return false
+  }
+  return false
+}
+
+ipcMain.handle('app:check-update', async () => {
+  try {
+    const currentVersion = app.getVersion()
+    const res = await new Promise<any>((resolve, reject) => {
+      https.get(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+        headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
+      }, (res) => {
+        let data = ''
+        res.on('data', (chunk) => data += chunk)
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)) }
+          catch (e) { reject(e) }
+        })
+      }).on('error', reject)
+    })
+    const tag = (res.tag_name || '').replace(/^v/, '')
+    if (!tag) return { success: true, data: { hasUpdate: false } }
+    const hasUpdate = isNewer(tag, currentVersion)
+    const asset = (res.assets || []).find((a: any) =>
+      a.name.endsWith('-arm64.dmg') || a.name.endsWith('-arm64-mac.zip')
+    )
+    return {
+      success: true,
+      data: {
+        hasUpdate,
+        currentVersion,
+        latestVersion: tag,
+        releaseNotes: (res.body || '').slice(0, 2000),
+        downloadUrl: asset?.browser_download_url || '',
+        assetName: asset?.name || '',
+        htmlUrl: res.html_url || '',
+      },
+    }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('app:download-update', async (event, url: string) => {
+  try {
+    const tempDir = app.getPath('temp')
+    const fileName = url.split('/').pop() || 'update.dmg'
+    const destPath = pathMod.join(tempDir, fileName)
+    const fileStream = fs.createWriteStream(destPath)
+    const totalSize = await new Promise<number>((resolve, reject) => {
+      https.get(url, { headers: { 'User-Agent': 'RodjerCloud' } }, (res) => {
+        const total = parseInt(res.headers['content-length'] || '0', 10)
+        let downloaded = 0
+        res.pipe(fileStream)
+        res.on('data', (chunk) => {
+          downloaded += chunk.length
+          event.sender.send('app:download-progress', { downloaded, total, percent: total ? Math.round(downloaded / total * 100) : 0 })
+        })
+        res.on('end', () => resolve(total))
+      }).on('error', (err) => { fileStream.close(); fs.unlink(destPath, () => {}); reject(err) })
+    })
+    await new Promise<void>((resolve, reject) => {
+      fileStream.on('finish', resolve)
+      fileStream.on('error', reject)
+    })
+    return { success: true, data: { filePath: destPath, fileName } }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('app:install-update', async (_, filePath: string) => {
+  try {
+    await shell.openPath(filePath)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 ipcMain.handle('storage:get-sync-history', async () => {

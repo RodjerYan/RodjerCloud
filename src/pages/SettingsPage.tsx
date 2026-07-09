@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Copy, AlertTriangle, Bot, Info } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { FolderOpen, Copy, AlertTriangle, Bot, Info, Download, ExternalLink, Loader2 } from 'lucide-react'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
   const [downloadPath, setDownloadPath] = useState('')
@@ -10,7 +11,21 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
-  const [version, setVersion] = useState("3.0.0")
+  const [version, setVersion] = useState("1.0.2")
+
+  const [updateModal, setUpdateModal] = useState<null | {
+    hasUpdate: boolean
+    currentVersion: string
+    latestVersion: string
+    releaseNotes: string
+    downloadUrl: string
+    assetName: string
+    htmlUrl: string
+  }>(null)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const [downloadPathState, setDownloadPathState] = useState('')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   useEffect(() => {
     (async () => {
@@ -69,8 +84,44 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     localStorage.clear()
     onChangeChannel()
   }
-  const checkUpdates = () => {
-    show('У вас последняя версия')
+
+  const checkUpdates = async () => {
+    setCheckingUpdate(true)
+    const r = await window.electronAPI.app.checkUpdate()
+    setCheckingUpdate(false)
+    if (r.success && r.data) {
+      setUpdateModal(r.data)
+      if (!r.data.hasUpdate) {
+        show('У вас последняя версия')
+      }
+    } else {
+      show(r.error || 'Ошибка проверки обновлений')
+    }
+  }
+
+  const startDownload = async () => {
+    if (!updateModal?.downloadUrl) return
+    setDownloading(true)
+    setDownloadProgress(0)
+    const unsub = window.electronAPI.app.onDownloadProgress((p) => {
+      setDownloadProgress(p.percent)
+    })
+    const r = await window.electronAPI.app.downloadUpdate(updateModal.downloadUrl)
+    unsub()
+    if (r.success && r.data) {
+      setDownloadPathState(r.data.filePath)
+      setDownloadProgress(100)
+    } else {
+      show(r.error || 'Ошибка загрузки')
+      setDownloading(false)
+    }
+  }
+
+  const installUpdate = async () => {
+    if (!downloadPathState) return
+    await window.electronAPI.app.installUpdate(downloadPathState)
+    setDownloading(false)
+    setUpdateModal(null)
   }
 
   return (
@@ -150,7 +201,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
           <div style={{ width: 72, height: 72, borderRadius: 20, background: 'var(--accent)', display: 'inline-flex',
             alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 8 }}>CS</div>
           <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
-          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>v{version} — 100+ возможностей</div>
+          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>v{version}</div>
           <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
             Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
@@ -161,10 +212,58 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
                 padding: '4px 10px', borderRadius: 99, fontSize: 11, color: 'var(--v3-text-mute)' }}>{s}</span>
             ))}
           </div>
-          <button className="se-secondary" onClick={checkUpdates}>Проверить обновления</button>
+          <button className="se-secondary" onClick={checkUpdates} disabled={checkingUpdate}>
+            {checkingUpdate ? <><Loader2 size={14} className="spin" /> Проверка…</> : 'Проверить обновления'}
+          </button>
           <div style={{ marginTop: 16, fontSize: 12, color: 'var(--v3-text-mute)' }}>Распространяется под лицензией MIT</div>
         </div>
       </section>
+
+      {updateModal && updateModal.hasUpdate && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => { if (!downloading) setUpdateModal(null) }}>
+          <div className="v3-card" style={{ padding: 20, minWidth: 360, maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px' }}>Доступно обновление v{updateModal.latestVersion}</h3>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12 }}>
+              Текущая версия: v{updateModal.currentVersion}
+            </div>
+            {updateModal.releaseNotes && (
+              <div style={{ fontSize: 13, lineHeight: 1.5, maxHeight: 200, overflowY: 'auto', background: 'var(--bg)', borderRadius: 8, padding: 12, marginBottom: 16, whiteSpace: 'pre-wrap' }}>
+                {updateModal.releaseNotes}
+              </div>
+            )}
+            {downloading ? (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span>Загрузка…</span><span>{downloadProgress}%</span>
+                </div>
+                <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: downloadProgress + '%', height: '100%', background: 'var(--accent)', borderRadius: 3, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {!downloading && !downloadPathState && (
+                <button className="v3-btn" onClick={() => setUpdateModal(null)}>Закрыть</button>
+              )}
+              {!downloading && !downloadPathState && (
+                <button className="v3-btn primary" onClick={startDownload}>
+                  <Download size={14} /> Скачать
+                </button>
+              )}
+              {downloadProgress === 100 && downloadPathState && (
+                <>
+                  <button className="v3-btn" onClick={() => { setUpdateModal(null); setDownloadPathState(''); setDownloadProgress(0) }}>Закрыть</button>
+                  <button className="v3-btn primary" onClick={installUpdate}>
+                    <ExternalLink size={14} /> Установить
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {toast && <div className="mf-toast">{toast}</div>}
     </div>
