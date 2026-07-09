@@ -78,6 +78,16 @@ app.whenReady().then(async () => {
   if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
+
+  // Background duplicate scan at startup
+  setTimeout(() => {
+    if (botService.getHashDb().length === 0) {
+      botService.scanChannel(telegramService, (p) => {
+        mainWindow?.webContents.send('bot:scan-progress', p)
+      }).catch(() => {})
+    }
+  }, 10000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -993,6 +1003,26 @@ ipcMain.handle('share:ensure-bot', async () => {
     const botResult = await telegramService.createBotAndAddToChannel()
     botService.setToken(botResult.token)
     return { success: true, data: { created: true, username: botResult.username } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('bot:get-hash-db', async () => {
+  try {
+    return { success: true, data: botService.getHashDb() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('bot:get-duplicate-groups', async () => {
+  try {
+    return { success: true, data: botService.getDuplicateGroups() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('bot:scan-duplicates', async (event) => {
+  try {
+    const onProgress = (p: any) => event.sender.send('bot:scan-progress', p)
+    const result = await botService.scanChannel(telegramService, onProgress)
+    return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

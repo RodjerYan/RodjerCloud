@@ -82,6 +82,12 @@ declare global {
       file: {
         computeHash: (messageId: number) => Promise<{ success: boolean; data?: string; error?: string }>
       }
+      bot: {
+        getHashDb: () => Promise<{ success: boolean; data?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; error?: string }>
+        getDuplicateGroups: () => Promise<{ success: boolean; data?: Array<{ hash: string; files: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; totalSize: number }>; error?: string }>
+        scanDuplicates: () => Promise<{ success: boolean; data?: { found: number; groups: number }; error?: string }>
+        onScanProgress: (cb: (data: { done: number; total: number; currentFile: string }) => void) => () => void
+      }
     }
   }
 }

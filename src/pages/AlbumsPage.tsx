@@ -131,8 +131,29 @@ export default function AlbumsPage() {
       window.electronAPI.telegram.listFiles().then((r: any) => { if (r?.success) setAllFiles(r.data || []) })
       const isDuplicates = SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates
       if (isDuplicates) {
-        const toHash = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
-        computeHashes(toHash)
+        window.electronAPI.bot.getHashDb().then((r: any) => {
+          if (r.success && r.data) {
+            for (const e of r.data) {
+              if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
+            }
+            // Auto-scan if db is empty
+            if (r.data.length === 0) {
+              setHashing(true)
+              window.electronAPI.bot.scanDuplicates().then((res: any) => {
+                if (res.success) {
+                  window.electronAPI.bot.getHashDb().then((r2: any) => {
+                    if (r2.success && r2.data) {
+                      for (const e of r2.data) {
+                        if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
+                      }
+                    }
+                    setHashing(false)
+                  })
+                }
+              })
+            }
+          }
+        })
       }
       if (albumFiles.length > 0) loadThumbs(albumFiles.slice(0, 50))
     }
