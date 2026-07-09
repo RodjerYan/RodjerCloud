@@ -11,7 +11,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
-  const [version, setVersion] = useState("1.0.2")
+  const [version, setVersion] = useState("")
 
   const [updateModal, setUpdateModal] = useState<null | {
     hasUpdate: boolean
@@ -201,7 +201,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
           <div style={{ width: 72, height: 72, borderRadius: 20, background: 'var(--accent)', display: 'inline-flex',
             alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 8 }}>CS</div>
           <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
-          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>v{version}</div>
+          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>{version ? `v${version}` : ''}</div>
           <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
             Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
