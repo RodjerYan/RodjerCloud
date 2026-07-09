@@ -25,8 +25,7 @@
     ],
     "icon": "resources/icon.icns",
     "category": "public.app-category.utilities",
-    "hardenedRuntime": false,
-    "identity": null,
+    "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist"
