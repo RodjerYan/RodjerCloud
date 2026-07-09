@@ -76,8 +76,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('app:update-available', listener)
       return () => ipcRenderer.removeListener('app:update-available', listener)
     },
-    setGithubToken: (token: string) => ipcRenderer.invoke('app:set-github-token', token),
-    getGithubToken: () => ipcRenderer.invoke('app:get-github-token'),
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }

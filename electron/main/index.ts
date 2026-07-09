@@ -88,22 +88,24 @@ app.whenReady().then(async () => {
   }, 10000)
 
   // Periodic update check
+  let _githubToken = process.env.GITHUB_TOKEN || ''
   async function githubFetch(path: string): Promise<any> {
-    const prefs = await readPrefs()
-    let token = prefs.githubToken || ''
-    if (!token) {
+    if (!_githubToken) {
       try {
         const gc = fs.readFileSync(pathMod.join(os.homedir(), '.git-credentials'), 'utf8')
         const m = gc.match(/https:\/\/[^:]+:([^@]+)@github\.com/)
-        if (m) token = m[1]
+        if (m) _githubToken = m[1]
       } catch {}
+      if (!_githubToken) {
+        const prefs = await readPrefs()
+        _githubToken = prefs.githubToken || ''
+      }
     }
-    token = token || process.env.GITHUB_TOKEN || ''
     return new Promise<any>((resolve, reject) => {
       const opts: any = {
         headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
       }
-      if (token) opts.headers['Authorization'] = `token ${token}`
+      if (_githubToken) opts.headers['Authorization'] = `token ${_githubToken}`
       https.get(`https://api.github.com${path}`, opts, (res) => {
         let data = ''
         res.on('data', (chunk) => data += chunk)
@@ -672,22 +674,6 @@ ipcMain.handle('app:install-update', async (_, filePath: string) => {
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
-})
-
-ipcMain.handle('app:set-github-token', async (_, token: string) => {
-  try {
-    const prefs = await readPrefs()
-    prefs.githubToken = token
-    await writePrefs(prefs)
-    return { success: true }
-  } catch (error) { return { success: false, error: (error as Error).message } }
-})
-
-ipcMain.handle('app:get-github-token', async () => {
-  try {
-    const prefs = await readPrefs()
-    return { success: true, data: prefs.githubToken || '' }
-  } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('storage:get-sync-history', async () => {

@@ -48,8 +48,6 @@ declare global {
         installUpdate: (filePath: string) => Promise<{ success: boolean; error?: string }>
         onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => () => void
         onUpdateAvailable: (cb: (data: { version: string }) => void) => () => void
-        setGithubToken: (token: string) => Promise<{ success: boolean; error?: string }>
-        getGithubToken: () => Promise<{ success: boolean; data?: string; error?: string }>
       }
       getPathForFile: (file: File) => string
       folders: {
