@@ -266,7 +266,7 @@ export class TelegramService {
 
     const result = await this.client.sendFile(this.channelId as any, {
       file: filePath,
-      caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(fileStats.mtimeMs).toISOString()}`,
+      caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(fileStats.birthtimeMs || fileStats.mtimeMs).toISOString()}`,
       forceDocument: true,
       workers: 4,
       progressCallback: (progress: any) => {
@@ -281,11 +281,14 @@ export class TelegramService {
       },
     } as any)
 
+    const fileTime = fileStats.birthtimeMs && fileStats.birthtimeMs > 0
+      ? Math.floor(fileStats.birthtimeMs / 1000)
+      : Math.floor(fileStats.mtimeMs / 1000)
     return {
       messageId: typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id,
       fileName,
       fileSize: sizeBytes,
-      uploadedAt: new Date().toISOString(),
+      uploadedAt: fileTime,
     }
   }
 

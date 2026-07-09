@@ -215,7 +215,7 @@ export default function MyFilesPage() {
     arr.sort((a, b) => {
       if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
       if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0)
-      return (b.uploadedAt || 0) - (a.uploadedAt || 0)
+      return (fileDate(b) || 0) - (fileDate(a) || 0)
     })
     return arr
   }, [files, search, sort])
@@ -226,7 +226,8 @@ export default function MyFilesPage() {
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
       if (ffset.has(f.messageId)) return
-      if ((f.uploadedAt || 0) > 0 && (now - f.uploadedAt) < SIX_HOURS) map['Недавние']?.push(f)
+      const fd = fileDate(f)
+      if (fd > 0 && (now - fd) < SIX_HOURS) map['Недавние']?.push(f)
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
@@ -584,7 +585,7 @@ export default function MyFilesPage() {
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                       <td className="ellip" title={f.fileName}>{f.fileName}</td>
                       <td>{fmtSize(f.fileSize)}</td>
-                      <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
+                      <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                       <td>
                         <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                         <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
@@ -675,7 +676,7 @@ export default function MyFilesPage() {
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
+                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
                               <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
@@ -700,7 +701,7 @@ export default function MyFilesPage() {
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                                   <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
                               <td>{fmtSize(f.fileSize)}</td>
-                              <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
+                              <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                               <td>
                                 <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                 {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
@@ -780,7 +781,7 @@ export default function MyFilesPage() {
                                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                 <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                                <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
+                                <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                                 <div className="mf-card-actions">
                                   <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                                   <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
@@ -798,7 +799,7 @@ export default function MyFilesPage() {
                                  <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                               <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
                                   <td>{fmtSize(f.fileSize)}</td>
-                                  <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
+                                  <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                                   <td>
                                     <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                     <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>

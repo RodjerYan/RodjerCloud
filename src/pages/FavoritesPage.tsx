@@ -77,7 +77,7 @@ export default function FavoritesPage() {
                     {(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
                   </div>
                   <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                  <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
+                  <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</div>
                   <div className="mf-card-actions">
                     <button title="Убрать из избранного" onClick={() => toggleFav(f)}><Star size={14} fill="#fbbf24" stroke="#fbbf24" /></button>
                     <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>

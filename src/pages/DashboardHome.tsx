@@ -44,7 +44,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
   const total = files.length
   const totalSize = files.reduce((s, f) => s + (f.fileSize || 0), 0)
   const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600
-  const weekFiles = files.filter(f => (f.uploadedAt || 0) >= oneWeekAgo).length
+  const weekFiles = files.filter(f => (f.originalDate || f.uploadedAt || 0) >= oneWeekAgo).length
   const avgSize = total ? totalSize / total : 0
 
   const typeMap: Record<string, number> = {}
@@ -53,7 +53,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
   files.forEach(f => { const t = typeOf(f.fileName || ''); typeMap[t] = (typeMap[t] || 0) + 1 })
   const chartData = CATS.filter(c => typeMap[c] > 0).map(name => ({ name, value: typeMap[name] }))
 
-  const recent = [...files].sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0)).slice(0, 5)
+  const recent = [...files].sort((a, b) => ((b.originalDate || b.uploadedAt) || 0) - ((a.originalDate || a.uploadedAt) || 0)).slice(0, 5)
 
   return (
     <div className="dh-root">
@@ -113,7 +113,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
               {recent.map(f => (
                 <li key={f.messageId}>
                   <div className="dh-recent-name" title={f.fileName}>{f.fileName}</div>
-                  <div className="dh-recent-meta">{fmtSize(f.fileSize)} • {new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</div>
+                  <div className="dh-recent-meta">{fmtSize(f.fileSize)} • {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</div>
                 </li>
               ))}
             </ul>

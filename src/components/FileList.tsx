@@ -64,7 +64,7 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
             </div>
 
             <div className="file-col col-date" data-testid="file-date">
-              {formatDate(file.uploadedAt)}
+              {formatDate(file.originalDate || file.uploadedAt)}
             </div>
 
             <div className="file-col col-actions">

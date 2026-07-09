@@ -70,7 +70,7 @@ export default function AudioPlayerPage() {
                   </td>
                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                   <td>{fmtSize(f.fileSize)}</td>
-                  <td>{new Date((f.uploadedAt || 0) * 1000).toLocaleDateString()}</td>
+                  <td>{new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</td>
                   <td>
                     <button title="Воспроизвести" onClick={() => play(f, files)}><Play size={14} /></button>
                     <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
