@@ -1,7 +1,7 @@
 import React from "react"
 import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, Settings,
-  LogOut, Trash2, Star, Link2, Image as ImgIcon,
+  LogOut, Trash2, Star, Image as ImgIcon,
   Command, Headphones, Cloud } from "lucide-react"
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void }
@@ -16,7 +16,6 @@ const items = [
 
   { to: "/trash", label: "Корзина", icon: Trash2 },
   { to: "/favorites", label: "Избранное", icon: Star },
-  { to: "/shared", label: "Общее", icon: Link2 },
   { to: "/settings", label: "Настройки", icon: Settings }
 ]
 

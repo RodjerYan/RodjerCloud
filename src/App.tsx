@@ -16,7 +16,7 @@ import AutoSyncPage from "./pages/AutoSyncPage"
 import SettingsPage from "./pages/SettingsPage"
 import TrashPage from "./pages/TrashPage"
 import FavoritesPage from "./pages/FavoritesPage"
-import SharedPage from "./pages/SharedPage"
+
 import ActivityPage from "./pages/ActivityPage"
 import TagsPage from "./pages/TagsPage"
 import SearchPage from "./pages/SearchPage"
@@ -120,7 +120,6 @@ function App() {
 
             <Route path="/trash" element={<TrashPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
-            <Route path="/shared" element={<SharedPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/tags" element={<TagsPage />} />
             <Route path="/search" element={<SearchPage />} />
