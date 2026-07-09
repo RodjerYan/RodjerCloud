@@ -55,11 +55,27 @@ export default function TrashPage() {
 
   useEffect(() => {
     if (!ctxMenu) return
-    const close = () => setCtxMenu(null)
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
+      setCtxMenu(null)
+    }
     window.addEventListener('click', close)
     window.addEventListener('scroll', close, true)
     return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
   }, [ctxMenu])
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
+      if (!el) return
+      if ((e.target as HTMLElement).closest('button')) return
+      if ((e.target as HTMLElement).closest('.mf-ctx')) return
+      const mid = Number(el.dataset.mid)
+      toggleSelect(mid)
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [files])
 
   const toggleSelect = (id: number) => {
     const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s)
@@ -129,7 +145,7 @@ export default function TrashPage() {
   })
 
   return (
-    <div className="mf-root">
+    <div className="mf-root mf-hide-checks">
       <div className="mf-toolbar">
         <div className="mf-search">
           <Search size={16} />

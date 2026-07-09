@@ -341,6 +341,19 @@ export default function MyFilesPage() {
     return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
   }, [ctxMenu])
 
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
+      if (!el) return
+      if ((e.target as HTMLElement).closest('button')) return
+      if ((e.target as HTMLElement).closest('.mf-ctx')) return
+      const mid = Number(el.dataset.mid)
+      toggleSelect(mid)
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [files])
+
   const navPreview = (dir: number) => {
     if (!preview) return
     const all = preview.list.filter((f: any) => {
@@ -447,7 +460,7 @@ export default function MyFilesPage() {
   }
 
   return (
-    <div className="mf-root">
+    <div className="mf-root mf-hide-checks">
       <div style={{
         maxHeight: shareProgress ? 48 : 0,
         opacity: shareProgress ? 1 : 0,
