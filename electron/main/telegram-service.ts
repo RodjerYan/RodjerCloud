@@ -5,7 +5,15 @@ import * as fs from 'fs'
 import * as crypto from 'crypto'
 import * as path from 'path'
 import { app } from 'electron'
-import { addEntry, computeFileHash } from './hash-db'
+function computeFileHash(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256')
+    const stream = fs.createReadStream(filePath, { start: 0, end: 65535 })
+    stream.on('data', d => hash.update(d))
+    stream.on('end', () => resolve(hash.digest('hex') + ':' + fs.statSync(filePath).size))
+    stream.on('error', reject)
+  })
+}
 
 const API_ID = 35766547
 const API_HASH = '5e37a0cba3964d7ca0814147562452ce'
@@ -286,14 +294,14 @@ export class TelegramService {
       ? Math.floor(fileStats.birthtimeMs / 1000)
       : Math.floor(fileStats.mtimeMs / 1000)
     const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
-    computeFileHash(filePath).then(hash => {
-      addEntry({ messageId: msgId, hash, fileName, fileSize: sizeBytes })
-    }).catch(() => {})
+    let fileHash = ''
+    try { fileHash = await computeFileHash(filePath) } catch {}
     return {
       messageId: msgId,
       fileName,
       fileSize: sizeBytes,
       uploadedAt: fileTime,
+      hash: fileHash,
     }
   }
 

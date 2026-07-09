@@ -193,6 +193,7 @@ export default function MyFilesPage() {
       const res = await window.electronAPI.telegram.uploadFile(f.filePath)
       if (res.success && res.data?.messageId) {
         await window.electronAPI.folders.addFile(folderId, res.data.messageId)
+        if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
       }
     }
     loadFolders()
@@ -454,7 +455,9 @@ export default function MyFilesPage() {
     for (let i = 0; i < dropped.length; i++) {
       const f = dropped[i]
       setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
-      await window.electronAPI.telegram.uploadFile(f.filePath)
+      await window.electronAPI.telegram.uploadFile(f.filePath).then((res: any) => {
+        if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
+      })
     }
     setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
     dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
