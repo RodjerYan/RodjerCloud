@@ -726,7 +726,7 @@ function renderMedia(files, idx) {
   var el = document.getElementById('media')
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
   el.innerHTML = isVideo
-    ? '<video id="pv" src="' + src + '" autoplay muted style="max-width:100%;max-height:100%;border-radius:4px"></video>'
+    ? '<video id="pv" src="' + src + '" autoplay style="max-width:100%;max-height:100%;border-radius:4px"></video>'
     : '<img src="' + src + '" draggable="false" style="max-width:100%;max-height:100%;border-radius:4px">'
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
