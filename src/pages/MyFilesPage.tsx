@@ -254,7 +254,9 @@ export default function MyFilesPage() {
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
 
   const toggleSelect = (id: number) => {
-    const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s)
+    setSelected(prev => {
+      const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s
+    })
   }
   const clearSelection = () => setSelected(new Set())
 
