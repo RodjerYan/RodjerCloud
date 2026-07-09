@@ -101,19 +101,21 @@ export default function MyFilesPage() {
     if (!newFolderName.trim()) return
     const r = await window.electronAPI.folders.create(newFolderName.trim())
     setShowCreateFolder(false)
-    if (r.success) { loadFolders(); showToast('Папка создана') }
+    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}); showToast('Папка создана') }
   }
 
   const deleteFolder = async (id: string) => {
     if (!confirm('Удалить папку? Файлы останутся в общем списке.')) return
-    await window.electronAPI.folders.delete(id)
-    loadFolders(); if (folderDrill === id) setFolderDrill(null)
+    const r = await window.electronAPI.folders.delete(id)
+    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
+    if (folderDrill === id) setFolderDrill(null)
   }
 
   const renameFolder = async (id: string) => {
     if (!renameVal.trim()) return
-    await window.electronAPI.folders.rename(id, renameVal.trim())
-    setRenameId(null); loadFolders()
+    const r = await window.electronAPI.folders.rename(id, renameVal.trim())
+    setRenameId(null)
+    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
   }
 
   const moveFileToFolder = (messageId: number) => { setMoveTarget([messageId]) }

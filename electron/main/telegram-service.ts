@@ -381,38 +381,150 @@ export class TelegramService {
   }
 
   private folderSyncId: number | null = null
+  private static SYNC_PREFIX = 'RFSYNC:'
+  private static OLD_PREFIXES = ['RFSYNC:', 'rf', '__rf__']
+
+  private get folderSyncIdPath(): string {
+    return path.join(app.getPath('userData'), 'folder-sync-id.json')
+  }
+
+  private saveFolderSyncId(id: number) {
+    this.folderSyncId = id
+    try { fs.writeFileSync(this.folderSyncIdPath, JSON.stringify({ id })) } catch {}
+  }
+
+  private loadFolderSyncId(): number | null {
+    try {
+      if (fs.existsSync(this.folderSyncIdPath)) {
+        const data = JSON.parse(fs.readFileSync(this.folderSyncIdPath, 'utf8'))
+        return data.id || null
+      }
+    } catch {}
+    return null
+  }
+
+  private parseSyncMessage(text: string): { data: any; prefixLen: number } | null {
+    for (const p of TelegramService.OLD_PREFIXES) {
+      if (text.startsWith(p)) {
+        try { return { data: JSON.parse(text.slice(p.length)), prefixLen: p.length } } catch {}
+      }
+    }
+    return null
+  }
+
+  private msgId(m: any): number {
+    return typeof m.id === 'object' ? Number(m.id.toString()) : m.id
+  }
 
   async syncFolders(data: { folders: any[]; fileFolders: Record<string, string> }) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const prefix = '__rf__'
-    const payload = prefix + JSON.stringify(data)
+    const payload = TelegramService.SYNC_PREFIX + JSON.stringify(data)
 
+    // Try cached ID first — edit it, but still search+cleanup duplicates
+    let editedViaCache = false
+    if (!this.folderSyncId) this.folderSyncId = this.loadFolderSyncId()
     if (this.folderSyncId) {
       try {
-        await this.client.editMessage(this.channelId as any, { ids: [this.folderSyncId], message: payload } as any)
-        return
-      } catch {}
+        await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: payload, formattingEntities: [] } as any)
+        editedViaCache = true
+      } catch {
+        this.folderSyncId = null
+      }
     }
 
+    // Search for existing sync messages
     const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
-    const existing = msgs.find((m: any) => m.message?.startsWith?.(prefix))
-    if (existing) {
-      this.folderSyncId = typeof existing.id === 'object' ? Number(existing.id.toString()) : existing.id
-      await this.client.editMessage(this.channelId as any, { ids: [this.folderSyncId], message: payload } as any)
+    const syncMsgs: any[] = []
+    for (const m of msgs) {
+      if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+    }
+
+    if (syncMsgs.length > 0) {
+      // Use the first (newest) sync message as primary
+      const primary = syncMsgs[0]
+      this.saveFolderSyncId(this.msgId(primary))
+      if (!editedViaCache || this.folderSyncId !== this.msgId(primary)) {
+        // Если кеш не совпадает с новейшим — редактируем новейший
+        await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: payload, formattingEntities: [] } as any)
+      }
+
+      // Clean up duplicate sync messages
+      if (syncMsgs.length > 1) {
+        const dupeIds = syncMsgs.slice(1).map((m: any) => this.msgId(m))
+        try {
+          await this.client.invoke(
+            new Api.channels.DeleteMessages({ channel: this.channelId as any, id: dupeIds })
+          )
+        } catch {}
+      }
       return
     }
 
-    const sent: any = await this.client.sendMessage(this.channelId as any, { message: payload } as any)
-    this.folderSyncId = typeof sent.id === 'object' ? Number(sent.id.toString()) : sent.id
+    // No sync message exists — create one
+    if (!editedViaCache) {
+      const sent: any = await this.client.sendMessage(this.channelId as any, { message: payload, formattingEntities: [] } as any)
+      this.saveFolderSyncId(this.msgId(sent))
+    }
+  }
+
+  private debugLog(msg: string) {
+    const logPath = path.join(app.getPath('userData'), 'folder-sync-debug.log')
+    const line = `[${new Date().toISOString()}] ${msg}\n`
+    try { fs.appendFileSync(logPath, line) } catch {}
   }
 
   async loadFoldersFromChannel(): Promise<{ folders: any[]; fileFolders: Record<string, string> } | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+
+    this.debugLog('loadFoldersFromChannel called')
+
+    // Full search by prefix — collect ALL sync messages and merge
     const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
-    const sync = msgs.find((m: any) => m.message?.startsWith?.('__rf__'))
-    if (!sync) return null
-    this.folderSyncId = typeof sync.id === 'object' ? Number(sync.id.toString()) : sync.id
-    try { return JSON.parse(sync.message.slice(6)) } catch { return null }
+    this.debugLog('Full search, total messages: ' + msgs.length)
+
+    const allFolders: any[] = []
+    const allFileFolders: Record<string, string> = {}
+    const seenFolderIds = new Set<string>()
+    const seenFileIds = new Set<string>()
+    let newestSyncId: number | null = null
+
+    for (const m of msgs) {
+      if (!m.message) continue
+      if (!m.message.startsWith('rf') && !m.message.startsWith('RFSYNC:')) continue
+      const id = this.msgId(m)
+      this.debugLog(`msg id=${id} hasFile=${!!m.file} text[0..80]="${m.message.substring(0, 80)}"`)
+
+      const parsed = this.parseSyncMessage(m.message)
+      if (!parsed) continue
+      this.debugLog('FOUND sync id=' + id + ' folders=' + (parsed.data?.folders?.length ?? 0))
+
+      if (newestSyncId === null) newestSyncId = id
+      if (parsed.data?.folders) {
+        for (const f of parsed.data.folders) {
+          if (f.id && !seenFolderIds.has(f.id)) {
+            seenFolderIds.add(f.id)
+            allFolders.push(f)
+          }
+        }
+      }
+      if (parsed.data?.fileFolders) {
+        for (const [key, val] of Object.entries(parsed.data.fileFolders)) {
+          if (!seenFileIds.has(key)) {
+            seenFileIds.add(key)
+            allFileFolders[key] = val as string
+          }
+        }
+      }
+    }
+
+    if (newestSyncId !== null) {
+      this.saveFolderSyncId(newestSyncId)
+      this.debugLog('Merged result: ' + allFolders.length + ' folders, ' + Object.keys(allFileFolders).length + ' file mappings')
+      return { folders: allFolders, fileFolders: allFileFolders }
+    }
+
+    this.debugLog('NO sync message found!')
+    return null
   }
 
   async getUserInfo(): Promise<{ firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }> {
