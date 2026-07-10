@@ -352,15 +352,18 @@ export default function AlbumsPage() {
           {SMART_ALBUMS.map(sa => {
             let count = 0
             if (sa.isDuplicates) {
-              const metas = v3store.getMeta().filter(m => m.hash)
-              const hashCounts = new Map<string, number>()
-              metas.forEach(m => hashCounts.set(m.hash!, (hashCounts.get(m.hash!) || 0) + 1))
-              hashCounts.forEach(c => { if (c > 1) count += c })
+              const metaMap = new Map<number, any>()
+              v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
+              const hashGroups = new Map<string, any[]>()
+              allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
+                const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
+              })
+              hashGroups.forEach(group => { if (group.length > 1) count += group.length })
             } else if (sa.filter) count = allFiles.filter(sa.filter).length
             return (
               <div key={sa.id} className="v3-card" style={{ padding: 14, cursor: 'pointer' }} onClick={() => setOpenAlbum(sa.id)}>
                 <div className="v3-row">{sa.id === '_photos' ? <Image size={18} /> : sa.id === '_videos' ? <Film size={18} /> : sa.id === '_screenshots' ? <Camera size={18} /> : <Copy size={18} />}<div style={{ flex: 1, fontWeight: 600, marginLeft: 8 }}>{sa.name}</div></div>
-                <div className="v3-sub v3-num" style={{ marginLeft: 26 }}>{count > 0 ? `${count} файлов` : '—'}</div>
+                <div className="v3-sub v3-num" style={{ marginLeft: 38 }}>{count > 0 ? `${count} файлов` : '—'}</div>
               </div>
             )
           })}
@@ -377,7 +380,7 @@ export default function AlbumsPage() {
                 <div className="v3-row"><Image size={18} /><div style={{ flex: 1, fontWeight: 600, marginLeft: 8 }}>{a.name}</div>
                   <button className="v3-btn ghost" style={{ padding: 4 }} onClick={(e) => { e.stopPropagation(); removeAlbum(a.id) }}><Trash2 size={14} /></button>
                 </div>
-                <div className="v3-sub v3-num" style={{ marginLeft: 26 }}>{a.messageIds.length} файлов · {new Date(a.createdAt).toLocaleDateString()}</div>
+                <div className="v3-sub v3-num" style={{ marginLeft: 38 }}>{a.messageIds.length} файлов · {new Date(a.createdAt).toLocaleDateString()}</div>
               </div>
             ))}
           </div>
