@@ -252,7 +252,7 @@ export default function AutoSyncPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 16 }}>
         <div className="v3-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Clock size={16} style={{ color: 'var(--v3-text-dim)' }} />
@@ -280,31 +280,10 @@ export default function AutoSyncPage() {
           </div>
         </div>
 
-        <div className="v3-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Shield size={16} style={{ color: 'var(--v3-text-dim)' }} />
-            <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Быстрые действия</h2>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={runTestUpload} disabled={testing} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px 12px', borderRadius: 10, border: '1px dashed var(--v3-border-strong)', cursor: testing ? 'wait' : 'pointer', background: 'rgba(255,255,255,0.02)', color: 'var(--v3-text-dim)', fontSize: 11, fontFamily: 'inherit' }}>
-              {testing ? <Loader2 size={12} className="spin" /> : <Upload size={12} />}
-              {testing ? 'Загрузка...' : 'Тест загрузки'}
-            </button>
-            <button onClick={runScan} disabled={scanning} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px 12px', borderRadius: 10, border: '1px dashed var(--v3-border-strong)', cursor: scanning ? 'wait' : 'pointer', background: 'rgba(255,255,255,0.02)', color: 'var(--v3-text-dim)', fontSize: 11, fontFamily: 'inherit' }}>
-              {scanning ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-              {scanning ? 'Сканирование...' : 'Сканировать'}
-            </button>
-          </div>
-          {testResult && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: testResult.success ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)', border: `1px solid ${testResult.success ? 'rgba(52,211,153,0.25)' : 'rgba(248,113,113,0.25)'}`, color: testResult.success ? '#34d399' : '#f87171' }}>
-              {testResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-              {testResult.message}
-            </div>
-          )}
-        </div>
+
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {config.mode === 'custom' && (
             <div className="v3-card">
@@ -333,57 +312,10 @@ export default function AutoSyncPage() {
             </div>
           )}
 
-          <div className="v3-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-              <FileText size={16} style={{ color: 'var(--v3-text-dim)' }} />
-              <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Фильтры</h2>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '6px 0' }}>
-              <input type="checkbox" checked={!!config.fileFilter?.enabled} onChange={e => save({ ...config, fileFilter: { ...(config.fileFilter || {}), enabled: e.target.checked } })} style={{ accentColor: '#7cc8ff', width: 16, height: 16 }} />
-              <span style={{ fontSize: 13, color: 'var(--v3-text)' }}>Только определённые расширения</span>
-            </label>
-            {config.fileFilter?.enabled && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {(config.fileFilter.extensions || []).map((x: string) => (
-                  <span key={x} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 99, fontSize: 12, background: 'rgba(124,200,255,0.1)', color: '#b9d8ff', border: '1px solid rgba(124,200,255,0.25)' }}>
-                    .{x}
-                    <button onClick={() => save({ ...config, fileFilter: { ...config.fileFilter, extensions: config.fileFilter.extensions.filter((y: string) => y !== x) } })} style={{ background: 'none', border: 'none', color: '#b9d8ff', cursor: 'pointer', padding: 0, display: 'flex', opacity: 0.6, fontSize: 12 }}>✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--v3-border-soft)' }}>
-              <button onClick={async () => { await window.electronAPI.autoSync.resetUploaded(); load() }} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', padding: 0, textDecoration: 'underline', opacity: 0.7 }}>
-                Сбросить историю загрузок
-              </button>
-            </div>
-          </div>
+
         </div>
 
-        <div className="v3-card" style={{ display: 'flex', flexDirection: 'column', maxHeight: '60vh' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexShrink: 0 }}>
-            <Clock size={16} style={{ color: 'var(--v3-text-dim)' }} />
-            <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>События</h2>
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--v3-text-dim)' }}>за 1 час</span>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {(() => { const recent = log.filter(e => e.ts && Date.now() - e.ts < 3600000); return recent.length === 0 ? (
-              <div style={{ color: 'var(--v3-text-dim)', textAlign: 'center', padding: '30px 0', fontSize: 13 }}>Событий за последний час нет</div>
-            ) : (
-              recent.slice(0, 100).map((e, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, borderLeft: `3px solid ${eventColor[e.type] || 'var(--v3-text-dim)'}`, background: 'rgba(255,255,255,0.015)' }}>
-                  <span style={{ flexShrink: 0 }}>{eventIcon[e.type] || '•'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, textTransform: 'capitalize' }}>{e.type}{e.file ? <span style={{ color: 'var(--v3-text-dim)', fontWeight: 400 }}> — {e.file}</span> : ''}</div>
-                    {e.error && <div style={{ color: '#f87171', fontSize: 11, marginTop: 1 }}>{e.error}</div>}
-                    <div style={{ color: 'var(--v3-text-dim)', fontSize: 9, marginTop: 2, opacity: 0.6 }}>{new Date(e.ts || Date.now()).toLocaleTimeString()}</div>
-                  </div>
-                </div>
-              ))
-            )})()}
-            <div ref={logEndRef} />
-          </div>
-        </div>
+
       </div>
     </div>
   )
