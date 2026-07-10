@@ -22,8 +22,11 @@
     "oneClick": true,
     "perMachine": false,
     "allowElevation": false,
-    "createDesktopShortcut": false,
-    "createStartMenuShortcut": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "installerIcon": "resources/icon.ico",
+    "uninstallerIcon": "resources/icon.ico",
+    "installerHeaderIcon": "resources/icon.ico",
     "shortcutName": "RodjerCloud",
     "artifactName": "RodjerCloud-${version}.exe"
   },

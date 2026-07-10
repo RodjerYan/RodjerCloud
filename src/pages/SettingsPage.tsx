@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Bot, Info, Download, ExternalLink, HardDrive } from 'lucide-react'
+import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2 } from 'lucide-react'
 import iconUrl from '../assets/icon.png'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
