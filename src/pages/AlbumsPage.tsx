@@ -4,6 +4,7 @@ import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, L
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
+import { appConfirm, appAlert } from "../lib/dialogs"
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
 
@@ -155,8 +156,8 @@ export default function AlbumsPage() {
     setAlbums(v3store.getAlbums()); setNewName(''); setShowCreateModal(false)
   }
 
-  const removeAlbum = (id: string) => {
-    if (!confirm('Удалить альбом?')) return; v3store.removeAlbum(id); setAlbums(v3store.getAlbums())
+  const removeAlbum = async (id: string) => {
+    if (!(await appConfirm('Удалить альбом?'))) return; v3store.removeAlbum(id); setAlbums(v3store.getAlbums())
     if (openAlbum === id) setOpenAlbum(null)
   }
 
@@ -167,11 +168,11 @@ export default function AlbumsPage() {
 
   const handleDownload = async (f: any) => {
     const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    if (!r.success) alert(r.error || 'Ошибка')
+    if (!r.success) await appAlert(r.error || 'Ошибка')
   }
 
   const handleDelete = async (f: any) => {
-    if (!confirm('Удалить ' + f.fileName + '?')) return
+    if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
   }

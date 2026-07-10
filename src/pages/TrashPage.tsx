@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2, Trash2 as DeleteIcon, Circle } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
+import { appConfirm } from '../lib/dialogs'
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -104,7 +105,7 @@ export default function TrashPage() {
   }
 
   const handlePurge = async (id: number) => {
-    if (!confirm('Удалить файл навсегда?')) return
+    if (!(await appConfirm('Удалить файл навсегда?'))) return
     setDeletingIds(prev => new Set(prev).add(id))
     const r = await window.electronAPI.telegram.permDeleteFile(id)
     if (r.success) {
@@ -129,7 +130,7 @@ export default function TrashPage() {
 
   const handleBulkPurge = async () => {
     if (selected.size === 0) return
-    if (!confirm(`Удалить навсегда ${selected.size} файлов?`)) return
+    if (!(await appConfirm(`Удалить навсегда ${selected.size} файлов?`))) return
     const ids = Array.from(selected)
     setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
     for (const id of ids) {

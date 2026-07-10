@@ -6,6 +6,7 @@ import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, Chevr
 import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
+import { appConfirm } from '../lib/dialogs'
 import { fmtSize } from '../lib/utils'
 
 const SIX_HOURS = 21600
@@ -134,7 +135,7 @@ export default function MyFilesPage() {
   }
 
   const deleteFolder = async (id: string) => {
-    if (!confirm('Удалить папку? Файлы останутся в общем списке.')) return
+    if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.'))) return
     const r = await window.electronAPI.folders.delete(id)
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
     if (folderDrill === id) setFolderDrill(null)
@@ -262,7 +263,7 @@ export default function MyFilesPage() {
     showToast(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
   }
   const handleDelete = async (f: any) => {
-    if (!confirm('Переместить ' + f.fileName + ' в корзину?')) return
+    if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
     setDeletingIds(prev => new Set(prev).add(f.messageId))
     showToast('Перемещение в корзину…')
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
@@ -365,7 +366,7 @@ export default function MyFilesPage() {
 
   const bulkDelete = async () => {
     if (selected.size === 0) return
-    if (!confirm(`Переместить ${selected.size} файлов в корзину?`)) return
+    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
     const ids = Array.from(selected)
     setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
     showToast('Перемещение в корзину…')

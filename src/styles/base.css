@@ -65,3 +65,5 @@ body::before {
 /* Tray indicator */
 .v3-tray { position: fixed; right: 18px; bottom: 18px; background: var(--panel); border: 1px solid var(--border-strong); backdrop-filter: blur(16px); border-radius: var(--radius-md); padding: 10px 14px; display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); color: var(--text); z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.45); }
 .v3-tray .pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--success); box-shadow: 0 0 12px var(--success); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }

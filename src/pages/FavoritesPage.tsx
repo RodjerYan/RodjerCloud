@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react"
 import { Star, Download, Trash2, Eye } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
+import { appConfirm, appAlert } from "../lib/dialogs"
 
 function fmtSize(n: number) {
   if (!n) return '0 B'
@@ -38,11 +39,11 @@ export default function FavoritesPage() {
 
   const handleDownload = async (f: any) => {
     const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    if (!r.success) alert(r.error || 'Ошибка скачивания')
+    if (!r.success) await appAlert(r.error || 'Ошибка скачивания')
   }
 
   const handleDelete = async (f: any) => {
-    if (!confirm('Удалить ' + f.fileName + '?')) return
+    if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
       setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))

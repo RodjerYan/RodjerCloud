@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Play, Download, Trash2, Music } from 'lucide-react'
 import { useAudioPlayer } from '../lib/AudioPlayerContext'
+import { appConfirm } from '../lib/dialogs'
 
 function fmtSize(n: number) {
   if (!n) return '0 B'
@@ -28,7 +29,7 @@ export default function AudioPlayerPage() {
   }, [])
 
   const handleDelete = async (f: any) => {
-    if (!confirm('Удалить ' + f.fileName + '?')) return
+    if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
       setFiles(prev => prev.filter(x => x.messageId !== f.messageId))

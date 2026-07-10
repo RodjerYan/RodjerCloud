@@ -37,6 +37,8 @@ import "./styles/settings.css"
 import "./styles/modal.css"
 import ErrorBoundary from "./components/ErrorBoundary"
 
+import GlobalDialogs from "./components/GlobalDialogs"
+
 declare global { interface Window { electronAPI: any } }
 
 function App() {
@@ -188,6 +190,7 @@ function App() {
         <AudioPlayerBar />
         </AudioPlayerProvider>
         <CommandPalette />
+        <GlobalDialogs />
       </div>
     </MemoryRouter>
     </ErrorBoundary>
