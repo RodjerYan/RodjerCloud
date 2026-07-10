@@ -15,6 +15,8 @@ import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 
 
+app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
+
 // Logger
 const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
 function log(level: string, msg: string) {
