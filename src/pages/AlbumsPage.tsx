@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil } from "lucide-react"
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS } from "../lib/albums"
+import { Player } from '@lottiefiles/react-lottie-player'
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
 
@@ -46,6 +47,9 @@ export default function AlbumsPage() {
   const [renameInput, setRenameInput] = useState('')
   const [showSub, setShowSub] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [duckAnim, setDuckAnim] = useState<any>(null)
+
+  useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
   const closeCtx = useCallback(() => { setCtxMenu(null); setShowSub(null) }, [])
@@ -277,7 +281,16 @@ export default function AlbumsPage() {
               </div>
             ))
           )}
-          {albumFiles.length === 0 && !hashing && <div className="v3-sub" style={{ padding: 30, textAlign: 'center' }}>Нет файлов</div>}
+          {albumFiles.length === 0 && !hashing && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 12 }}>
+              {duckAnim ? (
+                <Player autoplay loop src={duckAnim} style={{ width: 100, height: 100 }} />
+              ) : (
+                <div style={{ width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>🐤</div>
+              )}
+              <span style={{ color: 'var(--text-dim)', fontSize: 14, fontWeight: 500 }}>Здесь пока никого…</span>
+            </div>
+          )}
         </div>
 
         {renameTarget && createPortal(
