@@ -59,9 +59,6 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
         <button className="v2-sidebar-logout" onClick={onLogout} data-testid="logout-btn">
           <LogOut size={16} /><span>Выйти</span>
         </button>
-        <div className="v3-row" style={{ marginTop: 8, fontSize: 11, color: "var(--v3-text-mute)" }}>
-          <Command size={12} /> + K — поиск
-        </div>
       </div>
     </aside>
   )
