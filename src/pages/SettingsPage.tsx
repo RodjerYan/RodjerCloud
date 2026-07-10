@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FolderOpen, Copy, AlertTriangle, Bot, Info, Download, ExternalLink, Loader2 } from 'lucide-react'
+import iconUrl from '../assets/icon.png'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
   const [downloadPath, setDownloadPath] = useState('')
@@ -201,8 +202,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       <section className="se-card">
         <h2><Info size={16} /> О программе</h2>
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          <div style={{ width: 72, height: 72, borderRadius: 20, background: 'var(--accent)', display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 8 }}>CS</div>
+          <img src={iconUrl} alt="RodjerCloud" style={{ width: 72, height: 72, borderRadius: 20, marginBottom: 8 }} />
           <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
           <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>{version ? `v${version}` : ''}</div>
           <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
