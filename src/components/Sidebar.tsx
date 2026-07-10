@@ -14,9 +14,9 @@ const items = [
   { to: "/albums", label: "Альбомы", icon: ImgIcon },
   { to: "/autosync", label: "Авто-синх.", icon: RefreshCw },
 
-  { to: "/trash", label: "Корзина", icon: Trash2 },
   { to: "/favorites", label: "Избранное", icon: Star },
-  { to: "/settings", label: "Настройки", icon: Settings }
+  { to: "/settings", label: "Настройки", icon: Settings },
+  { to: "/trash", label: "Корзина", icon: Trash2 },
 ]
 
 export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
