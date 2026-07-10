@@ -1,6 +1,6 @@
 {
   "name": "rodjercloud",
-  "version": "1.0.31",
+  "version": "1.0.30",
   "description": "RodjerCloud - Telegram Cloud Storage Desktop App",
   "main": "out/main/index.js",
   "author": "RodjerCloud",
@@ -38,7 +38,7 @@
     "@types/react-dom": "^18.3.5",
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.3.0",
+    "electron": "^35.7.5",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
