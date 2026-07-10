@@ -202,6 +202,26 @@ export class TelegramService {
     return { success: true }
   }
 
+  private async setChannelPhoto() {
+    if (!this.client || !this.channelId) return
+    try {
+      const iconPath = path.join(app.getAppPath(), 'resources', 'icon-256.png')
+      if (!fs.existsSync(iconPath)) return
+      const uploaded = await this.client.uploadFile({
+        file: iconPath,
+        workers: 1,
+      })
+      await this.client.invoke(
+        new Api.channels.EditPhoto({
+          channel: this.channelId as any,
+          photo: new Api.InputChatUploadedPhoto({ file: uploaded }),
+        })
+      )
+    } catch {
+      // non-critical
+    }
+  }
+
   async createPrivateChannel() {
     if (!this.client) throw new Error('Client not initialized')
 
@@ -232,6 +252,7 @@ export class TelegramService {
     if (result.chats && result.chats.length > 0) {
       const channel = result.chats[0] as any
       this.channelId = BigInt(channel.id.toString())
+      this.setChannelPhoto()
       return {
         channelId: this.channelId.toString(),
         channelName: CHANNEL_NAME,
