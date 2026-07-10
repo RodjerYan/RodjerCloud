@@ -560,10 +560,28 @@ ipcMain.handle('dialog:pick-folder-recursive', async () => {
 })
 
 ipcMain.handle('telegram:bulk-download', async (event, items: Array<{ messageId: number; fileName: string }>) => {
+  const prefs = await readPrefs()
+  let destDir: string | null = null
+  if (prefs.askDownloadPath) {
+    const result = await dialog.showOpenDialog({
+      title: 'Выберите папку для загрузки',
+      defaultPath: app.getPath('downloads'),
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths.length) return { success: false, error: 'cancelled' }
+    destDir = result.filePaths[0]
+  }
   const results: any[] = []
   for (let i = 0; i < items.length; i++) {
     try {
-      const r = await telegramService.downloadFile(items[i].messageId, items[i].fileName)
+      let r
+      if (destDir) {
+        const filePath = pathMod.join(destDir, items[i].fileName)
+        await telegramService.downloadMediaToPath(items[i].messageId, filePath)
+        r = { filePath, fileName: items[i].fileName }
+      } else {
+        r = await telegramService.downloadFile(items[i].messageId, items[i].fileName)
+      }
       results.push({ success: true, data: r })
     } catch (e) { results.push({ success: false, error: (e as Error).message }) }
     event.sender.send('telegram:bulk-progress', { kind: 'download', index: i + 1, total: items.length })

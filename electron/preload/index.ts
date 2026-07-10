@@ -77,6 +77,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('app:update-available', listener)
     },
   },
+  storage: {
+    getDownloadPath: () => ipcRenderer.invoke('storage:get-download-path'),
+    setDownloadPath: (p: string) => ipcRenderer.invoke('storage:set-download-path', p),
+    getUploadConcurrency: () => ipcRenderer.invoke('storage:get-upload-concurrency'),
+    setUploadConcurrency: (n: number) => ipcRenderer.invoke('storage:set-upload-concurrency', n),
+    getAskDownloadPath: () => ipcRenderer.invoke('storage:get-ask-download-path'),
+    setAskDownloadPath: (val: boolean) => ipcRenderer.invoke('storage:set-ask-download-path', val),
+  },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }
   },

@@ -24,6 +24,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [askDownloadPath, setAskDownloadPath] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [downloadPathState, setDownloadPathState] = useState('')
 
   useEffect(() => {
     (async () => {
@@ -159,6 +160,12 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
             Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
           </p>
+
+          <button className="se-secondary" onClick={checkUpdates} disabled={checkingUpdate}
+            style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Download size={14} />
+            {checkingUpdate ? 'Проверка…' : 'Проверить обновления'}
+          </button>
 
           <div style={{ marginTop: 16, fontSize: 12, color: 'var(--v3-text-mute)' }}>Распространяется под лицензией MIT</div>
         </div>
