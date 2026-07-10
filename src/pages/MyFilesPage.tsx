@@ -38,7 +38,11 @@ const CAT_COLOR: Record<string, string> = {
 }
 
 function fileDate(f: any): number {
-  return f.originalDate || f.uploadedAt || 0
+  const t = typeOf(f.fileName)
+  if (t === 'Изображения' || t === 'Видео') {
+    return f.originalDate || f.uploadedAt || 0
+  }
+  return f.uploadedAt || f.originalDate || 0
 }
 
 function groupByDay(items: any[]) {
@@ -223,8 +227,8 @@ export default function MyFilesPage() {
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
       if (ffset.has(f.messageId)) return
-      const up = f.uploadedAt || 0
-      if (up > 0 && (now - up) < SIX_HOURS) map['Недавние']?.push(f)
+      const fd = fileDate(f)
+      if (fd > 0 && (now - fd) < SIX_HOURS) map['Недавние']?.push(f)
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
