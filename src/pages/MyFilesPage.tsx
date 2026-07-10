@@ -895,7 +895,7 @@ export default function MyFilesPage() {
               style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 14, outline: 'none' }} />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="v3-btn" onClick={() => setShowCreateFolder(false)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)' }}>Отмена</button>
-              <button className="v3-btn" onClick={confirmCreateFolder} style={{ background: 'var(--accent-1)', border: 'none', color: '#fff' }}>Создать</button>
+              <button className="v3-btn" onClick={confirmCreateFolder} style={{ background: 'var(--accent)', border: 'none', color: '#fff' }}>Создать</button>
             </div>
           </div>
         </div>

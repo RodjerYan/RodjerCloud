@@ -164,7 +164,7 @@ export default function UploadPage() {
             </React.Fragment>
           ))}
         </div>
-        <Archive size={28} style={{ color: '#7c83ff' }} />
+        <Archive size={28} style={{ color: 'var(--accent)' }} />
         <div className="up-archive-bar">
           <div className="up-bar">
             <div className="up-bar-fill up-archive-bar-fill" style={{ width: archiveInfo.percent + '%' }} />
@@ -209,8 +209,8 @@ export default function UploadPage() {
         <h2>Перетащите файлы сюда</h2>
         <p>или используйте кнопки ниже</p>
         <div className="up-actions">
-          <button className="primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
-          <button onClick={pickFolder}><FolderOpen size={16} /> Выбрать папку</button>
+          <button className="v3-btn primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
+          <button className="v3-btn" onClick={pickFolder}><FolderOpen size={16} /> Выбрать папку</button>
         </div>
       </div>
 

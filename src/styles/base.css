@@ -4,7 +4,7 @@ body {
   font-family: var(--font-sans);
   background: var(--bg-0);
   background-image:
-    radial-gradient(1200px 600px at 0% -10%, rgba(124,131,255,0.10), transparent 60%),
+    radial-gradient(1200px 600px at 0% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
     radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.10), transparent 60%);
   color: var(--text);
   overflow: hidden;
@@ -41,7 +41,7 @@ body::before {
 .splash-root { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .splash-bg { position: absolute; inset: 0; background: conic-gradient(from 230deg at 50% 50%, #1a1640, #2b1248, #1a1640); filter: blur(60px); opacity: 0.6; animation: pulse 4s ease-in-out infinite; }
 .splash-inner { position: relative; text-align: center; animation: fadeInUp 0.6s ease both; }
-.splash-logo-mark { width: 88px; height: 88px; border-radius: 24px; background: var(--accent); box-shadow: 0 20px 60px rgba(124,131,255,0.4); display: inline-flex;}
+.splash-logo-mark { width: 88px; height: 88px; border-radius: 24px; background: var(--accent); box-shadow: 0 20px 60px color-mix(in srgb, var(--accent) 40%, transparent); display: inline-flex;}
 .splash-title { font-size: 36px; margin: 18px 0 4px; letter-spacing: -0.5px; }
 .splash-subtitle { color: var(--text-dim); margin: 0 0 28px; }
 .splash-progress { width: 280px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; margin: 0 auto; }

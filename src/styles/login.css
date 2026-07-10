@@ -8,7 +8,7 @@
   overflow: hidden;
   z-index: 1;
   background:
-    radial-gradient(1200px 600px at 0% -10%, rgba(124,131,255,0.12), transparent 60%),
+    radial-gradient(1200px 600px at 0% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
     radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.12), transparent 60%),
     var(--bg-0, #05060d);
 }
@@ -105,7 +105,7 @@
   position: absolute;
   inset: -8px;
   border-radius: 28px;
-  background: linear-gradient(135deg, rgba(124,131,255,0.3), rgba(177,74,255,0.3));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent), rgba(177,74,255,0.3));
   filter: blur(12px);
   animation: loginPulse 3s ease-in-out infinite;
 }
@@ -116,10 +116,10 @@
 }
 
 .login-title {
-  font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 36px;
   font-weight: 800;
-  color: #e7eaf6;
+  color: var(--text);
   margin: 0 0 6px;
   letter-spacing: -0.5px;
 }
@@ -133,7 +133,7 @@
 
 .login-subtitle {
   font-size: 15px;
-  color: rgba(154, 163, 194, 0.8);
+  color: var(--text-dim);
   font-weight: 400;
   margin: 0;
 }
@@ -143,10 +143,10 @@
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.2);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
   border-radius: 12px;
-  color: #fca5a5;
+  color: var(--danger);
   font-size: 13px;
   margin-bottom: 24px;
   animation: loginShake 0.35s cubic-bezier(.36,.07,.19,.97);
@@ -191,8 +191,8 @@
 }
 
 .login-phone-wrap:focus-within {
-  border-color: rgba(124, 200, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(124, 200, 255, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .login-phone-prefix {
@@ -202,7 +202,7 @@
   font-weight: 500;
   color: rgba(231, 234, 246, 0.4);
   pointer-events: none;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   z-index: 1;
 }
 
@@ -212,17 +212,17 @@
   background: transparent;
   border: none;
   outline: none;
-  color: #e7eaf6;
+  color: var(--text);
   font-size: 16px;
   font-weight: 500;
-  font-family: 'Inter', 'SF Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.5px;
 }
 
 .login-phone-input::placeholder {
-  color: rgba(154, 163, 194, 0.3);
+  color: color-mix(in srgb, var(--text-dim) 30%, transparent);
   font-weight: 400;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   letter-spacing: 0;
 }
 
@@ -240,16 +240,16 @@
   color: transparent;
   font-size: 24px;
   font-weight: 700;
-  font-family: 'SF Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 12px;
   text-align: center;
-  caret-color: #7cc8ff;
+  caret-color: var(--accent);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .login-code-input:focus {
-  border-color: rgba(124, 200, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(124, 200, 255, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .login-code-input::placeholder {
@@ -271,15 +271,15 @@
   width: 10px;
   height: 2px;
   border-radius: 2px;
-  background: rgba(154, 163, 194, 0.2);
+  background: color-mix(in srgb, var(--text-dim) 20%, transparent);
   transition: all 0.2s ease;
 }
 
 .login-code-dash.filled {
   width: 12px;
   height: 3px;
-  background: #7cc8ff;
-  box-shadow: 0 0 8px rgba(124, 200, 255, 0.4);
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .login-input {
@@ -289,25 +289,25 @@
   border: 1px solid rgba(140,160,220,0.12);
   border-radius: 14px;
   outline: none;
-  color: #e7eaf6;
+  color: var(--text);
   font-size: 16px;
   font-weight: 500;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .login-input:focus {
-  border-color: rgba(124, 200, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(124, 200, 255, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .login-input::placeholder {
-  color: rgba(154, 163, 194, 0.3);
+  color: color-mix(in srgb, var(--text-dim) 30%, transparent);
 }
 
 .login-hint {
   font-size: 13px;
-  color: rgba(154, 163, 194, 0.4);
+  color: color-mix(in srgb, var(--text-dim) 40%, transparent);
   margin: 2px 0 0;
 }
 
@@ -321,15 +321,15 @@
   color: #fff;
   font-size: 15px;
   font-weight: 700;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   cursor: pointer;
   transition: transform 0.15s cubic-bezier(.2,.8,.2,1), box-shadow 0.2s ease, opacity 0.2s ease;
-  box-shadow: 0 4px 20px rgba(124, 131, 255, 0.3);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .login-btn:hover:not(:disabled) {
   transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 8px 30px rgba(124, 131, 255, 0.4);
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .login-btn:active:not(:disabled) {
@@ -367,18 +367,18 @@
   gap: 6px;
   background: none;
   border: none;
-  color: rgba(154, 163, 194, 0.6);
+  color: color-mix(in srgb, var(--text-dim) 60%, transparent);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   padding: 6px 0;
   transition: color 0.2s ease;
   width: fit-content;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .login-back:hover {
-  color: #7cc8ff;
+  color: var(--accent);
 }
 
 .login-footer {
@@ -390,7 +390,7 @@
   justify-content: center;
   gap: 8px;
   font-size: 12px;
-  color: rgba(154, 163, 194, 0.3);
+  color: color-mix(in srgb, var(--text-dim) 30%, transparent);
 }
 
 .fade-in {

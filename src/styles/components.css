@@ -34,14 +34,14 @@
   color: var(--text); font-family: var(--font-sans);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.v3-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(124,131,255,0.12); }
+.v3-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent); }
 
 /* Progress */
 .v3-progress { position: relative; height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .v3-progress-bar { height: 100%; border-radius: 999px; background-image: var(--accent-gradient); transition: width .1s ease-out; position: relative; }
 
 /* Chips */
-.v3-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: rgba(124,131,255,0.10); color: var(--accent); border: 1px solid rgba(124,131,255,0.25); }
+.v3-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
 
 /* Checkmark */
 .v3-check { width: 44px; height: 44px; border-radius: 999px; background: rgba(52,211,153,0.15); display:inline-flex; align-items:center; justify-content:center; }

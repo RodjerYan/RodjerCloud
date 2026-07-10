@@ -100,14 +100,14 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     <div className="se-root">
       <h1>Настройки</h1>
 
-      <section className="se-card">
+      <section className="v3-card">
         <h2>Загрузка</h2>
         <label className="se-row"><span>Всегда спрашивать куда загружать файлы</span>
           <input type="checkbox" checked={askDownloadPath} onChange={e => { setAskDownloadPath(e.target.checked); window.electronAPI.storage.setAskDownloadPath(e.target.checked) }} />
         </label>
       </section>
 
-      <section className="se-card">
+      <section className="v3-card">
         <h2>Отправка</h2>
         <label className="se-row"><span>Авто-переименование при совпадении</span>
           <input type="checkbox" checked={autoRename} onChange={e => { setAutoRename(e.target.checked); localStorage.setItem('v2.autoRename', e.target.checked ? '1' : '0') }} />
@@ -117,7 +117,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
         </div>
       </section>
 
-      <section className="se-card">
+      <section className="v3-card">
         <h2>Канал</h2>
         <div className="se-row"><span>Подключённый канал</span><strong>{channelInfo?.title || '—'}</strong></div>
         {channelInfo?.token && (
@@ -126,19 +126,19 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
               <button onClick={copyKey}><Copy size={14} /> Копировать ключ</button></div>
           </div>
         )}
-        <button className="se-secondary" onClick={onChangeChannel}>Сменить канал</button>
+        <button className="v3-btn" onClick={onChangeChannel}>Сменить канал</button>
       </section>
 
-      <section className="se-card">
+      <section className="v3-card">
         <h2><Bot size={16} /> Бот для ссылок</h2>
         <div className="se-row"><span>Токен бота</span>
-          {botConfigured ? <span style={{ color: 'var(--accent-1)' }}>✓ Настроен</span> : <span style={{ color: 'var(--red)' }}>Не настроен</span>}
+          {botConfigured ? <span style={{ color: 'var(--accent)' }}>✓ Настроен</span> : <span style={{ color: 'var(--danger)' }}>Не настроен</span>}
         </div>
         <div className="se-row" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
           <input value={botToken} onChange={e => setBotToken(e.target.value)}
             placeholder="Введите токен бота: 123456:ABCdef..."
             style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'monospace' }} />
-          <button className="se-secondary" onClick={async () => {
+          <button className="v3-btn" onClick={async () => {
             if (!botToken.trim()) return show('Введите токен')
             const r = await window.electronAPI.share.setBotToken(botToken.trim())
             if (r.success) { setBotConfigured(true); show('Токен сохранён') }
@@ -150,18 +150,18 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
         </div>
       </section>
 
-      <section className="se-card">
+      <section className="v3-card">
         <h2><Info size={16} /> О программе</h2>
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <img src={iconUrl} alt="RodjerCloud" style={{ width: 72, height: 72, borderRadius: 20, marginBottom: 8 }} />
           <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
-          <div style={{ color: 'var(--accent-1)', fontSize: 13, marginBottom: 12 }}>{version ? `v${version}` : ''}</div>
+          <div style={{ color: 'var(--accent)', fontSize: 13, marginBottom: 12 }}>{version ? `v${version}` : ''}</div>
           <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
             Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
           </p>
 
-          <button className="se-secondary" onClick={checkUpdates} disabled={checkingUpdate}
+          <button className="v3-btn" onClick={checkUpdates} disabled={checkingUpdate}
             style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Download size={14} />
             {checkingUpdate ? 'Проверка…' : 'Проверить обновления'}
