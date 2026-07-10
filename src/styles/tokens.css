@@ -1,0 +1,47 @@
+:root {
+  /* Фон */
+  --bg-0: #05060d;
+  --bg-1: #0c0e1a;
+  --panel: #111425;
+  --panel-hover: #161a30;
+  
+  /* Текст */
+  --text: #e7eaf6;
+  --text-dim: #9aa3c2;
+  --text-mute: #5a6080;
+  
+  /* Акцент — единый (фиолетовый, как на логине) */
+  --accent: #7c83ff;
+  --accent-hover: #6a70e6;
+  --accent-gradient: linear-gradient(135deg, #7c83ff, #5a44d4, #b14aff);
+  
+  /* Семантика */
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  
+  /* Границы */
+  --border: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.12);
+  
+  /* Радиусы */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  
+  /* Отступы */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  
+  /* Типографика */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  
+  /* Анимации */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}

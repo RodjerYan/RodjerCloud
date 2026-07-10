@@ -16,12 +16,12 @@
   backdrop-filter: blur(16px); }
 .mf-bulkbar button { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text);
   padding: 6px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
-.mf-bulkbar button.danger { color: var(--err); border-color: rgba(255,107,122,0.4); }
+.mf-bulkbar button.danger { color: var(--danger); border-color: rgba(255,107,122,0.4); }
 .mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .mf-card { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
   padding: 14px; backdrop-filter: blur(14px); transition: transform 0.15s, border-color 0.15s; }
 .mf-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
-.mf-card.selected { border-color: var(--accent-1); background: rgba(124,131,255,0.08); }
+.mf-card.selected { border-color: var(--accent); background: rgba(124,131,255,0.08); }
 .mf-card.deleting, .mf-gm-card.deleting, .mf-table tr.deleting {
   opacity: 0; transform: scale(0.9); transition: opacity 0.25s, transform 0.25s; pointer-events: none;
 }
@@ -43,7 +43,7 @@
 .mf-card-actions button, .mf-table button { background: rgba(255,255,255,0.04); border: 1px solid var(--border);
   color: var(--text-dim); padding: 6px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .mf-card-actions button:hover, .mf-table button:hover { color: var(--text); border-color: var(--border-strong); }
-.mf-card-actions button.danger:hover, .mf-table button.danger:hover { color: var(--err); border-color: rgba(255,107,122,0.4); }
+.mf-card-actions button.danger:hover, .mf-table button.danger:hover { color: var(--danger); border-color: rgba(255,107,122,0.4); }
 .mf-table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; backdrop-filter: blur(20px); }
 .mf-table th, .mf-table td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
 .mf-table th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
@@ -132,7 +132,7 @@ body.compact .mf-card-icon { height: 60px; }
   border-radius: 12px; padding: 12px; transition: border-color 0.15s; overflow: hidden;
 }
 .mf-gm-card:hover { border-color: var(--border-strong); }
-.mf-gm-card.selected { border-color: var(--accent-1); background: rgba(124,131,255,0.08); }
+.mf-gm-card.selected { border-color: var(--accent); background: rgba(124,131,255,0.08); }
 .mf-gm-card .mf-check { top: 6px; left: 6px; }
 .mf-gm-icon {
   position: relative; overflow: hidden;
@@ -148,7 +148,7 @@ body.compact .mf-card-icon { height: 60px; }
 .mf-gm-actions button { background: rgba(255,255,255,0.04); border: 1px solid var(--border);
   color: var(--text-dim); padding: 5px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .mf-gm-actions button:hover { color: var(--text); border-color: var(--border-strong); }
-.mf-gm-actions button.danger:hover { color: var(--err); border-color: rgba(255,107,122,0.4); }
+.mf-gm-actions button.danger:hover { color: var(--danger); border-color: rgba(255,107,122,0.4); }
 .mf-gm-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
 .mf-ctx {
   position: fixed; z-index: 9999; min-width: 200px; max-width: 260px;
@@ -179,3 +179,4 @@ body.compact .mf-card-icon { height: 60px; }
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,0.3); color: #fff; border-radius: 8px;
 }
+

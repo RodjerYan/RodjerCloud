@@ -10,7 +10,7 @@
   background:
     radial-gradient(1200px 600px at 0% -10%, rgba(124,131,255,0.12), transparent 60%),
     radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.12), transparent 60%),
-    var(--v3-bg-0, #05060d);
+    var(--bg-0, #05060d);
 }
 
 .login-bg-shapes {
@@ -401,3 +401,4 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+

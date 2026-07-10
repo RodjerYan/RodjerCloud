@@ -1,0 +1,65 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-0);
+  background-image:
+    radial-gradient(1200px 600px at 0% -10%, rgba(124,131,255,0.10), transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.10), transparent 60%);
+  color: var(--text);
+  overflow: hidden;
+}
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%27160%27 height=%27160%27><filter id=%27n%27><feTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%272%27 stitchTiles=%27stitch%27/></filter><rect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27 opacity=%270.06%27/></svg>");
+  opacity: .35; mix-blend-mode: overlay;
+}
+.app-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Animations from glass.css & v3-theme.css */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
+@keyframes spin { to { transform: rotate(360deg) } }
+.spin { animation: spin 1s linear infinite; }
+
+/* App shell */
+.v2-shell { display: flex; height: 100vh; width: 100%; position: relative; z-index: 1; }
+.v2-main { flex: 1; overflow: auto; padding: 28px 32px; scrollbar-width: none; }
+.v2-main::-webkit-scrollbar { display: none; }
+
+/* Page Layouts */
+.v3-page { padding: var(--space-xl); min-height: 100vh; position: relative; z-index: 1; }
+
+/* Splash and other global classes */
+.splash-root { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.splash-bg { position: absolute; inset: 0; background: conic-gradient(from 230deg at 50% 50%, #1a1640, #2b1248, #1a1640); filter: blur(60px); opacity: 0.6; animation: pulse 4s ease-in-out infinite; }
+.splash-inner { position: relative; text-align: center; animation: fadeInUp 0.6s ease both; }
+.splash-logo-mark { width: 88px; height: 88px; border-radius: 24px; background: var(--accent); box-shadow: 0 20px 60px rgba(124,131,255,0.4); display: inline-flex;}
+.splash-title { font-size: 36px; margin: 18px 0 4px; letter-spacing: -0.5px; }
+.splash-subtitle { color: var(--text-dim); margin: 0 0 28px; }
+.splash-progress { width: 280px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; margin: 0 auto; }
+.splash-progress-fill { height: 100%; width: 40%; background: var(--accent); border-radius: 99px; animation: splashSlide 1.6s ease-in-out infinite; }
+@keyframes splashSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+.splash-loading { color: var(--text-dim); margin-top: 16px; font-size: 14px; }
+.splash-version { position: absolute; bottom: -120px; left: 50%; transform: translateX(-50%); color: var(--text-mute); font-size: 12px; }
+
+/* Typography utils */
+.v3-num, .v3-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.v3-h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px; background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.v3-h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 16px; }
+.v3-sub { color: var(--text-dim); font-size: 14px; }
+.v3-row { display: flex; gap: 12px; align-items: center; }
+
+/* Grid */
+.v3-grid { display: grid; gap: 18px; }
+
+/* Tray indicator */
+.v3-tray { position: fixed; right: 18px; bottom: 18px; background: var(--panel); border: 1px solid var(--border-strong); backdrop-filter: blur(16px); border-radius: var(--radius-md); padding: 10px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text); z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.45); }
+.v3-tray .pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--success); box-shadow: 0 0 12px var(--success); animation: pulse 1.4s ease-in-out infinite; }
