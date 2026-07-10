@@ -35,7 +35,7 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
         )}
         <div className="v2-sidebar-profile-info">
           <div className="v2-sidebar-profile-name">
-            {userInfo?.firstName || channelInfo?.title || 'Аккаунт'}
+            {userInfo?.firstName || channelInfo?.channelName || 'Аккаунт'}
           </div>
           <div className="v2-sidebar-profile-sub">
             {userInfo ? 'В сети' : 'Подключено'}
@@ -52,8 +52,8 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
         ))}
       </nav>
       <div className="v2-sidebar-foot">
-        <div className="v2-sidebar-channel" title={channelInfo?.title}>
-          <div className="v2-sidebar-channel-name">{channelInfo?.title || "Канал"}</div>
+        <div className="v2-sidebar-channel" title={channelInfo?.channelName}>
+          <div className="v2-sidebar-channel-name">{channelInfo?.channelName || "Канал"}</div>
           <div className="v2-sidebar-channel-sub">Подключено</div>
         </div>
         <button className="v2-sidebar-logout" onClick={onLogout} data-testid="logout-btn">

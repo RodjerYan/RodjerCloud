@@ -54,7 +54,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
       <div className="dh-banner">
         <div>
           <h1>{timeGreeting()}{userInfo?.firstName ? `, ${userInfo.firstName}` : ''}</h1>
-          <p>{channelInfo?.title ? `Подключено к ${channelInfo.title}` : 'Ваше приватное облако в Telegram'}</p>
+          <p>{channelInfo?.channelName ? `Подключено к ${channelInfo.channelName}` : 'Ваше приватное облако в Telegram'}</p>
         </div>
         <button className="dh-cta" onClick={() => navigate('/upload')}>
           <Upload size={16} /> Загрузить файлы

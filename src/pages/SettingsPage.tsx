@@ -149,8 +149,20 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
               <div className="settings-title">Подключённый канал</div>
               <div className="settings-desc">Текущий канал, используемый для хранения файлов</div>
             </div>
-            <strong style={{ fontSize: 15 }}>{channelInfo?.title || '—'}</strong>
+            <strong style={{ fontSize: 15 }}>{channelInfo?.channelName || channelInfo?.title || '—'}</strong>
           </div>
+          {channelInfo?.channelId && (
+            <>
+              <div className="settings-divider" />
+              <div className="settings-row">
+                <div className="settings-info">
+                  <div className="settings-title">ID канала</div>
+                  <div className="settings-desc">Идентификатор канала в Telegram</div>
+                </div>
+                <code style={{ fontSize: 13 }}>{channelInfo.channelId}</code>
+              </div>
+            </>
+          )}
           {channelInfo?.token && (
             <>
               <div className="settings-divider" />
