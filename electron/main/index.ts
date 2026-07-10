@@ -203,11 +203,13 @@ ipcMain.handle('telegram:verify-code', async (_, code: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      try {
-        const botResult = await telegramService.createBotAndAddToChannel()
-        botService.setToken(botResult.token)
-      } catch (e) {
-        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+      if (!botService.getToken()) {
+        try {
+          const botResult = await telegramService.createBotAndAddToChannel()
+          botService.setToken(botResult.token)
+        } catch (e) {
+          log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+        }
       }
       return { success: true, data: channelResult }
     }
@@ -222,11 +224,13 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      try {
-        const botResult = await telegramService.createBotAndAddToChannel()
-        botService.setToken(botResult.token)
-      } catch (e) {
-        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+      if (!botService.getToken()) {
+        try {
+          const botResult = await telegramService.createBotAndAddToChannel()
+          botService.setToken(botResult.token)
+        } catch (e) {
+          log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
+        }
       }
       return { success: true, data: channelResult }
     }
@@ -1162,6 +1166,10 @@ ipcMain.handle('share:generate-link', async (_, messageId: number, channelId: st
 ipcMain.handle('share:ensure-bot', async () => {
   try {
     if (botService.getToken()) return { success: true, data: { created: false } }
+    const existingBot = await telegramService.findBotInChannel()
+    if (existingBot) {
+      return { success: false, error: `Bot @${existingBot} уже есть в канале. Получи токен: @BotFather → /mybots → ${existingBot} → API Token` }
+    }
     const botResult = await telegramService.createBotAndAddToChannel()
     botService.setToken(botResult.token)
     return { success: true, data: { created: true, username: botResult.username } }

@@ -676,8 +676,32 @@ export class TelegramService {
     return BigInt(me.id.toString())
   }
 
+  async findBotInChannel(): Promise<string | null> {
+    if (!this.client || !this.channelId) return null
+    try {
+      const participants = await this.client.invoke(
+        new Api.channels.GetParticipants({
+          channel: this.channelId as any,
+          filter: new Api.ChannelParticipantsBots(),
+          offset: 0,
+          limit: 200,
+          hash: 0,
+        })
+      ) as any
+      const bot = participants?.users?.find((u: any) => u.bot)
+      return bot ? (bot.username || null) : null
+    } catch {
+      return null
+    }
+  }
+
   async createBotAndAddToChannel(): Promise<{ token: string; username: string }> {
     if (!this.client || !this.channelId) throw new Error('Not initialized')
+
+    const existingBot = await this.findBotInChannel()
+    if (existingBot) {
+      throw new Error(`Bot @${existingBot} already exists in channel. Get its token from @BotFather → /mybots → ${existingBot} → API Token`)
+    }
 
     const botFather = await this.client.getEntity('BotFather') as any
     if (!botFather) throw new Error('Cannot find BotFather')
