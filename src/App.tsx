@@ -150,23 +150,17 @@ function App() {
         <AudioPlayerProvider>
         <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
           {updateData && dlStatus !== 'done' && (
-            <div style={{
-              background: 'linear-gradient(135deg, #7c83ff, #b14aff)',
-              padding: '8px 16px', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', gap: 10, fontSize: 13, fontWeight: 500,
-              cursor: dlStatus === 'idle' ? 'pointer' : 'default',
-              flexDirection: 'column',
-            }} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'center' }}>
-                <span>Доступно обновление v{updateData.version}</span>
-                {dlStatus === 'idle' && <span style={{ textDecoration: 'underline', fontSize: 12 }}>Установить</span>}
-                {dlStatus === 'downloading' && <span style={{ fontSize: 12 }}>Загрузка... {dlProgress}%</span>}
-                <span style={{ marginLeft: 'auto', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: 0.6 }}
+            <div className={`update-banner ${dlStatus === 'idle' ? 'clickable' : ''}`} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
+              <div className="update-banner-header">
+                <span>Обновление v{updateData.version}</span>
+                {dlStatus === 'idle' && <span className="update-banner-action">Скачать</span>}
+                {dlStatus === 'downloading' && <span className="update-banner-progress-text">Загрузка... {dlProgress}%</span>}
+                <span className="update-banner-close"
                   onClick={e => { e.stopPropagation(); setUpdateData(null) }}>×</span>
               </div>
               {dlStatus === 'downloading' && (
-                <div style={{ width: '100%', maxWidth: 400, height: 4, background: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ width: dlProgress + '%', height: '100%', background: '#fff', borderRadius: 2, transition: 'width 0.3s' }} />
+                <div className="update-banner-bar-wrap">
+                  <div className="update-banner-bar" style={{ width: dlProgress + '%' }} />
                 </div>
               )}
             </div>

@@ -16,3 +16,103 @@
 .se-warn:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); }
 .se-root button:disabled { opacity: 0.5; cursor: default; }
 
+
+/* About Section */
+.se-about-wrapper {
+  text-align: center;
+  padding: 20px 0;
+}
+.se-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  margin-bottom: var(--space-sm, 8px);
+}
+.se-app-name {
+  margin: 4px 0;
+}
+.se-app-version {
+  color: var(--accent);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.se-app-desc {
+  color: var(--text-dim);
+  line-height: 1.55;
+  max-width: 500px;
+  margin: 0 auto 16px;
+  font-size: 13px;
+}
+.se-update-btn {
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.se-app-license {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--v3-text-mute, var(--text-dim));
+}
+
+/* Update Modal */
+.se-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.5);
+}
+.se-modal-content {
+  padding: 20px;
+  min-width: 360px;
+  max-width: 480px;
+}
+.se-modal-title {
+  margin: 0 0 var(--space-sm, 8px);
+}
+.se-modal-version {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.se-modal-notes {
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg);
+  border-radius: var(--radius-md, 8px);
+  padding: 12px;
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+.se-modal-progress {
+  margin-bottom: 12px;
+}
+.se-modal-progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.se-modal-progress-bar-wrap {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.se-modal-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.se-modal-actions {
+  display: flex;
+  gap: var(--space-sm, 8px);
+  justify-content: flex-end;
+}
+

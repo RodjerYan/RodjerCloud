@@ -27,6 +27,7 @@ body::before {
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
 @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
 @keyframes spin { to { transform: rotate(360deg) } }
+@keyframes shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(200%) } }
 .spin { animation: spin 1s linear infinite; }
 
 /* App shell */

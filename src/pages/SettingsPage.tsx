@@ -152,49 +152,48 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
 
       <section className="v3-card">
         <h2><Info size={16} /> О программе</h2>
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          <img src={iconUrl} alt="RodjerCloud" style={{ width: 72, height: 72, borderRadius: 20, marginBottom: 8 }} />
-          <h3 style={{ margin: '4px 0' }}>RodjerCloud</h3>
-          <div style={{ color: 'var(--accent)', fontSize: 13, marginBottom: 12 }}>{version ? `v${version}` : ''}</div>
-          <p style={{ color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 500, margin: '0 auto 16px', fontSize: 13 }}>
+        <div className="se-about-wrapper">
+          <img src={iconUrl} alt="RodjerCloud" className="se-logo" />
+          <h3 className="se-app-name">RodjerCloud</h3>
+          <div className="se-app-version">{version ? `v${version}` : ''}</div>
+          <p className="se-app-desc">
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
             Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
           </p>
 
-          <button className="v3-btn" onClick={checkUpdates} disabled={checkingUpdate}
-            style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="v3-btn se-update-btn" onClick={checkUpdates} disabled={checkingUpdate}>
             <Download size={14} />
             {checkingUpdate ? 'Проверка…' : 'Проверить обновления'}
           </button>
 
-          <div style={{ marginTop: 16, fontSize: 12, color: 'var(--v3-text-mute)' }}>Распространяется под лицензией MIT</div>
+          <div className="se-app-license">Распространяется под лицензией MIT</div>
         </div>
       </section>
 
       {updateModal && updateModal.hasUpdate && createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}
+        <div className="se-modal-overlay"
           onClick={() => { if (!downloading) setUpdateModal(null) }}>
-          <div className="v3-card" style={{ padding: 20, minWidth: 360, maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 8px' }}>Доступно обновление v{updateModal.latestVersion}</h3>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12 }}>
+          <div className="v3-card se-modal-content" onClick={e => e.stopPropagation()}>
+            <h3 className="se-modal-title">Доступно обновление v{updateModal.latestVersion}</h3>
+            <div className="se-modal-version">
               Текущая версия: v{updateModal.currentVersion}
             </div>
             {updateModal.releaseNotes && (
-              <div style={{ fontSize: 13, lineHeight: 1.5, maxHeight: 200, overflowY: 'auto', background: 'var(--bg)', borderRadius: 8, padding: 12, marginBottom: 16, whiteSpace: 'pre-wrap' }}>
+              <div className="se-modal-notes">
                 {updateModal.releaseNotes}
               </div>
             )}
             {downloading ? (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+              <div className="se-modal-progress">
+                <div className="se-modal-progress-text">
                   <span>Загрузка…</span><span>{downloadProgress}%</span>
                 </div>
-                <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ width: downloadProgress + '%', height: '100%', background: 'var(--accent)', borderRadius: 3, transition: 'width 0.3s' }} />
+                <div className="se-modal-progress-bar-wrap">
+                  <div className="se-modal-progress-bar" style={{ width: downloadProgress + '%' }} />
                 </div>
               </div>
             ) : null}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div className="se-modal-actions">
               {!downloading && !downloadPathState && (
                 <button className="v3-btn" onClick={() => setUpdateModal(null)}>Закрыть</button>
               )}
