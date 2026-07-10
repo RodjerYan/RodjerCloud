@@ -4,7 +4,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--space-lg);
   overflow: hidden;
   z-index: 1;
   background:
@@ -69,7 +69,7 @@
   padding: 40px 36px 28px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
   border: 1px solid rgba(140,160,220,0.12);
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
@@ -82,7 +82,7 @@
 
 .login-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: var(--space-xl);
 }
 
 .login-logo-wrap {
@@ -94,7 +94,7 @@
 .login-logo {
   width: 72px;
   height: 72px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   object-fit: cover;
   position: relative;
   z-index: 1;
@@ -117,7 +117,7 @@
 
 .login-title {
   font-family: var(--font-sans);
-  font-size: 36px;
+  font-size: var(--text-3xl);
   font-weight: 800;
   color: var(--text);
   margin: 0 0 6px;
@@ -132,7 +132,7 @@
 }
 
 .login-subtitle {
-  font-size: 15px;
+  font-size: var(--text-base);
   color: var(--text-dim);
   font-weight: 400;
   margin: 0;
@@ -142,13 +142,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 12px var(--space-md);
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--danger);
-  font-size: 13px;
-  margin-bottom: 24px;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-lg);
   animation: loginShake 0.35s cubic-bezier(.36,.07,.19,.97);
 }
 
@@ -169,11 +169,11 @@
 .login-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 
 .login-label {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: rgba(231, 234, 246, 0.7);
   text-transform: uppercase;
@@ -186,7 +186,7 @@
   align-items: center;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(140,160,220,0.12);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -198,7 +198,7 @@
 .login-phone-prefix {
   position: absolute;
   left: 16px;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 500;
   color: rgba(231, 234, 246, 0.4);
   pointer-events: none;
@@ -208,12 +208,12 @@
 
 .login-phone-input {
   width: 100%;
-  padding: 14px 16px 14px 28px;
+  padding: 14px var(--space-md) 14px 28px;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 500;
   font-family: var(--font-mono);
   letter-spacing: 0.5px;
@@ -232,13 +232,13 @@
 
 .login-code-input {
   width: 100%;
-  padding: 16px;
+  padding: var(--space-md);
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(140,160,220,0.12);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   outline: none;
   color: transparent;
-  font-size: 24px;
+  font-size: var(--text-2xl);
   font-weight: 700;
   font-family: var(--font-mono);
   letter-spacing: 12px;
@@ -264,7 +264,7 @@
   justify-content: center;
   gap: 10px;
   pointer-events: none;
-  padding: 0 16px;
+  padding: 0 var(--space-md);
 }
 
 .login-code-dash {
@@ -284,13 +284,13 @@
 
 .login-input {
   width: 100%;
-  padding: 14px 16px;
+  padding: 14px var(--space-md);
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(140,160,220,0.12);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   outline: none;
   color: var(--text);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 500;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   font-family: var(--font-sans);
@@ -306,7 +306,7 @@
 }
 
 .login-hint {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: color-mix(in srgb, var(--text-dim) 40%, transparent);
   margin: 2px 0 0;
 }
@@ -316,10 +316,10 @@
   width: 100%;
   padding: 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: linear-gradient(135deg, #7c83ff 0%, #5a44d4 50%, #b14aff 100%);
   color: #fff;
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
@@ -368,7 +368,7 @@
   background: none;
   border: none;
   color: color-mix(in srgb, var(--text-dim) 60%, transparent);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
   padding: 6px 0;
@@ -388,8 +388,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
   color: color-mix(in srgb, var(--text-dim) 30%, transparent);
 }
 
