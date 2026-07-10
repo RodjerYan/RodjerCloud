@@ -210,7 +210,7 @@
   color: var(--text);
   font-size: var(--text-lg);
   font-weight: 500;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   letter-spacing: 0.5px;
 }
 

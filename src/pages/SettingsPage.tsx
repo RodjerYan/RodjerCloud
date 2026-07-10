@@ -178,10 +178,6 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
               </div>
             </>
           )}
-          <div className="settings-divider" />
-          <div className="settings-row" style={{ padding: '12px 0' }}>
-            <button className="v3-btn" onClick={onChangeChannel}>Сменить канал</button>
-          </div>
         </div>
       </div>
 

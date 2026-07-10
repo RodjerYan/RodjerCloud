@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2, Trash2 as DeleteIcon, Circle } from "lucide-react"
+import { Player } from '@lottiefiles/react-lottie-player'
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -12,6 +13,7 @@ const fmtSize = (n: number) => {
 const DAY_MS = 86400000
 
 export default function TrashPage() {
+  const [fairAnim, setFairAnim] = useState<any>(null)
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -21,6 +23,12 @@ export default function TrashPage() {
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
+
+  useEffect(() => {
+    window.electronAPI.tgs.read('fair.tgs').then((r: any) => {
+      if (r.success) setFairAnim(r.data)
+    })
+  }, [])
 
   const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
 
@@ -175,7 +183,11 @@ export default function TrashPage() {
 
       {loading ? <div className="mf-empty">Загрузка…</div> : filtered.length === 0 ? (
         <div className="mf-empty" style={{ paddingTop: 60 }}>
-          <Trash2 size={48} style={{ opacity: 0.2, marginBottom: 12 }} />
+          {fairAnim ? (
+            <Player autoplay loop src={fairAnim} style={{ width: 140, height: 140, marginBottom: 12 }} />
+          ) : (
+            <Trash2 size={48} style={{ opacity: 0.2, marginBottom: 12 }} />
+          )}
           <div>Корзина пуста</div>
         </div>
       ) : view === 'grid' ? (
