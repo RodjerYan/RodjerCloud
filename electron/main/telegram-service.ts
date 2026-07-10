@@ -447,6 +447,15 @@ export class TelegramService {
     return { filePath: downloadPath, fileName }
   }
 
+  async downloadMediaToPath(messageId: number, filePath: string) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const message: any = messages[0]
+    if (!message.file) throw new Error('No file attached to message')
+    await this.client.downloadMedia(message, { outputFile: filePath } as any)
+  }
+
   async downloadMediaToTemp(messageId: number): Promise<string> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })

@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { FolderOpen, Copy, AlertTriangle, Bot, Info, Download, ExternalLink, Loader2 } from 'lucide-react'
+import { Copy, AlertTriangle, Bot, Info, Download, ExternalLink, Loader2 } from 'lucide-react'
 import iconUrl from '../assets/icon.png'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
-  const [downloadPath, setDownloadPath] = useState('')
   const [concurrency, setConcurrency] = useState(2)
   const [autoRename, setAutoRename] = useState(false)
   const [reduceAnim, setReduceAnim] = useState(false)
@@ -24,13 +23,13 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   }>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
-  const [downloadPathState, setDownloadPathState] = useState('')
+  const [askDownloadPath, setAskDownloadPath] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   useEffect(() => {
     (async () => {
-      const a = await window.electronAPI.storage.getDownloadPath()
-      if (a.success) setDownloadPath(a.data || '')
+      const a = await window.electronAPI.storage.getAskDownloadPath()
+      if (a.success) setAskDownloadPath(a.data || false)
       const c = await window.electronAPI.storage.getUploadConcurrency()
       if (c.success) setConcurrency(c.data || 2)
       setAutoRename(localStorage.getItem('v2.autoRename') === '1')
@@ -45,15 +44,6 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   }, [])
 
   const show = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
-
-  const pickDownload = async () => {
-    const r = await window.electronAPI.dialog.pickDownloadDir()
-    if (r.success) {
-      setDownloadPath(r.data.folderPath)
-      await window.electronAPI.storage.setDownloadPath(r.data.folderPath)
-      show('Сохранено')
-    }
-  }
 
   const onConcurrency = async (n: number) => {
     setConcurrency(n)
@@ -138,10 +128,9 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
 
       <section className="se-card">
         <h2>Загрузка</h2>
-        <div className="se-row">
-          <span>Папка для скачивания</span>
-          <div className="se-path"><code>{downloadPath || 'По умолчанию'}</code><button onClick={pickDownload}><FolderOpen size={14} /> Изменить</button></div>
-        </div>
+        <label className="se-row"><span>Всегда спрашивать куда загружать файлы</span>
+          <input type="checkbox" checked={askDownloadPath} onChange={e => { setAskDownloadPath(e.target.checked); window.electronAPI.storage.setAskDownloadPath(e.target.checked) }} />
+        </label>
       </section>
 
       <section className="se-card">

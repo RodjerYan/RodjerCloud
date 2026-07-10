@@ -427,6 +427,18 @@ ipcMain.handle('telegram:list-files', async () => {
 
 ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: string) => {
   try {
+    const prefs = await readPrefs()
+    if (prefs.askDownloadPath) {
+      const result = await dialog.showSaveDialog({
+        title: 'Сохранить файл',
+        defaultPath: pathMod.join(app.getPath('downloads'), fileName),
+        file: fileName,
+      })
+      if (result.canceled) return { success: false, error: 'cancelled' }
+      const filePath = result.filePath
+      await telegramService.downloadMediaToPath(messageId, filePath)
+      return { success: true, data: { filePath, fileName } }
+    }
     const result = await telegramService.downloadFile(messageId, fileName)
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -593,6 +605,16 @@ ipcMain.handle('storage:get-upload-concurrency', async () => {
 
 ipcMain.handle('storage:set-upload-concurrency', async (_, n: number) => {
   try { const prefs = await readPrefs(); prefs.uploadConcurrency = Math.min(5, Math.max(1, n)); await writePrefs(prefs); return { success: true } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('storage:get-ask-download-path', async () => {
+  try { const prefs = await readPrefs(); return { success: true, data: prefs.askDownloadPath || false } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('storage:set-ask-download-path', async (_, val: boolean) => {
+  try { const prefs = await readPrefs(); prefs.askDownloadPath = val; await writePrefs(prefs); return { success: true } }
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 

@@ -73,6 +73,10 @@ declare global {
         load: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
         close: (sessionId: string) => void
       }
+      storage: {
+        getAskDownloadPath: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+        setAskDownloadPath: (val: boolean) => Promise<{ success: boolean; error?: string }>
+      }
       share: {
         generateLink: (messageId: number, channelId: string, originalFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
         setBotToken: (token: string) => Promise<{ success: boolean; error?: string }>
