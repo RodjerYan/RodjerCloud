@@ -8,7 +8,6 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [concurrency, setConcurrency] = useState(2)
   const [autoRename, setAutoRename] = useState(false)
   const [reduceAnim, setReduceAnim] = useState(false)
-  const [compact, setCompact] = useState(false)
   const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
@@ -36,9 +35,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       if (c.success) setConcurrency(c.data || 2)
       setAutoRename(localStorage.getItem('v2.autoRename') === '1')
       setReduceAnim(localStorage.getItem('v2.reduceAnim') === '1')
-      setCompact(localStorage.getItem('v2.compact') === '1')
       if (localStorage.getItem('v2.reduceAnim') === '1') document.body.classList.add('reduce-anim')
-      if (localStorage.getItem('v2.compact') === '1') document.body.classList.add('compact')
       const v = await window.electronAPI.app.getVersion()
       if (v.success && v.data) setVersion(v.data)
     })()
@@ -136,9 +133,6 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
         <h2>Внешний вид</h2>
         <label className="se-row"><span>Уменьшить анимации</span>
           <input type="checkbox" checked={reduceAnim} onChange={e => toggle('v2.reduceAnim', e.target.checked, 'reduce-anim', setReduceAnim)} />
-        </label>
-        <label className="se-row"><span>Компактный режим</span>
-          <input type="checkbox" checked={compact} onChange={e => toggle('v2.compact', e.target.checked, 'compact', setCompact)} />
         </label>
       </section>
 
