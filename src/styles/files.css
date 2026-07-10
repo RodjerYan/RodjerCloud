@@ -68,7 +68,7 @@ body.compact .mf-card-icon { height: 60px; }
 }
 .mf-section-head:hover { background: rgba(255,255,255,0.04); }
 .mf-section-head svg { color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0; }
-.mf-section:not(.open) .mf-section-head svg { transform: rotate(-90deg); }
+.mf-section:not(.open) .mf-section-head > svg:first-child { transform: rotate(-90deg); }
 .mf-section-icon { font-size: var(--text-base); line-height: 1; flex-shrink: 0; }
 .mf-section-title { font-weight: 500; font-size: var(--text-sm); flex: 1; color: var(--text-dim); }
 .mf-section.open .mf-section-title { color: var(--text); }
