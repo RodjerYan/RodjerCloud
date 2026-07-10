@@ -223,8 +223,8 @@ export default function MyFilesPage() {
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
       if (ffset.has(f.messageId)) return
-      const fd = fileDate(f)
-      if (fd > 0 && (now - fd) < SIX_HOURS) map['Недавние']?.push(f)
+      const up = f.uploadedAt || 0
+      if (up > 0 && (now - up) < SIX_HOURS) map['Недавние']?.push(f)
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
