@@ -557,15 +557,7 @@ export default function MyFilesPage() {
           <Search size={16} />
           <input placeholder="Поиск файлов…" value={search} onChange={e => { setSearch(e.target.value) }} />
         </div>
-        <select value={sort} onChange={e => setSort(e.target.value as any)}>
-          <option value="date">Новые</option>
-          <option value="name">Имя</option>
-          <option value="size">Крупные</option>
-        </select>
-        <div className="mf-view-toggle">
-          <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><Grid size={16} /></button>
-          <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><ListIcon size={16} /></button>
-        </div>
+
         <button className="v3-btn ghost" onClick={createFolder} title="Создать папку" style={{ padding: '8px 10px', borderColor: 'transparent' }}><FolderPlus size={16} /></button>
       </div>
 
