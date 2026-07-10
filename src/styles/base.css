@@ -52,7 +52,8 @@ body::before {
 .splash-version { position: absolute; bottom: -120px; left: 50%; transform: translateX(-50%); color: var(--text-mute); font-size: var(--text-xs); }
 
 /* Typography utils */
-.v3-num, .v3-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.v3-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.v3-num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .v3-h1 { font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px; background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .v3-h2 { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.01em; margin: 0 0 var(--space-md); }
 .v3-sub { color: var(--text-dim); font-size: var(--text-base); }
