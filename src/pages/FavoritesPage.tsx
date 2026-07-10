@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { Star, Download, Trash2, Eye } from "lucide-react"
+import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
 
 function fmtSize(n: number) {
@@ -20,12 +21,16 @@ export default function FavoritesPage() {
   const [favs, setFavs] = useState(v3store.getFavs())
   const [allFiles, setAllFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [navAnim, setNavAnim] = useState<any>(null)
 
   useEffect(() => {
     setFavs(v3store.getFavs())
     window.electronAPI.telegram.listFiles().then((r: any) => {
       if (r?.success) setAllFiles(r.data || [])
       setLoading(false)
+    })
+    window.electronAPI.tgs.read('nav.tgs').then((r: any) => {
+      if (r.success) setNavAnim(r.data)
     })
   }, [])
 
@@ -61,7 +66,8 @@ export default function FavoritesPage() {
       <h1 className="v3-h1">Избранное</h1>
       <div className="v3-sub">Файлы, отмеченные звёздочкой для быстрого доступа.</div>
       {loading ? <div className="v3-sub" style={{ marginTop: 18 }}>Загрузка…</div> : favFiles.length === 0 ? (
-        <div className="v3-card" style={{ marginTop: 18, padding: 30, textAlign: 'center' }}>
+        <div className="v3-card" style={{ marginTop: 18, padding: 30, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          {navAnim && <Player autoplay loop src={navAnim} style={{ width: 140, height: 140, marginBottom: 12 }} />}
           <div className="v3-sub">Пока ничего нет. Отметьте файл звёздочкой в «Мои файлы».</div>
         </div>
       ) : (
