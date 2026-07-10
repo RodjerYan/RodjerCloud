@@ -15,8 +15,17 @@
     "releaseType": "release"
   },
   "win": {
-    "target": ["nsis", "portable"],
+    "target": ["nsis"],
     "icon": "resources/icon.ico"
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "allowElevation": false,
+    "createDesktopShortcut": false,
+    "createStartMenuShortcut": false,
+    "shortcutName": "RodjerCloud",
+    "artifactName": "RodjerCloud-${version}.exe"
   },
   "mac": {
     "target": [

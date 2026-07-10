@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react"
+import React, { useEffect, useState, useCallback, useRef } from "react"
 import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom"
 import SplashScreen from "./components/SplashScreen"
 import DuckSplash from "./components/DuckSplash"
@@ -46,7 +46,11 @@ function App() {
   const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ firstName: string; lastName?: string; username?: string; photoPath?: string } | null>(null)
-  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null)
+  const [updateData, setUpdateData] = useState<{ version: string; assetId: number } | null>(null)
+  const [dlProgress, setDlProgress] = useState(0)
+  const [dlPath, setDlPath] = useState('')
+  const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
+  const unsubDlRef = useRef<(() => void) | null>(null)
 
   const fetchUserInfo = useCallback(async () => {
     try {
@@ -69,10 +73,35 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string }) => {
-      setUpdateAvailable(data.version)
+    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number }) => {
+      setUpdateData({ version: data.version, assetId: data.assetId })
     })
     return () => unsub?.()
+  }, [])
+
+  const startDownload = async () => {
+    if (!updateData?.assetId || dlStatus === 'downloading') return
+    setDlStatus('downloading')
+    setDlProgress(0)
+    const unsub = window.electronAPI.app.onDownloadProgress((p: { percent: number }) => {
+      setDlProgress(p.percent)
+    })
+    unsubDlRef.current = unsub
+    const r = await window.electronAPI.app.downloadUpdate(updateData.assetId)
+    unsubDlRef.current = null
+    if (r.success && r.data) {
+      setDlPath(r.data.filePath)
+      setDlProgress(100)
+      setDlStatus('done')
+      await window.electronAPI.app.installUpdate(r.data.filePath)
+    } else {
+      setDlStatus('idle')
+      setDlProgress(0)
+    }
+  }
+
+  useEffect(() => {
+    return () => { unsubDlRef.current?.() }
   }, [])
 
   const checkSession = async () => {
@@ -120,17 +149,26 @@ function App() {
         <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
         <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
-          {updateAvailable && (
+          {updateData && dlStatus !== 'done' && (
             <div style={{
               background: 'linear-gradient(135deg, #7c83ff, #b14aff)',
               padding: '8px 16px', display: 'flex', alignItems: 'center',
               justifyContent: 'center', gap: 10, fontSize: 13, fontWeight: 500,
-              cursor: 'pointer',
-            }} onClick={() => { setUpdateAvailable(null); window.open('https://github.com/RodjerYan/RodjerCloud/releases', '_blank') }}>
-              <span>Доступно обновление v{updateAvailable}</span>
-              <span style={{ textDecoration: 'underline', fontSize: 12 }}>Установить</span>
-              <span style={{ marginLeft: 'auto', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: 0.6 }}
-                onClick={e => { e.stopPropagation(); setUpdateAvailable(null) }}>×</span>
+              cursor: dlStatus === 'idle' ? 'pointer' : 'default',
+              flexDirection: 'column',
+            }} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'center' }}>
+                <span>Доступно обновление v{updateData.version}</span>
+                {dlStatus === 'idle' && <span style={{ textDecoration: 'underline', fontSize: 12 }}>Установить</span>}
+                {dlStatus === 'downloading' && <span style={{ fontSize: 12 }}>Загрузка... {dlProgress}%</span>}
+                <span style={{ marginLeft: 'auto', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: 0.6 }}
+                  onClick={e => { e.stopPropagation(); setUpdateData(null) }}>×</span>
+              </div>
+              {dlStatus === 'downloading' && (
+                <div style={{ width: '100%', maxWidth: 400, height: 4, background: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: dlProgress + '%', height: '100%', background: '#fff', borderRadius: 2, transition: 'width 0.3s' }} />
+                </div>
+              )}
             </div>
           )}
           <AggregateProgress />

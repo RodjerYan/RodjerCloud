@@ -47,7 +47,7 @@ declare global {
         downloadUpdate: (url: string) => Promise<{ success: boolean; data?: { filePath: string; fileName: string }; error?: string }>
         installUpdate: (filePath: string) => Promise<{ success: boolean; error?: string }>
         onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => () => void
-        onUpdateAvailable: (cb: (data: { version: string }) => void) => () => void
+        onUpdateAvailable: (cb: (data: { version: string; assetId: number }) => void) => () => void
       }
       getPathForFile: (file: File) => string
       folders: {
@@ -89,7 +89,7 @@ declare global {
       }
       bot: {
         getHashDb: () => Promise<{ success: boolean; data?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; error?: string }>
-        getDuplicateGroups: () => Promise<{ success: boolean; data?: Array<{ hash: string; files: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; totalSize: number }>; error?: string }>
+        getDuplicateGroups: () => Promise<{ success: boolean; data?: Array<{ hash: string; files: Array<{ messageId: number; fileName: string; fileSize: number; hash: string; mimeType?: string }>; totalSize: number }>; error?: string }>
         scanDuplicates: () => Promise<{ success: boolean; data?: { found: number; groups: number }; error?: string }>
         onScanProgress: (cb: (data: { done: number; total: number; currentFile: string }) => void) => () => void
       }

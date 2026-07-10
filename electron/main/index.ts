@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell } from 'electron'
+import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as https from 'https'
+import * as http from 'http'
 import * as zlib from 'zlib'
 import * as crypto from 'crypto'
 import * as pathMod from 'path'
@@ -83,6 +85,11 @@ async function githubFetch(path: string): Promise<any> {
       const prefs = await readPrefs()
       _githubToken = prefs.githubToken || ''
     }
+    if (!_githubToken) {
+      try {
+        _githubToken = execSync('gh auth token', { encoding: 'utf8', timeout: 5000 }).trim()
+      } catch {}
+    }
   }
   return new Promise<any>((resolve, reject) => {
     const opts: any = {
@@ -103,8 +110,14 @@ async function checkUpdate() {
     const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (tag && isNewer(tag, current)) {
+      const matchFn = platformAssetPattern()
+      const asset = (res.assets || []).find((a: any) => matchFn(a.name))
       const wins = BrowserWindow.getAllWindows()
-      if (wins.length > 0) wins[0].webContents.send('app:update-available', { version: tag, url: res.html_url })
+      if (wins.length > 0) wins[0].webContents.send('app:update-available', {
+        version: tag,
+        assetId: asset?.id || 0,
+        htmlUrl: res.html_url || '',
+      })
     }
   } catch {}
 }
@@ -630,7 +643,7 @@ ipcMain.handle('app:check-update', async () => {
         currentVersion,
         latestVersion: tag,
         releaseNotes: (res.body || '').slice(0, 2000),
-        downloadUrl: asset?.browser_download_url || '',
+        assetId: asset?.id || 0,
         assetName: asset?.name || '',
         htmlUrl: res.html_url || '',
       },
@@ -640,29 +653,42 @@ ipcMain.handle('app:check-update', async () => {
   }
 })
 
-ipcMain.handle('app:download-update', async (event, url: string) => {
+function downloadFile(event: any, url: string, destPath: string, redirects = 0): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('Too many redirects'))
+    const mod = url.startsWith('https') ? https : http
+    const dlHeaders: any = { 'User-Agent': 'RodjerCloud', 'Accept': 'application/octet-stream' }
+    if (_githubToken) dlHeaders['Authorization'] = `token ${_githubToken}`
+    const req = mod.get(url, { headers: dlHeaders }, (res: any) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume()
+        return downloadFile(event, res.headers.location, destPath, redirects + 1).then(resolve, reject)
+      }
+      if (res.statusCode !== 200) {
+        res.resume()
+        return reject(new Error(`HTTP ${res.statusCode}`))
+      }
+      const total = parseInt(res.headers['content-length'] || '0', 10)
+      let downloaded = 0
+      const fileStream = fs.createWriteStream(destPath)
+      res.pipe(fileStream)
+      res.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length
+        event.sender.send('app:download-progress', { downloaded, total, percent: total ? Math.round(downloaded / total * 100) : 0 })
+      })
+      res.on('end', () => { fileStream.end(() => resolve(total)) })
+    })
+    req.on('error', (err: Error) => { fs.unlink(destPath, () => {}); reject(err) })
+  })
+}
+
+ipcMain.handle('app:download-update', async (event, assetId: number) => {
   try {
     const tempDir = app.getPath('temp')
-    const fileName = url.split('/').pop() || 'update.dmg'
-    const destPath = pathMod.join(tempDir, fileName)
-    const fileStream = fs.createWriteStream(destPath)
-    const totalSize = await new Promise<number>((resolve, reject) => {
-      https.get(url, { headers: { 'User-Agent': 'RodjerCloud' } }, (res) => {
-        const total = parseInt(res.headers['content-length'] || '0', 10)
-        let downloaded = 0
-        res.pipe(fileStream)
-        res.on('data', (chunk) => {
-          downloaded += chunk.length
-          event.sender.send('app:download-progress', { downloaded, total, percent: total ? Math.round(downloaded / total * 100) : 0 })
-        })
-        res.on('end', () => resolve(total))
-      }).on('error', (err) => { fileStream.close(); fs.unlink(destPath, () => {}); reject(err) })
-    })
-    await new Promise<void>((resolve, reject) => {
-      fileStream.on('finish', resolve)
-      fileStream.on('error', reject)
-    })
-    return { success: true, data: { filePath: destPath, fileName } }
+    const destPath = pathMod.join(tempDir, 'update.exe')
+    const downloadUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${assetId}`
+    await downloadFile(event, downloadUrl, destPath)
+    return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }
@@ -670,7 +696,14 @@ ipcMain.handle('app:download-update', async (event, url: string) => {
 
 ipcMain.handle('app:install-update', async (_, filePath: string) => {
   try {
-    await shell.openPath(filePath)
+    try {
+      fs.writeFileSync(filePath + ':Zone.Identifier', '[ZoneTransfer]\r\nZoneId=0\r\n', 'utf8')
+    } catch {}
+    const result = await shell.openPath(filePath)
+    if (result) {
+      return { success: false, error: result }
+    }
+    app.quit()
     return { success: true }
   } catch (error) {
     return { success: false, error: (error as Error).message }

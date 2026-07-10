@@ -53,6 +53,7 @@ interface HashEntry {
   fileName: string
   fileSize: number
   hash: string
+  mimeType?: string
 }
 
 export interface DuplicateGroup {
@@ -124,10 +125,15 @@ export class BotService {
     return this.hashDb
   }
 
-  getDuplicateGroups(): DuplicateGroup[] {
+  private isMediaEntry(e: HashEntry): boolean {
+    return !!(e.mimeType?.startsWith('image/') || e.mimeType?.startsWith('video/'))
+  }
+
+  getDuplicateGroups(mediaOnly = true): DuplicateGroup[] {
     const groups = new Map<string, HashEntry[]>()
     for (const e of this.hashDb) {
       if (!e.hash) continue
+      if (mediaOnly && !this.isMediaEntry(e)) continue
       const arr = groups.get(e.hash) || []
       arr.push(e)
       groups.set(e.hash, arr)
@@ -155,13 +161,20 @@ export class BotService {
     })
   }
 
+  private cleanupNonMediaEntries() {
+    const before = this.hashDb.length
+    this.hashDb = this.hashDb.filter(e => this.isMediaEntry(e))
+    if (this.hashDb.length !== before) this.saveHashDb()
+  }
+
   // ── Channel scan ──
   async scanChannel(telegramService: TelegramService, onProgress?: ProgressCb) {
+    this.cleanupNonMediaEntries()
     const all = await telegramService.listFiles()
     if (!all || all.length === 0) return { found: 0, groups: 0 }
 
     const hashedIds = new Set(this.hashDb.map(e => e.messageId))
-    const toScan = all.filter((f: any) => !hashedIds.has(f.messageId))
+    const toScan = all.filter((f: any) => !hashedIds.has(f.messageId) && (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')))
     const total = toScan.length
     let done = 0
     let found = 0
@@ -178,6 +191,7 @@ export class BotService {
           fileName: f.fileName || 'unknown',
           fileSize: f.fileSize || 0,
           hash,
+          mimeType: f.mimeType || undefined,
         })
         done++
       } catch {
@@ -186,6 +200,7 @@ export class BotService {
           fileName: f.fileName || 'unknown',
           fileSize: f.fileSize || 0,
           hash: '',
+          mimeType: f.mimeType || undefined,
         })
         done++
       }

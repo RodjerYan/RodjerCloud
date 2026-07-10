@@ -18,7 +18,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     currentVersion: string
     latestVersion: string
     releaseNotes: string
-    downloadUrl: string
+    assetId: number
     assetName: string
     htmlUrl: string
   }>(null)
@@ -100,13 +100,13 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   }
 
   const startDownload = async () => {
-    if (!updateModal?.downloadUrl) return
+    if (!updateModal?.assetId) return
     setDownloading(true)
     setDownloadProgress(0)
     const unsub = window.electronAPI.app.onDownloadProgress((p) => {
       setDownloadProgress(p.percent)
     })
-    const r = await window.electronAPI.app.downloadUpdate(updateModal.downloadUrl)
+    const r = await window.electronAPI.app.downloadUpdate(updateModal.assetId)
     unsub()
     if (r.success && r.data) {
       setDownloadPathState(r.data.filePath)
@@ -119,7 +119,10 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
 
   const installUpdate = async () => {
     if (!downloadPathState) return
-    await window.electronAPI.app.installUpdate(downloadPathState)
+    const r = await window.electronAPI.app.installUpdate(downloadPathState)
+    if (!r.success) {
+      show(r.error || 'Ошибка запуска установщика')
+    }
     setDownloading(false)
     setUpdateModal(null)
   }
