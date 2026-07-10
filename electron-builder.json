@@ -32,7 +32,6 @@
   },
   "mac": {
     "target": [
-      { "target": "dmg", "arch": ["arm64"] },
       { "target": "zip", "arch": ["arm64"] }
     ],
     "icon": "resources/icon.icns",
@@ -41,20 +40,6 @@
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist"
-  },
-  "dmg": {
-    "title": "RodjerCloud",
-    "background": null,
-    "icon": "resources/icon.icns",
-    "iconSize": 100,
-    "contents": [
-      { "x": 130, "y": 220, "type": "file" },
-      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
-    ],
-    "window": {
-      "width": 540,
-      "height": 380
-    }
   },
   "afterSign": null,
   "buildDependenciesFromSource": false,
