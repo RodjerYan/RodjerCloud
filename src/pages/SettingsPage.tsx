@@ -100,89 +100,144 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     <div className="se-root">
       <h1>Настройки</h1>
 
-      <section className="v3-card">
-        <h2>Загрузка</h2>
-        <label className="se-row"><span>Всегда спрашивать куда загружать файлы</span>
-          <input type="checkbox" checked={askDownloadPath} onChange={e => { setAskDownloadPath(e.target.checked); window.electronAPI.storage.setAskDownloadPath(e.target.checked) }} />
-        </label>
-      </section>
-
-      <section className="v3-card">
-        <h2>Отправка</h2>
-        <label className="se-row"><span>Авто-переименование при совпадении</span>
-          <input type="checkbox" checked={autoRename} onChange={e => { setAutoRename(e.target.checked); localStorage.setItem('v2.autoRename', e.target.checked ? '1' : '0') }} />
-        </label>
-        <div className="se-row"><span>Одновременных загрузок</span>
-          <input type="number" min={1} max={5} value={concurrency} onChange={e => onConcurrency(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))} style={{ width: 80 }} />
+      <div className="settings-card">
+        <div className="settings-header">
+          <HardDrive size={18} className="settings-header-icon" />
+          <h2>Загрузка и отправка</h2>
         </div>
-      </section>
-
-      <section className="v3-card">
-        <h2>Канал</h2>
-        <div className="se-row"><span>Подключённый канал</span><strong>{channelInfo?.title || '—'}</strong></div>
-        {channelInfo?.token && (
-          <div className="se-row"><span>Ключ канала</span>
-            <div className="se-path"><code>{String(channelInfo.token).slice(0, 12)}…</code>
-              <button onClick={copyKey}><Copy size={14} /> Копировать ключ</button></div>
+        <div className="settings-body">
+          <label className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Всегда спрашивать куда загружать файлы</div>
+              <div className="settings-desc">Выбирать папку для сохранения скачиваемых файлов вручную</div>
+            </div>
+            <div className="v3-switch">
+              <input type="checkbox" checked={askDownloadPath} onChange={e => { setAskDownloadPath(e.target.checked); window.electronAPI.storage.setAskDownloadPath(e.target.checked) }} />
+              <div className="v3-switch-knob"></div>
+            </div>
+          </label>
+          <div className="settings-divider" />
+          <label className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Авто-переименование при совпадении</div>
+              <div className="settings-desc">Автоматически добавлять (1) к имени файла при конфликте имён</div>
+            </div>
+            <div className="v3-switch">
+              <input type="checkbox" checked={autoRename} onChange={e => { setAutoRename(e.target.checked); localStorage.setItem('v2.autoRename', e.target.checked ? '1' : '0') }} />
+              <div className="v3-switch-knob"></div>
+            </div>
+          </label>
+          <div className="settings-divider" />
+          <div className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Одновременных загрузок</div>
+              <div className="settings-desc">Количество файлов, загружаемых параллельно (до 5)</div>
+            </div>
+            <input type="number" min={1} max={5} value={concurrency} onChange={e => onConcurrency(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))} style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
           </div>
-        )}
-        <button className="v3-btn" onClick={onChangeChannel}>Сменить канал</button>
-      </section>
+        </div>
+      </div>
 
-      <section className="v3-card">
-        <h2><Bot size={16} /> Бот для ссылок</h2>
-        <div className="se-row"><span>Токен бота</span>
-          {botConfigured ? <span style={{ color: 'var(--accent)' }}>✓ Настроен</span> : <span style={{ color: 'var(--danger)' }}>Не настроен</span>}
+      <div className="settings-card">
+        <div className="settings-header">
+          <Link2 size={18} className="settings-header-icon" />
+          <h2>Канал</h2>
         </div>
-        <div className="se-row" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
-          <input value={botToken} onChange={e => setBotToken(e.target.value)}
-            placeholder="Введите токен бота: 123456:ABCdef..."
-            style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'monospace' }} />
-          <button className="v3-btn" onClick={async () => {
-            if (!botToken.trim()) return show('Введите токен')
-            const r = await window.electronAPI.share.setBotToken(botToken.trim())
-            if (r.success) { setBotConfigured(true); show('Токен сохранён') }
-            else show(r.error || 'Ошибка')
-          }}>Сохранить токен</button>
+        <div className="settings-body">
+          <div className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Подключённый канал</div>
+              <div className="settings-desc">Текущий канал, используемый для хранения файлов</div>
+            </div>
+            <strong style={{ fontSize: 15 }}>{channelInfo?.title || '—'}</strong>
+          </div>
+          {channelInfo?.token && (
+            <>
+              <div className="settings-divider" />
+              <div className="settings-row">
+                <div className="settings-info">
+                  <div className="settings-title">Ключ канала</div>
+                  <div className="settings-desc">Ключ для авторизации в этом канале</div>
+                </div>
+                <div className="se-path">
+                  <code>{String(channelInfo.token).slice(0, 12)}…</code>
+                  <button onClick={copyKey}><Copy size={14} /> Копировать</button>
+                </div>
+              </div>
+            </>
+          )}
+          <div className="settings-divider" />
+          <div className="settings-row" style={{ padding: '12px 0' }}>
+            <button className="v3-btn" onClick={onChangeChannel}>Сменить канал</button>
+          </div>
         </div>
-        <div className="se-row" style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-          @BotFather → создать бота → добавить администратором канала «My area» → написать боту /start
-        </div>
-      </section>
+      </div>
 
-      <section className="v3-card">
-        <h2><Info size={16} /> О программе</h2>
+      <div className="settings-card">
+        <div className="settings-header">
+          <Bot size={18} className="settings-header-icon" />
+          <h2>Бот для ссылок</h2>
+        </div>
+        <div className="settings-body">
+          <div className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Токен бота</div>
+              <div className="settings-desc">Позволяет генерировать прямые ссылки на файлы</div>
+            </div>
+            {botConfigured ? <span style={{ color: 'var(--success)', fontWeight: 500, fontSize: 13, background: 'rgba(52,211,153,0.1)', padding: '4px 10px', borderRadius: 99 }}>✓ Настроен</span> : <span style={{ color: 'var(--danger)', fontWeight: 500, fontSize: 13, background: 'rgba(248,113,113,0.1)', padding: '4px 10px', borderRadius: 99 }}>Не настроен</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 10, paddingBottom: 16 }}>
+            <input value={botToken} onChange={e => setBotToken(e.target.value)}
+              placeholder="Введите токен бота: 123456:ABCdef..."
+              style={{ flex: 1, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono, monospace)' }} />
+            <button className="v3-btn primary" onClick={async () => {
+              if (!botToken.trim()) return show('Введите токен')
+              const r = await window.electronAPI.share.setBotToken(botToken.trim())
+              if (r.success) { setBotConfigured(true); show('Токен сохранён') }
+              else show(r.error || 'Ошибка')
+            }}>Сохранить</button>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, paddingBottom: 16, borderTop: '1px solid var(--border-soft)', paddingTop: 16 }}>
+            Инструкция: зайдите в @BotFather → создайте бота → добавьте его администратором вашего канала → напишите боту /start
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-header">
+          <Info size={18} className="settings-header-icon" />
+          <h2>О программе</h2>
+        </div>
         <div className="se-about-wrapper">
           <img src={iconUrl} alt="RodjerCloud" className="se-logo" />
           <h3 className="se-app-name">RodjerCloud</h3>
-          <div className="se-app-version">{version ? `v${version}` : ''}</div>
+          <div className="se-app-version">{version ? `Версия ${version}` : ''}</div>
           <p className="se-app-desc">
             RodjerCloud превращает ваш приватный Telegram-канал в безлимитное облачное хранилище.
-            Без шифрования, без ежемесячной платы, полностью в вашем распоряжении.
+            Полный контроль, никаких лимитов на объем и отсутствие абонентской платы.
           </p>
 
-          <button className="v3-btn se-update-btn" onClick={checkUpdates} disabled={checkingUpdate}>
-            <Download size={14} />
-            {checkingUpdate ? 'Проверка…' : 'Проверить обновления'}
+          <button className="v3-btn primary se-update-btn" onClick={checkUpdates} disabled={checkingUpdate}>
+            <Download size={16} />
+            {checkingUpdate ? 'Проверка обновлений…' : 'Проверить обновления'}
           </button>
 
           <div className="se-app-license">Распространяется под лицензией MIT</div>
         </div>
-      </section>
+      </div>
 
       {updateModal && updateModal.hasUpdate && createPortal(
-        <div className="se-modal-overlay"
-          onClick={() => { if (!downloading) setUpdateModal(null) }}>
-          <div className="v3-card se-modal-content" onClick={e => e.stopPropagation()}>
+        <div className="se-modal-overlay" onClick={() => { if (!downloading) setUpdateModal(null) }}>
+          <div className="settings-card se-modal-content" onClick={e => e.stopPropagation()} style={{ margin: 0 }}>
             <h3 className="se-modal-title">Доступно обновление v{updateModal.latestVersion}</h3>
-            <div className="se-modal-version">
-              Текущая версия: v{updateModal.currentVersion}
-            </div>
+            <div className="se-modal-version">Текущая версия: v{updateModal.currentVersion}</div>
+            
             {updateModal.releaseNotes && (
               <div className="se-modal-notes">
                 {updateModal.releaseNotes}
               </div>
             )}
+            
             {downloading ? (
               <div className="se-modal-progress">
                 <div className="se-modal-progress-text">
@@ -193,6 +248,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
                 </div>
               </div>
             ) : null}
+            
             <div className="se-modal-actions">
               {!downloading && !downloadPathState && (
                 <button className="v3-btn" onClick={() => setUpdateModal(null)}>Закрыть</button>

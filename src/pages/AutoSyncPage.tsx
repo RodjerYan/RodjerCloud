@@ -184,7 +184,7 @@ export default function AutoSyncPage() {
 
       {/* ===== Upload queue ===== */}
       {queue.length > 0 && (
-        <div style={{ marginBottom: 16, background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)' }}>
+        <div className="v3-card" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <Upload size={16} style={{ color: 'var(--v3-text-dim)' }} />
             <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Очередь загрузки</h2>
@@ -229,20 +229,20 @@ export default function AutoSyncPage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 16 }}>
-        <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 14, padding: '16px 18px', backdropFilter: 'blur(12px)' }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Файлов в папках</div>
+        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Файлов в папках</div>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#e0e0e0' }}>{totalFileCount}</div>
         </div>
-        <div style={{ background: 'linear-gradient(180deg, rgba(52,211,153,0.04), rgba(52,211,153,0.01))', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 14, padding: '16px 18px', backdropFilter: 'blur(12px)' }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Загружено</div>
+        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Загружено</div>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#34d399' }}>{status.uploadedCount}</div>
         </div>
-        <div style={{ background: 'linear-gradient(180deg, rgba(248,113,113,0.04), rgba(248,113,113,0.01))', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 14, padding: '16px 18px', backdropFilter: 'blur(12px)' }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Ошибок</div>
+        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ошибок</div>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#f87171' }}>{status.failedCount}</div>
         </div>
-        <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 14, padding: '16px 18px', backdropFilter: 'blur(12px)' }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Статус</div>
+        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Статус</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: config.enabled ? '#34d399' : '#f87171', boxShadow: config.enabled ? '0 0 12px #34d399' : '0 0 12px #f87171', animation: config.enabled ? 'v3-pulse 1.4s ease-in-out infinite' : 'none' }} />
             <span style={{ fontSize: 14, fontWeight: 600, color: config.enabled ? '#34d399' : '#f87171' }}>
@@ -253,7 +253,7 @@ export default function AutoSyncPage() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)' }}>
+        <div className="v3-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Clock size={16} style={{ color: 'var(--v3-text-dim)' }} />
             <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Режим</h2>
@@ -280,7 +280,7 @@ export default function AutoSyncPage() {
           </div>
         </div>
 
-        <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)' }}>
+        <div className="v3-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Shield size={16} style={{ color: 'var(--v3-text-dim)' }} />
             <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Быстрые действия</h2>
@@ -307,7 +307,7 @@ export default function AutoSyncPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {config.mode === 'custom' && (
-            <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)' }}>
+            <div className="v3-card">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <FolderOpen size={16} style={{ color: 'var(--v3-text-dim)' }} />
                 <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Папки</h2>
@@ -333,7 +333,7 @@ export default function AutoSyncPage() {
             </div>
           )}
 
-          <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)' }}>
+          <div className="v3-card">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               <FileText size={16} style={{ color: 'var(--v3-text-dim)' }} />
               <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Фильтры</h2>
@@ -360,7 +360,7 @@ export default function AutoSyncPage() {
           </div>
         </div>
 
-        <div style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))', border: '1px solid var(--v3-border-soft)', borderRadius: 18, padding: 22, backdropFilter: 'blur(16px)', boxShadow: '0 10px 40px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', maxHeight: '60vh' }}>
+        <div className="v3-card" style={{ display: 'flex', flexDirection: 'column', maxHeight: '60vh' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexShrink: 0 }}>
             <Clock size={16} style={{ color: 'var(--v3-text-dim)' }} />
             <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>События</h2>
