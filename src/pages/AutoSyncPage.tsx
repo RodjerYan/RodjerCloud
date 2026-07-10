@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Play, Square, FolderPlus, Clock, Shield, FolderOpen, Settings2, Upload, CheckCircle, AlertCircle, Loader2, RefreshCw, FileText } from 'lucide-react'
 import AutoSyncSettings from '../components/AutoSyncSettings'
+import { fmtSize } from '../lib/utils'
 
 const DEFAULTS = ['Documents', 'Downloads', 'Pictures', 'Desktop']
 
@@ -9,8 +10,6 @@ interface SyncEvent { type: string; file?: string; current?: number; total?: num
 
 const eventIcon: Record<string, string> = { detected: '👁️', uploading: '📤', uploaded: '✅', failed: '❌', skipped: '⏭️', 'scan-start': '🔍', 'scan-progress': '📡', 'scan-done': '🏁', started: '▶️', stopped: '⏹️', error: '⚠️' }
 const eventColor: Record<string, string> = { uploaded: '#34d399', failed: '#f87171', uploading: '#7cc8ff', skipped: '#fbbf24', error: '#f87171', detected: '#b9d8ff', 'scan-progress': '#7cc8ff' }
-
-function fmtSize(n: number) { if (!n) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n; while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }; return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i] }
 
 export default function AutoSyncPage() {
   const [showSettings, setShowSettings] = useState(false)

@@ -2,14 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts'
 import { Upload, HardDrive, FileText, TrendingUp } from 'lucide-react'
+import { fmtSize } from '../lib/utils'
 
-function fmtSize(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0; let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
-}
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Изображения'

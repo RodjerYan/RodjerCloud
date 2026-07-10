@@ -6,17 +6,12 @@ import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, Chevr
 import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
+import { fmtSize } from '../lib/utils'
 
 const SIX_HOURS = 21600
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
-function fmtSize(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
-}
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Изображения'

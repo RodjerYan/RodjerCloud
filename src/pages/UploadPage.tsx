@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
+import { fmtSize } from '../lib/utils'
 
 interface QueueItem {
   id: string
@@ -13,12 +14,6 @@ interface QueueItem {
   error?: string
 }
 
-function fmtSize(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
-}
 const TG_LIMIT = 2 * 1024 * 1024 * 1024
 
 const ALL_STEPS = [
