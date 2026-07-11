@@ -958,7 +958,7 @@ function renderMedia(files, idx) {
   const ext = (f.fileName||'').split('.').pop().toLowerCase()
   const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
   const heicExt = ['heic','heif'].includes(ext) ? '.jpg' : ''
-  const src = baseUrl + f.messageId + '_' + f.fileName + heicExt
+  const src = baseUrl + f.messageId + '_' + encodeURIComponent(f.fileName) + heicExt
   var el = document.getElementById('media')
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
   el.innerHTML = isVideo
