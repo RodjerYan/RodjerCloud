@@ -873,7 +873,7 @@ ipcMain.handle('tgs:read', async (_, name?: string) => {
 })
 
 function toFileUrl(p: string): string {
-  return 'file:///' + p.replace(/\\/g, '/')
+  return 'file:///' + p.replace(/\\/g, '/').split('/').map(s => encodeURIComponent(s)).join('/')
 }
 
 function ensurePreviewCache(cachedPath: string): string {
