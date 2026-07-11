@@ -873,7 +873,8 @@ ipcMain.handle('tgs:read', async (_, name?: string) => {
 })
 
 function toFileUrl(p: string): string {
-  return 'file:///' + p.replace(/\\/g, '/').split('/').map(s => encodeURIComponent(s)).join('/')
+  const normalized = p.replace(/\\/g, '/').replace(/^\//, '')
+  return 'file:///' + encodeURI(normalized)
 }
 
 function ensurePreviewCache(cachedPath: string): string {
@@ -932,7 +933,7 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #close{position:fixed;top:12px;right:16px;z-index:20;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;line-height:1;-webkit-app-region:no-drag}
 #media{position:fixed;top:0;left:0;right:0;bottom:48px;display:flex;align-items:center;justify-content:center}
 #media video,#media img{max-width:100%;max-height:100%;border-radius:4px}
-#bar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(10,10,20,0.92);display:flex;align-items:center;gap:8px;padding:6px 12px;height:48px;border-top:1px solid rgba(255,255,255,0.06)}
+#bar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(10,10,20,0.92);display:none;align-items:center;gap:8px;padding:6px 12px;height:48px;border-top:1px solid rgba(255,255,255,0.06)}
 #bar button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:5px;padding:4px 10px;font:12px/1.2 sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s}
 #bar button:hover{background:rgba(255,255,255,0.18)}
 #progress{flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;cursor:pointer;position:relative;margin:0 8px}
@@ -1025,15 +1026,9 @@ document.addEventListener('mousemove', function() {
 
     // start download in background - window.load IPC will wait for it
     if (!fs.existsSync(cachedPath)) {
-      telegramService.downloadFile(f.messageId, f.fileName).then(r => {
-        if (r?.filePath) {
-          try {
-            const destPath = pathMod.join(downloadDir, `${f.messageId}_${f.fileName}`)
-            fs.copyFileSync(r.filePath, destPath)
-            ensurePreviewCache(destPath)
-          } catch(e) { console.error('move failed', e) }
-        }
-      }).catch(e => console.error('bg download failed', e))
+      telegramService.downloadMediaToPath(f.messageId, cachedPath).then(() => {
+        ensurePreviewCache(cachedPath)
+      }).catch(e => console.error('download failed', e))
     } else {
       ensurePreviewCache(cachedPath)
     }
@@ -1083,14 +1078,11 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
     s.idx = nextIdx
     const cachedPath = pathMod.join(s.dir, `${nextFile.messageId}_${nextFile.fileName}`)
     if (!fs.existsSync(cachedPath)) {
-      const messages = await (telegramService as any).client.getMessages((telegramService as any).channelId, { ids: [nextFile.messageId] })
-      if (messages && messages[0]?.file) {
-        await (telegramService as any).client.downloadMedia(messages[0], { outputFile: cachedPath })
-        ensurePreviewCache(cachedPath)
-      }
-    } else {
-      ensurePreviewCache(cachedPath)
+      try {
+        await (telegramService as any).downloadMediaToPath(nextFile.messageId, cachedPath)
+      } catch(e) { console.error('nav download failed', e) }
     }
+    ensurePreviewCache(cachedPath)
     return { success: true, data: { files: s.files, idx: s.idx } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
