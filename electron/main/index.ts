@@ -877,6 +877,23 @@ function toFileUrl(p: string): string {
   return 'file:///' + encodeURI(normalized)
 }
 
+function loadPreviewData(filePath: string): string {
+  const ext = pathMod.extname(filePath).toLowerCase()
+  const mime: Record<string, string> = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.gif': 'image/gif',
+    '.webp': 'image/webp', '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+    '.webm': 'video/webm',
+  }
+  const mimeType = mime[ext] || 'application/octet-stream'
+  const data = fs.readFileSync(filePath)
+  const base64 = data.toString('base64')
+  return `data:${mimeType};base64,${base64}`
+}
+
 function ensurePreviewCache(cachedPath: string): string {
   const ext = pathMod.extname(cachedPath).toLowerCase()
   if (ext === '.heic' || ext === '.heif') {
@@ -949,32 +966,32 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 <script>
 let sid = '${winId}'
 let total = ${files.length}
-let baseUrl = '${toFileUrl(downloadDir)}/'
 let speed = 1
 let video = null
-function renderMedia(files, idx) {
+function renderMedia(files, idx, src) {
   if (!files || !files[idx]) return
   const f = files[idx]
-  const ext = (f.fileName||'').split('.').pop().toLowerCase()
-  const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
-  const heicExt = ['heic','heif'].includes(ext) ? '.jpg' : ''
-  const src = baseUrl + f.messageId + '_' + encodeURIComponent(f.fileName) + heicExt
+  const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
   var el = document.getElementById('media')
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
-  el.innerHTML = isVideo
-    ? '<video id="pv" src="' + src + '" autoplay style="max-width:100%;max-height:100%;border-radius:4px"></video>'
-    : '<img src="' + src + '" draggable="false" style="max-width:100%;max-height:100%;border-radius:4px">'
+  if (src) {
+    el.innerHTML = isVideo
+      ? '<video id="pv" src="' + src + '" autoplay style="max-width:100%;max-height:100%;border-radius:4px"></video>'
+      : '<img src="' + src + '" draggable="false" style="max-width:100%;max-height:100%;border-radius:4px">'
+  }
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
   if (isVideo) {
     video = document.getElementById('pv')
     document.getElementById('bar').style.display = 'flex'
-    video.playbackRate = speed
-    video.ontimeupdate = update
-    video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
-    video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
-    video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
-    video.onclick = function(e) { e.stopPropagation(); togglePlay() }
+    if (video) {
+      video.playbackRate = speed
+      video.ontimeupdate = update
+      video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
+      video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
+      video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
+      video.onclick = function(e) { e.stopPropagation(); togglePlay() }
+    }
   } else {
     document.getElementById('bar').style.display = 'none'; video = null
   }
@@ -987,7 +1004,7 @@ function cycleSpeed() { var a=[0.5,0.75,1,1.25,1.5,2]; var i=a.indexOf(speed); s
 function toggleFs() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen() }
 function nav(dir) {
   document.getElementById('media').innerHTML = ''; video = null
-  try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx) }) } catch(e) {}
+  try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx, r.data.src) }) } catch(e) {}
 }
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') window.electronAPI.preview.close(sid)
@@ -1005,7 +1022,7 @@ document.getElementById('media').onclick = function(e) {
 window.electronAPI.preview.getSession(sid).then(r => {
   if (r.success) {
     window.electronAPI.preview.load(sid).then(r2 => {
-      if (r2.success) renderMedia(r2.data.files, r2.data.idx)
+      if (r2.success) renderMedia(r2.data.files, r2.data.idx, r2.data.src)
     })
   }
 })
@@ -1043,14 +1060,23 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     if (!s) return { success: false, error: 'Session not found' }
     const f = s.files[s.idx]
     const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
-    const heicSuffix = ['heic','heif'].includes(ext) ? '.jpg' : ''
+    const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
+    const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
     const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
     // wait for the file to exist (poll up to 30s)
     for (let i = 0; i < 60; i++) {
       if (fs.existsSync(cachedPath)) break
       await new Promise(r => setTimeout(r, 500))
     }
-    return { success: true, data: { files: s.files, idx: s.idx } }
+    let src = ''
+    if (fs.existsSync(cachedPath)) {
+      if (isVideo) {
+        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
+      } else {
+        src = loadPreviewData(cachedPath)
+      }
+    }
+    return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -1083,7 +1109,19 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
       } catch(e) { console.error('nav download failed', e) }
     }
     ensurePreviewCache(cachedPath)
-    return { success: true, data: { files: s.files, idx: s.idx } }
+    const ext = (nextFile.fileName || '').split('.').pop()?.toLowerCase() || ''
+    const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
+    const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
+    const displayPath = cachedPath + heicSuffix
+    let src = ''
+    if (fs.existsSync(displayPath)) {
+      if (isVideo) {
+        src = 'file:///' + encodeURI(displayPath.replace(/\\/g, '/').replace(/^\//, ''))
+      } else {
+        src = loadPreviewData(displayPath)
+      }
+    }
+    return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
