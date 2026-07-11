@@ -38,11 +38,7 @@ const CAT_COLOR: Record<string, string> = {
 }
 
 function fileDate(f: any): number {
-  const t = typeOf(f.fileName)
-  if (t === 'Изображения' || t === 'Видео') {
-    return f.originalDate || f.uploadedAt || 0
-  }
-  return f.uploadedAt || f.originalDate || 0
+  return f.originalDate || f.uploadedAt || 0
 }
 
 function groupByDay(items: any[]) {

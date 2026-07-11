@@ -876,6 +876,20 @@ function toFileUrl(p: string): string {
   return 'file:///' + p.replace(/\\/g, '/')
 }
 
+function ensurePreviewCache(cachedPath: string): string {
+  const ext = pathMod.extname(cachedPath).toLowerCase()
+  if (ext === '.heic' || ext === '.heif') {
+    const jpgPath = cachedPath + '.jpg'
+    if (!fs.existsSync(jpgPath)) {
+      try {
+        execSync(`sips -s format jpeg "${cachedPath}" --out "${jpgPath}"`, { timeout: 15000 })
+      } catch {}
+    }
+    return jpgPath
+  }
+  return cachedPath
+}
+
 const previewWindows = new Map<number, BrowserWindow>()
 
 ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
@@ -940,8 +954,10 @@ let video = null
 function renderMedia(files, idx) {
   if (!files || !files[idx]) return
   const f = files[idx]
-  const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
-  const src = baseUrl + f.messageId + '_' + f.fileName
+  const ext = (f.fileName||'').split('.').pop().toLowerCase()
+  const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
+  const heicExt = ['heic','heif'].includes(ext) ? '.jpg' : ''
+  const src = baseUrl + f.messageId + '_' + f.fileName + heicExt
   var el = document.getElementById('media')
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
   el.innerHTML = isVideo
@@ -1011,10 +1027,10 @@ document.addEventListener('mousemove', function() {
     if (!fs.existsSync(cachedPath)) {
       telegramService.downloadFile(f.messageId, f.fileName).then(r => {
         if (r?.filePath) {
-          // move to cache dir
           try {
             const destPath = pathMod.join(downloadDir, `${f.messageId}_${f.fileName}`)
             fs.copyFileSync(r.filePath, destPath)
+            ensurePreviewCache(destPath)
           } catch(e) { console.error('move failed', e) }
         }
       }).catch(e => console.error('bg download failed', e))
@@ -1053,7 +1069,7 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
     if (!s) return { success: false, error: 'Session not found' }
     const all = s.files.filter((f: any) => {
       const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
-      return ['jpg','jpeg','png','gif','webp','bmp','svg','mp4','mov','mkv','avi','webm'].includes(ext)
+      return ['jpg','jpeg','png','gif','webp','bmp','svg','heic','heif','mp4','mov','mkv','avi','webm'].includes(ext)
     })
     if (all.length === 0) return { success: false, error: 'No previewable files' }
     const currInAll = all.findIndex((x: any) => x === s.files[s.idx])
@@ -1066,6 +1082,7 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
       const messages = await (telegramService as any).client.getMessages((telegramService as any).channelId, { ids: [nextFile.messageId] })
       if (messages && messages[0]?.file) {
         await (telegramService as any).client.downloadMedia(messages[0], { outputFile: cachedPath })
+        ensurePreviewCache(cachedPath)
       }
     }
     return { success: true, data: { files: s.files, idx: s.idx } }
