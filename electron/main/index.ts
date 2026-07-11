@@ -1034,6 +1034,8 @@ document.addEventListener('mousemove', function() {
           } catch(e) { console.error('move failed', e) }
         }
       }).catch(e => console.error('bg download failed', e))
+    } else {
+      ensurePreviewCache(cachedPath)
     }
 
     return { success: true }
@@ -1045,7 +1047,9 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const s = previewSessions.get(sessionId)
     if (!s) return { success: false, error: 'Session not found' }
     const f = s.files[s.idx]
-    const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`)
+    const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
+    const heicSuffix = ['heic','heif'].includes(ext) ? '.jpg' : ''
+    const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
     // wait for the file to exist (poll up to 30s)
     for (let i = 0; i < 60; i++) {
       if (fs.existsSync(cachedPath)) break
@@ -1084,6 +1088,8 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
         await (telegramService as any).client.downloadMedia(messages[0], { outputFile: cachedPath })
         ensurePreviewCache(cachedPath)
       }
+    } else {
+      ensurePreviewCache(cachedPath)
     }
     return { success: true, data: { files: s.files, idx: s.idx } }
   } catch (error) { return { success: false, error: (error as Error).message } }
