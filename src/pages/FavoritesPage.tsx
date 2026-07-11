@@ -13,7 +13,7 @@ function fmtSize(n: number) {
 
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif'].includes(ext)) return 'image'
   if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'video'
   return 'other'
 }

@@ -9,7 +9,7 @@ export function fmtSize(bytes: number): string {
 export function typeOf(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
-    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', ico: 'image', avif: 'image',
+    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', ico: 'image', avif: 'image', heic: 'image', heif: 'image',
     mp4: 'video', mkv: 'video', avi: 'video', mov: 'video', webm: 'video', flv: 'video',
     mp3: 'audio', wav: 'audio', flac: 'audio', aac: 'audio', ogg: 'audio', wma: 'audio', m4a: 'audio',
     pdf: 'document', doc: 'document', docx: 'document', txt: 'document', rtf: 'document', odt: 'document', xls: 'document', xlsx: 'document', ppt: 'document', pptx: 'document', csv: 'document',

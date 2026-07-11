@@ -4,7 +4,7 @@ import { fmtSize } from '../lib/utils'
 
 function typeOf(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'Изображения'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif'].includes(ext)) return 'Изображения'
   if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Видео'
   if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Аудио'
   if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Документы'
