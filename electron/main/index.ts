@@ -15,6 +15,9 @@ import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 
 
+app.commandLine.appendSwitch('no-sandbox')
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-software-rasterizer')
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 
 // Logger

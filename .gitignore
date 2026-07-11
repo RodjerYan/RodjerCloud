@@ -5,3 +5,7 @@ dist/
 *.log
 .env
 .env.local
+*.app
+RodjerCloud.app/
+dist-manual/
+*.zip
