@@ -32,7 +32,10 @@
   },
   "mac": {
     "target": [
-      { "target": "zip", "arch": ["arm64"] }
+      {
+        "target": "pkg",
+        "arch": ["arm64"]
+      }
     ],
     "icon": "resources/icon.icns",
     "category": "public.app-category.utilities"
