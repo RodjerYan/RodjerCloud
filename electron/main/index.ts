@@ -1076,8 +1076,14 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     
     let src = ''
     if (exists) {
-      src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
-      
+      const ext2 = pathMod.extname(cachedPath).toLowerCase()
+      const isVid = ['mp4','mov','mkv','avi','webm'].includes(ext2)
+      if (isVid) {
+        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
+      } else {
+        const buf = fs.readFileSync(cachedPath)
+        src = `data:image/jpeg;base64,${buf.toString('base64')}`
+      }
     }
     return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
