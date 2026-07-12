@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
     downloadFile: (messageId: number, fileName: string) =>
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
-    downloadThumbnail: (messageId: number) =>
-      ipcRenderer.invoke('telegram:download-thumbnail', messageId),
+    downloadThumbnail: (messageId: number, fileName?: string) =>
+      ipcRenderer.invoke('telegram:download-thumbnail', messageId, fileName),
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
     listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
     restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),
@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   file: {
     computeHash: (messageId: number) => ipcRenderer.invoke('file:compute-hash', messageId),
+    readDataUrl: (filePath: string) => ipcRenderer.invoke('file:read-data-url', filePath),
+    getLocalUrl: (filePath: string) => ipcRenderer.invoke('file:get-local-url', filePath),
   },
   bot: {
     getHashDb: () => ipcRenderer.invoke('bot:get-hash-db'),

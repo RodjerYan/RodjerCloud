@@ -490,27 +490,38 @@ export class TelegramService {
     return tmpFile
   }
 
-  async downloadThumbnail(messageId: number): Promise<string | null> {
+  async downloadThumbnail(messageId: number, fileName?: string): Promise<string | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
     if (!messages || messages.length === 0) return null
     const message: any = messages[0]
     if (!message.file) return null
 
+    const ext = fileName ? path.extname(fileName).toLowerCase() : '.jpg'
     const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-    const cachePath = path.join(cacheDir, `${messageId}.jpg`)
+    const cachePath = path.join(cacheDir, `${messageId}${ext}`)
     if (fs.existsSync(cachePath)) return cachePath
 
-    try {
-      await this.client.downloadMedia(message, { outputFile: cachePath, thumb: 0 } as any)
-      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
-    } catch {}
+    const media = message.document || message.photo
+    const hasThumbs = media && media.thumbs && media.thumbs.length > 0
 
-    try {
-      await this.client.downloadMedia(message, { outputFile: cachePath, thumb: 1 } as any)
-      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
-    } catch {}
+    if (hasThumbs) {
+      // Try to get a medium/large thumbnail to avoid blurriness
+      const sizesToTry = ['m', 'x', media.thumbs.length - 1, 1, 0]
+      for (const t of sizesToTry) {
+        try {
+          await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
+          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
+        } catch {}
+      }
+    } else if (ext === '.heic' || ext === '.heif') {
+      // No thumbnails available. For HEIC, we must download the full file to generate a thumbnail.
+      try {
+        await this.client.downloadMedia(message, { outputFile: cachePath } as any)
+        if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
+      } catch {}
+    }
 
     return null
   }

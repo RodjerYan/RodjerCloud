@@ -168,8 +168,11 @@ export default function MyFilesPage() {
     const map: Record<number, string> = {}
     await Promise.all(files.map(async (f) => {
       try {
-        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId)
-        if (r.success && r.data) map[f.messageId] = 'file://' + r.data
+        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
+        if (r.success && r.data) {
+          const d = await window.electronAPI.file.getLocalUrl(r.data)
+          if (d.success) map[f.messageId] = d.data
+        }
       } catch {}
     }))
     setThumbs(prev => ({ ...prev, ...map }))

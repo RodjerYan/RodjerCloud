@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net } from 'electron'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -16,6 +16,7 @@ import { BotService } from './bot-service'
 
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
+app.commandLine.appendSwitch('disable-web-security')
 
 // Logger
 const logFile = pathMod.join(app.getPath('userData'), 'rodjercloud.log')
@@ -446,9 +447,9 @@ ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: 
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('telegram:download-thumbnail', async (_, messageId: number) => {
+ipcMain.handle('telegram:download-thumbnail', async (_, messageId: number, fileName?: string) => {
   try {
-    const filePath = await telegramService.downloadThumbnail(messageId)
+    const filePath = await telegramService.downloadThumbnail(messageId, fileName)
     return { success: true, data: filePath }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -872,36 +873,16 @@ ipcMain.handle('tgs:read', async (_, name?: string) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-function toFileUrl(p: string): string {
-  const normalized = p.replace(/\\/g, '/').replace(/^\//, '')
-  return 'file:///' + encodeURI(normalized)
-}
-
-function loadPreviewData(filePath: string): string {
-  const ext = pathMod.extname(filePath).toLowerCase()
-  const mime: Record<string, string> = {
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.png': 'image/png', '.gif': 'image/gif',
-    '.webp': 'image/webp', '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml',
-    '.mp4': 'video/mp4', '.mov': 'video/quicktime',
-    '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
-    '.webm': 'video/webm',
-  }
-  const mimeType = mime[ext] || 'application/octet-stream'
-  const data = fs.readFileSync(filePath)
-  const base64 = data.toString('base64')
-  return `data:${mimeType};base64,${base64}`
-}
-
 function ensurePreviewCache(cachedPath: string): string {
   const ext = pathMod.extname(cachedPath).toLowerCase()
   if (ext === '.heic' || ext === '.heif') {
     const jpgPath = cachedPath + '.jpg'
     if (!fs.existsSync(jpgPath)) {
       try {
-        execSync(`sips -s format jpeg "${cachedPath}" --out "${jpgPath}"`, { timeout: 15000 })
-      } catch {}
+        require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', cachedPath, '--out', jpgPath], { timeout: 15000 })
+      } catch (e: any) {
+        console.error('sips FAIL:', cachedPath, e.message)
+      }
     }
     return jpgPath
   }
@@ -914,10 +895,13 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
   try {
     const f = files[idx]
     if (!f) return { success: false, error: 'File not found' }
+    
+    
     const winId = ++previewIdSeq
     const downloadDir = pathMod.join(app.getPath('userData'), 'preview-cache')
     if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true })
     const cachedPath = pathMod.join(downloadDir, `${f.messageId}_${f.fileName}`)
+    
 
     previewSessions.set(winId.toString(), { files, idx, dir: downloadDir })
 
@@ -962,6 +946,7 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 <button id="close" onclick="window.electronAPI.preview.close(sid)">✕</button>
 <div id="loader"></div>
 <div id="media"></div>
+<div id="error" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f87171;font:14px/1.4 sans-serif;text-align:center;max-width:80%"></div>
 <div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><button id="speedBtn" onclick="cycleSpeed()">1x</button><button onclick="toggleFs()">⛶</button></div>
 <script>
 let sid = '${winId}'
@@ -972,12 +957,16 @@ function renderMedia(files, idx, src) {
   if (!files || !files[idx]) return
   const f = files[idx]
   const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
-  var el = document.getElementById('media')
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  var err = document.getElementById('error')
+  var el = document.getElementById('media')
   if (src) {
     el.innerHTML = isVideo
       ? '<video id="pv" src="' + src + '" autoplay style="max-width:100%;max-height:100%;border-radius:4px"></video>'
       : '<img src="' + src + '" draggable="false" style="max-width:100%;max-height:100%;border-radius:4px">'
+    if (err) err.style.display = 'none'
+  } else {
+    if (err) { err.textContent = 'Не удалось загрузить файл\\n' + f.fileName; err.style.display = 'block' }
   }
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
@@ -995,6 +984,10 @@ function renderMedia(files, idx, src) {
   } else {
     document.getElementById('bar').style.display = 'none'; video = null
   }
+}
+function showError(msg) {
+  var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  var err = document.getElementById('error'); if (err) { err.textContent = 'Ошибка: ' + msg; err.style.display = 'block' }
 }
 function togglePlay() { if (!video) return; if (video.paused) video.play(); else video.pause() }
 function update() { if (!video||!video.duration) return; document.getElementById('progressFill').style.width = (video.currentTime/video.duration*100)+'%'; document.getElementById('time').textContent = fmt(video.currentTime)+' / '+fmt(video.duration) }
@@ -1023,9 +1016,18 @@ window.electronAPI.preview.getSession(sid).then(r => {
   if (r.success) {
     window.electronAPI.preview.load(sid).then(r2 => {
       if (r2.success) renderMedia(r2.data.files, r2.data.idx, r2.data.src)
-    })
+      else showError(r2.error || 'load failed')
+    }).catch(function(e) { showError('load error: ' + e.message) })
+  } else {
+    showError(r.error || 'session error')
   }
-})
+}).catch(function(e) { showError('init error: ' + e.message) })
+// also try direct load if preload API differs
+try {
+  window.electronAPI.preview.load(sid).then(r2 => {
+    if (r2 && r2.success && r2.data && r2.data.src) renderMedia(r2.data.files, r2.data.idx, r2.data.src)
+  }).catch(function(e) {})
+} catch(e) {}
 // show close on mouse move, hide after idle
 var closeTimer = null
 document.addEventListener('mousemove', function() {
@@ -1063,18 +1065,19 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
     const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
     const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
+    
+    
     // wait for the file to exist (poll up to 30s)
     for (let i = 0; i < 60; i++) {
       if (fs.existsSync(cachedPath)) break
       await new Promise(r => setTimeout(r, 500))
     }
+    const exists = fs.existsSync(cachedPath)
+    
     let src = ''
-    if (fs.existsSync(cachedPath)) {
-      if (isVideo) {
-        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
-      } else {
-        src = loadPreviewData(cachedPath)
-      }
+    if (exists) {
+      src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
+      
     }
     return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -1115,13 +1118,50 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
     const displayPath = cachedPath + heicSuffix
     let src = ''
     if (fs.existsSync(displayPath)) {
-      if (isVideo) {
-        src = 'file:///' + encodeURI(displayPath.replace(/\\/g, '/').replace(/^\//, ''))
-      } else {
-        src = loadPreviewData(displayPath)
-      }
+      src = 'file:///' + encodeURI(displayPath.replace(/\\/g, '/').replace(/^\//, ''))
     }
     return { success: true, data: { files: s.files, idx: s.idx, src } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('file:read-data-url', async (_, filePath: string) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+    const data = fs.readFileSync(filePath)
+    const ext = pathMod.extname(filePath).toLowerCase()
+    const mime: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.svg': 'image/svg+xml',
+    }
+    return { success: true, data: `data:${mime[ext] || 'image/jpeg'};base64,${data.toString('base64')}` }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+    let finalPath = filePath
+    const ext = pathMod.extname(filePath).toLowerCase()
+    if (ext === '.heic' || ext === '.heif') {
+      const jpgPath = filePath + '.jpg'
+      let needsConversion = !fs.existsSync(jpgPath)
+      if (!needsConversion) {
+        const stat = fs.statSync(jpgPath)
+        if (stat.size < 10000) needsConversion = true // Fix for old corrupted 3.5KB sips outputs
+      }
+      
+      if (needsConversion) {
+        try {
+          if (fs.existsSync(jpgPath)) fs.unlinkSync(jpgPath)
+          require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', filePath, '--out', jpgPath], { timeout: 15000 })
+        } catch (e: any) {
+          console.error('sips FAIL for thumbnail:', filePath, e.message)
+        }
+      }
+      finalPath = jpgPath
+    }
+    return { success: true, data: 'file:///' + encodeURI(finalPath.replace(/\\/g, '/').replace(/^\//, '')) }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
