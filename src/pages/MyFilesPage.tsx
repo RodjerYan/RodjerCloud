@@ -637,32 +637,112 @@ export default function MyFilesPage() {
       </div>
 
       {duplicatePrompt && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--panel)', padding: '28px 32px', borderRadius: 20, width: 440, boxShadow: '0 20px 40px rgba(0,0,0,0.4)', border: '1px solid var(--border)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.3s ease-out forwards' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(5, 7, 16, 0.6)', backdropFilter: 'blur(24px) saturate(150%)' }} />
+          
+          <div style={{ 
+            position: 'relative', 
+            background: 'linear-gradient(145deg, rgba(30, 34, 53, 0.9), rgba(15, 17, 26, 0.95))', 
+            padding: '36px', 
+            borderRadius: 24, 
+            width: 460, 
+            boxShadow: '0 30px 60px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.1)', 
+            border: '1px solid rgba(255,255,255,0.05)',
+            animation: 'modalPop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+          }}>
+            <style>{`
+              @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+              @keyframes modalPop { 
+                0% { opacity: 0; transform: scale(0.95) translateY(10px); } 
+                100% { opacity: 1; transform: scale(1) translateY(0); } 
+              }
+              .btn-premium {
+                padding: 12px 24px; border-radius: 12px; font-weight: 600; font-size: 14px;
+                cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                display: flex; align-items: center; justify-content: center;
+              }
+              .btn-premium:hover { transform: translateY(-1px); }
+              .btn-premium:active { transform: translateY(1px); }
+              
+              .btn-premium.danger {
+                background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                color: white; border: none;
+                box-shadow: 0 8px 16px rgba(239, 68, 68, 0.25), inset 0 1px 1px rgba(255,255,255,0.2);
+              }
+              .btn-premium.danger:hover { box-shadow: 0 12px 20px rgba(239, 68, 68, 0.35), inset 0 1px 1px rgba(255,255,255,0.2); filter: brightness(1.1); }
+              
+              .btn-premium.secondary {
+                background: rgba(255,255,255,0.05);
+                color: #e2e8f0; border: 1px solid rgba(255,255,255,0.1);
+                backdrop-filter: blur(8px);
+              }
+              .btn-premium.secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); color: #fff; }
+
+              .btn-premium.ghost {
+                background: transparent; color: #94a3b8; border: 1px solid transparent;
+              }
+              .btn-premium.ghost:hover { color: #f1f5f9; background: rgba(255,255,255,0.03); }
+
+              .file-chip {
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 16px; padding: 16px;
+                display: flex; align-items: center; gap: 16px;
+                box-shadow: inset 0 1px 1px rgba(255,255,255,0.03), 0 4px 12px rgba(0,0,0,0.2);
+              }
+              
+              .icon-glow-wrap {
+                position: relative; width: 56px; height: 56px;
+                display: flex; align-items: center; justify-content: center;
+              }
+              .icon-glow-bg {
+                position: absolute; inset: 0; border-radius: 50%;
+                background: linear-gradient(135deg, #f59e0b, #ea580c);
+                opacity: 0.2; filter: blur(8px);
+                animation: pulseGlow 2s ease-in-out infinite alternate;
+              }
+              .icon-glow-inner {
+                position: relative; width: 48px; height: 48px; border-radius: 50%;
+                background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.1));
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                display: flex; align-items: center; justify-content: center; color: #fbbf24;
+                box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
+              }
+              @keyframes pulseGlow { from { opacity: 0.15; transform: scale(0.95); } to { opacity: 0.3; transform: scale(1.05); } }
+            `}</style>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <AlertCircle size={26} strokeWidth={2.5} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 28 }}>
+              <div className="icon-glow-wrap">
+                <div className="icon-glow-bg" />
+                <div className="icon-glow-inner">
+                  <AlertCircle size={24} strokeWidth={2.5} />
+                </div>
               </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Файл уже существует</h3>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-dim)' }}>В этой папке уже есть файл с таким именем.</p>
+              <div style={{ paddingTop: 4 }}>
+                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 700, background: 'linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.02em' }}>Конфликт имен</h3>
+                <p style={{ margin: '8px 0 0', fontSize: 14, color: '#94a3b8', lineHeight: 1.6 }}>В этой папке уже есть файл с таким же именем. Выберите, как с ним поступить.</p>
               </div>
             </div>
 
-            <div style={{ background: 'var(--bg)', borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28, border: '1px solid var(--border)' }}>
-              <div className="mf-card-icon" data-type={typeOf(duplicatePrompt.file.fileName)} style={{ width: 36, height: 36, fontSize: 11, background: 'rgba(124, 131, 255, 0.1)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, fontWeight: 600 }}>
+            <div className="file-chip" style={{ marginBottom: 36 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.1))', border: '1px solid rgba(99, 102, 241, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8', fontSize: 12, fontWeight: 700, letterSpacing: 0.5, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.05)' }}>
                 {(duplicatePrompt.file.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
               </div>
-              <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {duplicatePrompt.file.fileName}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 4 }}>
+                  {duplicatePrompt.file.fileName}
+                </div>
+                <div style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
+                  Ожидает загрузки
+                </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')}>Пропустить</button>
-              <button className="v3-btn" onClick={() => duplicatePrompt.resolve('copy')}>Сохранить оба</button>
-              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')}>Заменить</button>
+              <button className="btn-premium ghost" onClick={() => duplicatePrompt.resolve('skip')}>Пропустить</button>
+              <button className="btn-premium secondary" onClick={() => duplicatePrompt.resolve('copy')}>Сохранить оба</button>
+              <button className="btn-premium danger" onClick={() => duplicatePrompt.resolve('replace')}>Заменить</button>
             </div>
           </div>
         </div>
