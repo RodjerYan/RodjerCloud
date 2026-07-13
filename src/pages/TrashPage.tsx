@@ -163,8 +163,8 @@ export default function TrashPage() {
           <input placeholder="Поиск в корзине…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="mf-view-toggle">
-          <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><Grid size={16} /></button>
-          <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><ListIcon size={16} /></button>
+          <button type="button" className={view === 'grid' ? 'active' : ''} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('grid'); }}><Grid size={16} /></button>
+          <button type="button" className={view === 'list' ? 'active' : ''} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setView('list'); }}><ListIcon size={16} /></button>
         </div>
       </div>
 

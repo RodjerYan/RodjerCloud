@@ -6,7 +6,7 @@
 .mf-search input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: var(--text-base); }
 .mf-toolbar select { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 9px 12px;
   border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer; }
-.mf-view-toggle { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; }
+.mf-view-toggle { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; -webkit-app-region: no-drag; }
 .mf-view-toggle button { background: transparent; border: none; color: var(--text-dim); padding: 7px 10px; cursor: pointer; border-radius: var(--radius-sm); }
 .mf-view-toggle button.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
 .mf-bulkbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px;
