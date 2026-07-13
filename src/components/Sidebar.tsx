@@ -29,7 +29,7 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
         ) : (
           <img className="v2-sidebar-avatar" src={avatarSrc} alt="" />
         )) : (
-          <div className="v2-sidebar-avatar v2-sidebar-avatar-fallback">
+          <div className="v2-sidebar-avatar v2-sidebar-avatar-fallback" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Cloud size={20} />
           </div>
         )}

@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2 } from 'lucide-react'
+import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock } from 'lucide-react'
 import iconUrl from '../assets/icon.png'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
   const [concurrency, setConcurrency] = useState(2)
   const [autoRename, setAutoRename] = useState(false)
+  const [turboMode, setTurboMode] = useState(false)
   const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
   const [version, setVersion] = useState("")
+  const [showPwdPrompt, setShowPwdPrompt] = useState(false)
+  const [checkingOldPwd, setCheckingOldPwd] = useState(false)
+  const [pwdError, setPwdError] = useState('')
 
   const [updateModal, setUpdateModal] = useState<null | {
     hasUpdate: boolean
@@ -32,6 +36,8 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       if (a.success) setAskDownloadPath(a.data || false)
       const c = await window.electronAPI.storage.getUploadConcurrency()
       if (c.success) setConcurrency(c.data || 2)
+      const tm = await window.electronAPI.storage.getTurboMode?.()
+      if (tm?.success) setTurboMode(tm.data || false)
       setAutoRename(localStorage.getItem('v2.autoRename') === '1')
       const v = await window.electronAPI.app.getVersion()
       if (v.success && v.data) setVersion(v.data)
@@ -134,6 +140,38 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
               <div className="settings-desc">Количество файлов, загружаемых параллельно (до 5)</div>
             </div>
             <input type="number" min={1} max={5} value={concurrency} onChange={e => onConcurrency(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))} style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
+          </div>
+          <div className="settings-divider" />
+          <label className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">🚀 Турбо-режим загрузки</div>
+              <div className="settings-desc">Агрессивное многопоточное разделение (до 16 потоков). Увеличивает скорость, но сильно нагружает сеть.</div>
+            </div>
+            <div className="v3-switch">
+              <input type="checkbox" checked={turboMode} onChange={e => { setTurboMode(e.target.checked); window.electronAPI.storage.setTurboMode?.(e.target.checked) }} />
+              <div className="v3-switch-knob"></div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-header">
+          <Lock size={18} className="settings-header-icon" />
+          <h2>Безопасность</h2>
+        </div>
+        <div className="settings-body">
+          <div className="settings-row">
+            <div className="settings-info">
+              <div className="settings-title">Мастер-пароль Сейфа</div>
+              <div className="settings-desc">Сменить пароль для сквозного шифрования (Внимание: старые файлы не откроются с новым паролем)</div>
+            </div>
+            <button className="v3-btn" onClick={async () => {
+              const has = await window.electronAPI.vault.hasPassword()
+              setCheckingOldPwd(has)
+              setPwdError('')
+              setShowPwdPrompt(true)
+            }}>Изменить</button>
           </div>
         </div>
       </div>
@@ -278,6 +316,44 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
           </div>
         </div>,
         document.body
+      )}
+
+      {showPwdPrompt && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="v3-card" style={{ padding: 24, width: 400, maxWidth: '90%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h3 style={{ margin: 0 }}>{checkingOldPwd ? 'Подтверждение пароля' : 'Изменение мастер-пароля'}</h3>
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)' }}>
+              {checkingOldPwd 
+                ? 'Введите ваш текущий мастер-пароль для продолжения.'
+                : 'Внимание: Изменение пароля сделает старые зашифрованные файлы недоступными!'}
+            </p>
+            <input type="password" id="vault-pwd" placeholder={checkingOldPwd ? 'Текущий мастер-пароль' : 'Новый мастер-пароль'} style={{ padding: '12px 16px', borderRadius: 8, border: `1px solid ${pwdError ? '#e74c3c' : 'var(--border)'}`, background: 'var(--bg-card)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', fontSize: 16 }} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') document.getElementById('vault-btn-ok')?.click() }} onChange={() => setPwdError('')} />
+            {pwdError && <div style={{ color: '#e74c3c', fontSize: 13, marginTop: -8 }}>{pwdError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="v3-btn ghost" onClick={() => setShowPwdPrompt(false)}>Отмена</button>
+              <button id="vault-btn-ok" className="v3-btn primary" onClick={async () => {
+                const input = document.getElementById('vault-pwd') as HTMLInputElement
+                const pwd = input.value
+                if (!pwd) return
+                if (checkingOldPwd) {
+                  const ok = await window.electronAPI.vault.checkPassword(pwd)
+                  if (!ok) {
+                    setPwdError('Неверный пароль!')
+                    return
+                  }
+                  setCheckingOldPwd(false)
+                  setPwdError('')
+                  input.value = ''
+                  input.focus()
+                } else {
+                  await window.electronAPI.vault.setPassword(pwd)
+                  setShowPwdPrompt(false)
+                  show('Пароль успешно изменен')
+                }
+              }}>{checkingOldPwd ? 'Далее' : 'Сохранить'}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && <div className="mf-toast">{toast}</div>}

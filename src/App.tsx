@@ -12,6 +12,7 @@ import DashboardHome from "./pages/DashboardHome"
 import MyFilesPage from "./pages/MyFilesPage"
 import UploadPage from "./pages/UploadPage"
 import AutoSyncPage from "./pages/AutoSyncPage"
+import { UploadQueueProvider } from "./lib/UploadQueueContext"
 
 import SettingsPage from "./pages/SettingsPage"
 import TrashPage from "./pages/TrashPage"
@@ -150,44 +151,46 @@ function App() {
       <div className="v2-shell">
         <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
-        <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
-          {updateData && dlStatus !== 'done' && (
-            <div className={`update-banner ${dlStatus === 'idle' ? 'clickable' : ''}`} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
-              <div className="update-banner-header">
-                <span>Обновление v{updateData.version}</span>
-                {dlStatus === 'idle' && <span className="update-banner-action">Скачать</span>}
-                {dlStatus === 'downloading' && <span className="update-banner-progress-text">Загрузка... {dlProgress}%</span>}
-                <span className="update-banner-close"
-                  onClick={e => { e.stopPropagation(); setUpdateData(null) }}>×</span>
-              </div>
-              {dlStatus === 'downloading' && (
-                <div className="update-banner-bar-wrap">
-                  <div className="update-banner-bar" style={{ width: dlProgress + '%' }} />
+          <UploadQueueProvider>
+            <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
+              {updateData && dlStatus !== 'done' && (
+                <div className={`update-banner ${dlStatus === 'idle' ? 'clickable' : ''}`} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
+                  <div className="update-banner-header">
+                    <span>Обновление v{updateData.version}</span>
+                    {dlStatus === 'idle' && <span className="update-banner-action">Скачать</span>}
+                    {dlStatus === 'downloading' && <span className="update-banner-progress-text">Загрузка... {dlProgress}%</span>}
+                    <span className="update-banner-close"
+                      onClick={e => { e.stopPropagation(); setUpdateData(null) }}>×</span>
+                  </div>
+                  {dlStatus === 'downloading' && (
+                    <div className="update-banner-bar-wrap">
+                      <div className="update-banner-bar" style={{ width: dlProgress + '%' }} />
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-          <AggregateProgress />
-          <Routes>
-            <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
-            <Route path="/files" element={<MyFilesPage />} />
-            <Route path="/upload" element={<UploadPage />} />
-            <Route path="/autosync" element={<AutoSyncPage />} />
+              <AggregateProgress />
+              <Routes>
+                <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
+                <Route path="/files" element={<MyFilesPage />} />
+                <Route path="/upload" element={<UploadPage />} />
+                <Route path="/autosync" element={<AutoSyncPage />} />
 
-            <Route path="/trash" element={<TrashPage />} />
-            <Route path="/favorites" element={<FavoritesPage />} />
-            <Route path="/shared" element={<SharedPage />} />
-            <Route path="/activity" element={<ActivityPage />} />
-            <Route path="/tags" element={<TagsPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/calendar" element={<CalendarPage />} />
-            <Route path="/albums" element={<AlbumsPage />} />
-            <Route path="/audioplayer" element={<AudioPlayerPage />} />
-            <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-        <AudioPlayerBar />
+                <Route path="/trash" element={<TrashPage />} />
+                <Route path="/favorites" element={<FavoritesPage />} />
+                <Route path="/shared" element={<SharedPage />} />
+                <Route path="/activity" element={<ActivityPage />} />
+                <Route path="/tags" element={<TagsPage />} />
+                <Route path="/search" element={<SearchPage />} />
+                <Route path="/calendar" element={<CalendarPage />} />
+                <Route path="/albums" element={<AlbumsPage />} />
+                <Route path="/audioplayer" element={<AudioPlayerPage />} />
+                <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </main>
+            <AudioPlayerBar />
+          </UploadQueueProvider>
         </AudioPlayerProvider>
         <CommandPalette />
         <GlobalDialogs />

@@ -11,12 +11,15 @@ interface UploadFileItem {
   status: 'pending' | 'uploading' | 'completed' | 'error'
   progress: number
   error?: string
+  encrypt?: boolean
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [isDragging, setIsDragging] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<UploadFileItem[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const [encryptNext, setEncryptNext] = useState(false)
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
 
@@ -82,6 +85,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         path: resolvePath(file),
         status: 'pending' as const,
         progress: 0,
+        encrypt: encryptNext,
       }
     })
     setUploadQueue(prev => [...prev, ...newItems])
@@ -137,7 +141,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       }
 
       try {
-        const result = await api.telegram.uploadFile(filePath)
+        const result = await api.telegram.uploadFile(filePath, undefined, item.encrypt)
         if (result.success) {
           setUploadQueue(prev => {
             const updated = [...prev]
@@ -197,9 +201,27 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
 
   return (
     <div className="upload-section glass-card">
-      <div className="upload-header">
-        <h2 className="section-title">⬆️ Загрузка файлов</h2>
-        <p className="upload-subtitle">Перетащите файлы сюда или нажмите для выбора (до 2GB каждый)</p>
+      <div className="upload-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 className="section-title">⬆️ Загрузка файлов</h2>
+          <p className="upload-subtitle">Перетащите файлы сюда или нажмите для выбора (до 2GB каждый)</p>
+        </div>
+        <label className="encrypt-toggle" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={encryptNext} onChange={async (e) => {
+            const isChecked = e.target.checked
+            if (isChecked) {
+              const api: any = (window as any).electronAPI
+              const hasPwd = await api.vault.hasPassword()
+              const isUnlocked = await api.vault.isUnlocked()
+              if (!hasPwd || !isUnlocked) {
+                setShowPasswordPrompt(true)
+                return
+              }
+            }
+            setEncryptNext(isChecked)
+          }} />
+          <span>🔒 Зашифровать</span>
+        </label>
       </div>
 
       <div
@@ -249,7 +271,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                       {item.status === 'completed' && '✅'}
                       {item.status === 'error' && '❌'}
                       {item.status === 'uploading' && '⏳'}
-                      {item.status === 'pending' && '📄'}
+                      {item.status === 'pending' && (item.encrypt ? '🔒' : '📄')}
                     </div>
                     <div className="file-details">
                       <div className="file-name" data-testid={`queue-file-name-${index}`}>
@@ -314,6 +336,27 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           </div>
         )}
       </div>
+
+      {showPasswordPrompt && (
+        <div className="dialog-overlay" onClick={(e) => { e.stopPropagation(); setShowPasswordPrompt(false) }}>
+          <div className="dialog-content glass-card" onClick={e => e.stopPropagation()}>
+            <h3>Настройка Сейфа</h3>
+            <p>Придумайте мастер-пароль. Он будет надежно сохранен в вашей системе.</p>
+            <input type="password" id="vault-pwd" placeholder="Мастер-пароль" className="glass-input" style={{ width: '100%', marginBottom: '16px' }} />
+            <div className="dialog-actions">
+              <button className="glass-button" onClick={() => setShowPasswordPrompt(false)}>Отмена</button>
+              <button className="glass-button glass-button-primary" onClick={async () => {
+                const pwd = (document.getElementById('vault-pwd') as HTMLInputElement).value
+                if (!pwd) return
+                const api: any = (window as any).electronAPI
+                await api.vault.setPassword(pwd)
+                setShowPasswordPrompt(false)
+                setEncryptNext(true)
+              }}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

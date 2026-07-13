@@ -592,7 +592,7 @@ export default function MyFilesPage() {
                   {galleryFiles.map(f => (
                     <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
-                      <td className="ellip" title={f.fileName}>{f.fileName}</td>
+                      <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
                       <td>{fmtSize(f.fileSize)}</td>
                       <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                       <td>
@@ -633,7 +633,7 @@ export default function MyFilesPage() {
                                     isVideo ? '🎬' : '🖼️'
                                   )}
                                 </div>
-                                <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+                                <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
                                 <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
                                 <div className="mf-gm-actions">
                                   <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
@@ -684,7 +684,7 @@ export default function MyFilesPage() {
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
-                            <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                            <div className="mf-card-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
                               <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
@@ -708,7 +708,7 @@ export default function MyFilesPage() {
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
-                                  <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
+                                  <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.isEncrypted && '🔒 '}{f.fileName}</span></td>
                               <td>{fmtSize(f.fileSize)}</td>
                               <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                               <td>

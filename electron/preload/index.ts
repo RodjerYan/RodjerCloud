@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyCode: (code: string) => ipcRenderer.invoke('telegram:verify-code', code),
     verify2FA: (password: string) => ipcRenderer.invoke('telegram:verify-2fa', password),
     reconnect: () => ipcRenderer.invoke('telegram:reconnect'),
-    uploadFile: (filePath: string, id?: string) => ipcRenderer.invoke('telegram:upload-file', filePath, id),
+    uploadFile: (filePath: string, id?: string, encrypt?: boolean) => ipcRenderer.invoke('telegram:upload-file', filePath, id, encrypt),
     onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('telegram:upload-progress', listener)
@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setUploadConcurrency: (n: number) => ipcRenderer.invoke('storage:set-upload-concurrency', n),
     getAskDownloadPath: () => ipcRenderer.invoke('storage:get-ask-download-path'),
     setAskDownloadPath: (val: boolean) => ipcRenderer.invoke('storage:set-ask-download-path', val),
+    getTurboMode: () => ipcRenderer.invoke('storage:get-turbo-mode'),
+    setTurboMode: (val: boolean) => ipcRenderer.invoke('storage:set-turbo-mode', val),
   },
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }
@@ -121,6 +123,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getBotToken: () => ipcRenderer.invoke('share:get-bot-token'),
     ensureBot: () => ipcRenderer.invoke('share:ensure-bot'),
     downloadFile: (url: string, fileName: string) => ipcRenderer.invoke('share:download-file', url, fileName),
+  },
+  vault: {
+    hasPassword: () => ipcRenderer.invoke('vault:has-password'),
+    isUnlocked: () => ipcRenderer.invoke('vault:is-unlocked'),
+    setPassword: (password: string) => ipcRenderer.invoke('vault:set-password', password),
+    checkPassword: (password: string) => ipcRenderer.invoke('vault:check-password', password),
   },
   state: {
     sync: (jsonStr: string) => ipcRenderer.invoke('state:sync', jsonStr),

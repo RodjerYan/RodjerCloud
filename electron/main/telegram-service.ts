@@ -1,10 +1,12 @@
 import { TelegramClient } from 'telegram'
+import { getFileHash, computeFileHash } from './storage-service'
+import { vaultService } from './vault-service'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
 import * as fs from 'fs'
 import * as crypto from 'crypto'
 import * as path from 'path'
-import { app } from 'electron'
+import { app, nativeImage } from 'electron'
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
@@ -280,25 +282,91 @@ export class TelegramService {
     return await this.createPrivateChannel()
   }
 
-  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void) {
+  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
-    const fileStats = fs.statSync(filePath)
+    let uploadPath = filePath
+    let ivHex = ''
+    let isTemp = false
+
+    if (encrypt) {
+      const encrypted = await vaultService.encryptFile(filePath)
+      uploadPath = encrypted.tempPath
+      ivHex = encrypted.ivHex
+      isTemp = true
+    }
+
+    const fileStats = fs.statSync(uploadPath)
+    const originalStats = fs.statSync(filePath)
     const fileName = path.basename(filePath)
     const sizeBytes = fileStats.size
+    const originalSizeBytes = originalStats.size
     const TWO_GB = 2 * 1024 * 1024 * 1024
 
     if (sizeBytes > TWO_GB) {
+      if (isTemp) fs.unlinkSync(uploadPath).catch(() => {})
       throw new Error('File splitting not implemented yet. Files must be under 2GB.')
     }
 
     let lastSent = 0
 
+    let captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
+    if (encrypt) {
+      captionStr += `\n#vault ${ivHex}`
+    }
+
+    let turboMode = false
+    try {
+      const p = path.join(app.getPath('userData'), 'rodjer-preferences.json')
+      if (fs.existsSync(p)) {
+        const prefs = JSON.parse(fs.readFileSync(p, 'utf8'))
+        turboMode = !!prefs.turboMode
+      }
+    } catch {}
+
+    let workersCount = 4
+    if (turboMode) {
+      if (sizeBytes < 10 * 1024 * 1024) workersCount = 4
+      else if (sizeBytes < 100 * 1024 * 1024) workersCount = 8
+      else workersCount = 16
+    } else {
+      if (sizeBytes > 100 * 1024 * 1024) workersCount = 4
+      else workersCount = 2
+    }
+
+    // Usually gramjs allows setting maxChunkSize but uploadFile defaults it correctly.
+    // We just pass workers.
+
+    let thumbBuffer: Buffer | undefined = undefined
+    if (!isTemp) {
+      const ext = path.extname(filePath).toLowerCase()
+      if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
+        try {
+          const tempDir = app.getPath('temp')
+          require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
+          const baseName = path.basename(filePath)
+          const pngPath = path.join(tempDir, baseName + '.png')
+          if (fs.existsSync(pngPath)) {
+            const pngBuf = fs.readFileSync(pngPath)
+            const img = nativeImage.createFromBuffer(pngBuf)
+            if (!img.isEmpty()) {
+              thumbBuffer = img.toJPEG(80)
+              ;(thumbBuffer as any).name = 'thumb.jpg'
+            }
+            fs.unlinkSync(pngPath)
+          }
+        } catch (e) {
+          console.error('qlmanage thumb failed:', e)
+        }
+      }
+    }
+
     const result = await this.client.sendFile(this.channelId as any, {
-      file: filePath,
-      caption: `${fileName}\nSize: ${this.formatFileSize(sizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(fileStats.birthtimeMs || fileStats.mtimeMs).toISOString()}`,
+      file: uploadPath,
+      caption: captionStr,
       forceDocument: true,
-      workers: 4,
+      workers: workersCount,
+      thumb: thumbBuffer,
       progressCallback: (progress: any) => {
         try {
           const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
@@ -311,18 +379,23 @@ export class TelegramService {
       },
     } as any)
 
-    const fileTime = fileStats.birthtimeMs && fileStats.birthtimeMs > 0
-      ? Math.floor(fileStats.birthtimeMs / 1000)
-      : Math.floor(fileStats.mtimeMs / 1000)
+    if (isTemp) {
+      fs.unlink(uploadPath, () => {})
+    }
+
+    const fileTime = originalStats.birthtimeMs && originalStats.birthtimeMs > 0
+      ? Math.floor(originalStats.birthtimeMs / 1000)
+      : Math.floor(originalStats.mtimeMs / 1000)
     const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
     let fileHash = ''
     try { fileHash = await computeFileHash(filePath) } catch {}
     return {
       messageId: msgId,
       fileName,
-      fileSize: sizeBytes,
+      fileSize: originalSizeBytes,
       uploadedAt: fileTime,
       hash: fileHash,
+      isEncrypted: !!encrypt,
     }
   }
 
@@ -383,6 +456,7 @@ export class TelegramService {
       .map((m: any) => {
         const caption = m.message || ''
         const createdMatch = caption.match(/Created:\s*(.+)/)
+        const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
         const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
         return {
           messageId: this.msgId(m),
@@ -393,6 +467,7 @@ export class TelegramService {
           originalDate: originalDate || undefined,
           caption,
           chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+          isEncrypted: !!vaultMatch,
         }
       })
   }
@@ -456,6 +531,19 @@ export class TelegramService {
     )
   }
 
+  private async performDownload(message: any, targetPath: string) {
+    const caption = message.message || ''
+    const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
+    if (vaultMatch) {
+      const encTemp = targetPath + '.enc'
+      await this.client.downloadMedia(message, { outputFile: encTemp } as any)
+      await vaultService.decryptFile(encTemp, targetPath, vaultMatch[1])
+      try { fs.unlinkSync(encTemp) } catch {}
+    } else {
+      await this.client.downloadMedia(message, { outputFile: targetPath } as any)
+    }
+  }
+
   async downloadFile(messageId: number, fileName: string) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
@@ -464,7 +552,7 @@ export class TelegramService {
     if (!message.file) throw new Error('No file attached to message')
     const downloadsPath = app.getPath('downloads')
     const downloadPath = path.join(downloadsPath, fileName)
-    await this.client.downloadMedia(message, { outputFile: downloadPath } as any)
+    await this.performDownload(message, downloadPath)
     return { filePath: downloadPath, fileName }
   }
 
@@ -474,7 +562,7 @@ export class TelegramService {
     if (!messages || messages.length === 0) throw new Error('Message not found')
     const message: any = messages[0]
     if (!message.file) throw new Error('No file attached to message')
-    await this.client.downloadMedia(message, { outputFile: filePath } as any)
+    await this.performDownload(message, filePath)
   }
 
   async downloadMediaToTemp(messageId: number): Promise<string> {
@@ -486,7 +574,7 @@ export class TelegramService {
     const tmpDir = app.getPath('temp')
     const tmpFile = path.join(tmpDir, `_hash_${messageId}`)
     if (fs.existsSync(tmpFile)) fs.rmSync(tmpFile, { force: true })
-    await this.client.downloadMedia(message, { outputFile: tmpFile } as any)
+    await this.performDownload(message, tmpFile)
     return tmpFile
   }
 

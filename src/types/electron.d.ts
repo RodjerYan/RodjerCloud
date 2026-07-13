@@ -67,6 +67,7 @@ declare global {
         read: (name?: string) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       preview: {
+
         open: (files: any[], idx: number) => Promise<{ success: boolean; error?: string }>
         getSession: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
         navigate: (sessionId: string, dir: number) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
@@ -76,6 +77,8 @@ declare global {
       storage: {
         getAskDownloadPath: () => Promise<{ success: boolean; data?: boolean; error?: string }>
         setAskDownloadPath: (val: boolean) => Promise<{ success: boolean; error?: string }>
+        getTurboMode?: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+        setTurboMode?: (val: boolean) => Promise<{ success: boolean; error?: string }>
       }
       share: {
         generateLink: (messageId: number, channelId: string, originalFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
@@ -90,6 +93,12 @@ declare global {
       }
       file: {
         computeHash: (messageId: number) => Promise<{ success: boolean; data?: string; error?: string }>
+      }
+      vault: {
+        hasPassword: () => Promise<boolean>
+        isUnlocked: () => Promise<boolean>
+        setPassword: (password: string) => Promise<boolean>
+        checkPassword: (password: string) => Promise<boolean>
       }
       bot: {
         getHashDb: () => Promise<{ success: boolean; data?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; error?: string }>

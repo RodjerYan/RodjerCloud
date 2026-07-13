@@ -13,7 +13,8 @@ import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
-
+import { vaultService } from './vault-service'
+import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 app.commandLine.appendSwitch('disable-web-security')
@@ -133,6 +134,7 @@ app.whenReady().then(async () => {
   if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
+  startVideoStreamServer(telegramService)
 
   // Background duplicate scan at startup
   setTimeout(() => {
@@ -190,6 +192,23 @@ ipcMain.handle('telegram:check-session', async () => {
     const session = await storageService.getSession()
     return { success: true, hasSession: !!session }
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('vault:has-password', async () => {
+  return vaultService.hasPassword()
+})
+
+ipcMain.handle('vault:is-unlocked', async () => {
+  return vaultService.loadPassword()
+})
+
+ipcMain.handle('vault:set-password', async (_, password: string) => {
+  vaultService.setPassword(password)
+  return true
+})
+
+ipcMain.handle('vault:check-password', async (_, password: string) => {
+  return vaultService.checkPassword(password)
 })
 
 ipcMain.handle('telegram:login', async (_, phoneNumber: string) => {
@@ -268,7 +287,7 @@ ipcMain.handle('telegram:get-user-info', async () => {
 })
 
 // ===== Upload queue =====
-interface UploadJob { id: string; filePath: string; event: any }
+type UploadJob = { id: string; filePath: string; encrypt?: boolean; event: { sender: { send: (c: string, d: any) => void } } }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
 async function getConcurrency(): Promise<number> {
@@ -298,7 +317,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     sendProgress(0, 1)
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
       sendProgress(sent, total)
-    })
+    }, job.encrypt)
     sendProgress(result.fileSize, result.fileSize)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
@@ -306,11 +325,11 @@ async function runUpload(job: UploadJob): Promise<void> {
   }
 }
 
-ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string) => {
+ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string, encrypt?: boolean) => {
   try {
     const jobId = id || Math.random().toString(36).slice(2)
     return await new Promise((resolve) => {
-      uploadQueue.push({ id: jobId, filePath, event: {
+      uploadQueue.push({ id: jobId, filePath, encrypt, event: {
         sender: {
           send: (channel: string, data: any) => {
             event.sender.send(channel, data)
@@ -626,6 +645,16 @@ ipcMain.handle('storage:get-upload-concurrency', async () => {
 
 ipcMain.handle('storage:set-upload-concurrency', async (_, n: number) => {
   try { const prefs = await readPrefs(); prefs.uploadConcurrency = Math.min(5, Math.max(1, n)); await writePrefs(prefs); return { success: true } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('storage:get-turbo-mode', async () => {
+  try { const prefs = await readPrefs(); return { success: true, data: prefs.turboMode || false } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('storage:set-turbo-mode', async (_, val: boolean) => {
+  try { const prefs = await readPrefs(); prefs.turboMode = val; await writePrefs(prefs); return { success: true } }
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -957,7 +986,7 @@ function renderMedia(files, idx, src) {
   if (!files || !files[idx]) return
   const f = files[idx]
   const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
-  var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  var ld = document.getElementById('loader'); if (ld && !isVideo) ld.style.display = 'none'
   var err = document.getElementById('error')
   var el = document.getElementById('media')
   if (src) {
@@ -980,6 +1009,9 @@ function renderMedia(files, idx, src) {
       video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
       video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
       video.onclick = function(e) { e.stopPropagation(); togglePlay() }
+      video.onwaiting = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block' }
+      video.onplaying = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' }
+      video.oncanplay = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' }
     }
   } else {
     document.getElementById('bar').style.display = 'none'; video = null
@@ -997,6 +1029,7 @@ function cycleSpeed() { var a=[0.5,0.75,1,1.25,1.5,2]; var i=a.indexOf(speed); s
 function toggleFs() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen() }
 function nav(dir) {
   document.getElementById('media').innerHTML = ''; video = null
+  var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block'
   try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx, r.data.src) }) } catch(e) {}
 }
 document.addEventListener('keydown', e => {
@@ -1043,13 +1076,20 @@ document.addEventListener('mousemove', function() {
     pw.loadFile(tmpFile)
     pw.show()
 
-    // start download in background - window.load IPC will wait for it
-    if (!fs.existsSync(cachedPath)) {
-      telegramService.downloadMediaToPath(f.messageId, cachedPath).then(() => {
-        ensurePreviewCache(cachedPath)
-      }).catch(e => console.error('download failed', e))
+    const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
+    const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
+
+    if (isVideo && !f.isEncrypted) {
+      // Skip download for unencrypted video, we will stream it
     } else {
-      ensurePreviewCache(cachedPath)
+      // start download in background - window.load IPC will wait for it
+      if (!fs.existsSync(cachedPath)) {
+        telegramService.downloadMediaToPath(f.messageId, cachedPath).then(() => {
+          ensurePreviewCache(cachedPath)
+        }).catch(e => console.error('download failed', e))
+      } else {
+        ensurePreviewCache(cachedPath)
+      }
     }
 
     return { success: true }
@@ -1067,22 +1107,26 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const cachedPath = pathMod.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
     
     
-    // wait for the file to exist (poll up to 30s)
-    for (let i = 0; i < 60; i++) {
-      if (fs.existsSync(cachedPath)) break
-      await new Promise(r => setTimeout(r, 500))
-    }
-    const exists = fs.existsSync(cachedPath)
-    
     let src = ''
-    if (exists) {
-      const ext2 = pathMod.extname(cachedPath).toLowerCase()
-      const isVid = ['mp4','mov','mkv','avi','webm'].includes(ext2)
-      if (isVid) {
-        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
-      } else {
-        const buf = fs.readFileSync(cachedPath)
-        src = `data:image/jpeg;base64,${buf.toString('base64')}`
+    if (isVideo && !f.isEncrypted) {
+      src = `http://127.0.0.1:14300/stream/${f.messageId}`
+    } else {
+      // wait for the file to exist (poll up to 30s)
+      for (let i = 0; i < 60; i++) {
+        if (fs.existsSync(cachedPath)) break
+        await new Promise(r => setTimeout(r, 500))
+      }
+      const exists = fs.existsSync(cachedPath)
+      
+      if (exists) {
+        const ext2 = pathMod.extname(cachedPath).toLowerCase()
+        const isVid = ['mp4','mov','mkv','avi','webm'].includes(ext2)
+        if (isVid) {
+          src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
+        } else {
+          const buf = fs.readFileSync(cachedPath)
+          src = `data:image/jpeg;base64,${buf.toString('base64')}`
+        }
       }
     }
     return { success: true, data: { files: s.files, idx: s.idx, src } }

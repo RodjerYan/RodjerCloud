@@ -8,6 +8,7 @@ interface File {
   mimeType: string
   uploadedAt: number
   caption: string
+  isEncrypted?: boolean
 }
 
 interface FileListProps {
@@ -51,11 +52,11 @@ const FileList: React.FC<FileListProps> = ({ files, loading, onDownload, onDelet
           <div key={file.messageId} className="file-item" data-testid="file-list-item">
             <div className="file-col col-name">
               <div className="file-icon-wrapper">
-                <span className="file-icon">{getFileIcon(file.mimeType)}</span>
+                <span className="file-icon">{file.isEncrypted ? '🔒' : getFileIcon(file.mimeType)}</span>
               </div>
               <div className="file-name-wrapper">
                 <div className="file-name" data-testid="file-name">{file.fileName}</div>
-                <div className="file-type">{getFileType(file.mimeType)}</div>
+                <div className="file-type">{file.isEncrypted ? 'ENCRYPTED' : getFileType(file.mimeType)}</div>
               </div>
             </div>
 

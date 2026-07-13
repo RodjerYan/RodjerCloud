@@ -1,18 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive } from 'lucide-react'
+import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive, Lock, Unlock } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
-
-interface QueueItem {
-  id: string
-  filePath: string
-  fileName: string
-  fileSize: number
-  status: 'waiting' | 'uploading' | 'done' | 'failed'
-  percent: number
-  error?: string
-}
+import { useUploadQueue } from '../lib/UploadQueueContext'
 
 const TG_LIMIT = 2 * 1024 * 1024 * 1024
 
@@ -24,11 +15,11 @@ const ALL_STEPS = [
 
 export default function UploadPage() {
   const location = useLocation() as any
-  const [queue, setQueue] = useState<QueueItem[]>([])
+  const { queue, archiveInfo, archivePhases, addFiles, removeItem, clearDone, pickFolder } = useUploadQueue()
   const [dragOver, setDragOver] = useState(false)
+  const [encryptNext, setEncryptNext] = useState(localStorage.getItem('v3.encryptNext') === '1')
+  const [showPwdPrompt, setShowPwdPrompt] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
-  const queueRef = useRef<QueueItem[]>([])
-  queueRef.current = queue
 
   useEffect(() => {
     (async () => {
@@ -38,91 +29,14 @@ export default function UploadPage() {
   }, [])
 
   useEffect(() => {
-    const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
-      if (!d.id) return
-      setQueue(prev => prev.map(q => q.id === d.id ? { ...q, percent: d.percent, status: 'uploading' } : q))
-    })
-    return off
-  }, [])
-
-  useEffect(() => {
     const initial = location.state?.initialFiles
-    if (initial && Array.isArray(initial)) addFiles(initial)
+    if (initial && Array.isArray(initial)) addFiles(initial, encryptNext)
   }, [])
-
-  const addFiles = (files: Array<{ filePath: string; fileName: string; fileSize: number }>) => {
-    const items: QueueItem[] = files.map(f => ({
-      id: Math.random().toString(36).slice(2),
-      filePath: f.filePath, fileName: f.fileName, fileSize: f.fileSize,
-      status: 'waiting', percent: 0
-    }))
-    setQueue(prev => [...prev, ...items])
-    setTimeout(() => processQueue(), 50)
-  }
-
-  const processQueue = async () => {
-    const items = queueRef.current.filter(q => q.status === 'waiting')
-    for (const it of items) {
-      if (it.fileSize > TG_LIMIT) {
-        setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'failed', error: 'Exceeds 2GB' } : q))
-        continue
-      }
-      setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'uploading' } : q))
-      const res = await window.electronAPI.telegram.uploadFile(it.filePath, it.id)
-      setQueue(prev => prev.map(q => q.id === it.id
-        ? { ...q, status: res.success ? 'done' : 'failed', percent: res.success ? 100 : q.percent, error: res.success ? undefined : res.error }
-        : q))
-    }
-  }
 
   const pickFiles = async () => {
     const r = await window.electronAPI.dialog.pickMultipleFiles()
-    if (r.success) addFiles(r.data)
+    if (r.success) addFiles(r.data, encryptNext)
   }
-
-  const [archiveInfo, setArchiveInfo] = useState<{ percent: number; phase: string; sent?: number; total?: number } | null>(null)
-  const [archivePhases, setArchivePhases] = useState<Set<string>>(new Set())
-  const archiveStart = useRef(0)
-  const uploadStart = useRef(0)
-
-  const pickFolder = async () => {
-    const r = await window.electronAPI.dialog.pickFolder()
-    if (!r.success || !r.data?.folderPath) return
-    archiveStart.current = Date.now()
-    uploadStart.current = 0
-    setArchiveInfo({ percent: 0, phase: 'compressing' })
-    setArchivePhases(new Set(['compressing']))
-    await new Promise(r => setTimeout(r, 0))
-
-    const off = window.electronAPI.folders.onArchiveProgress((d) => {
-      setArchiveInfo(prev => {
-        const next = { percent: d.percent, phase: d.phase }
-        if (d.sent !== undefined) { (next as any).sent = d.sent; (next as any).total = d.total }
-        if (d.phase === 'uploading' && prev?.phase !== 'uploading') uploadStart.current = Date.now()
-        return next
-      })
-      setArchivePhases(prev => new Set(prev).add(d.phase))
-    })
-    let res: any
-    try { res = await window.electronAPI.folders.archiveAndUpload({ folderPath: r.data.folderPath }) }
-    catch (e) { res = { success: false, error: String(e) } }
-    off()
-    setArchiveInfo(null)
-    if (res?.success && res.data) {
-      const archiveName = res.data.archiveName || (r.data.folderPath.split('/').pop() || 'folder') + '.zip'
-      setQueue(prev => [...prev, {
-        id: Math.random().toString(36).slice(2),
-        filePath: '',
-        fileName: archiveName,
-        fileSize: res.data.fileSize || 0,
-        status: 'done' as const,
-        percent: 100,
-      }])
-    }
-  }
-
-  const removeItem = (id: string) => setQueue(prev => prev.filter(q => q.id !== id))
-  const clearDone = () => setQueue(prev => prev.filter(q => q.status !== 'done'))
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
@@ -131,7 +45,7 @@ export default function UploadPage() {
       const p = window.electronAPI.getPathForFile(file)
       if (p) dropped.push({ filePath: p, fileName: file.name, fileSize: file.size })
     }
-    if (dropped.length) addFiles(dropped)
+    if (dropped.length) addFiles(dropped, encryptNext)
   }
 
   const doneCount = queue.filter(q => q.status === 'done').length
@@ -147,7 +61,7 @@ export default function UploadPage() {
     const currentIdx = ALL_STEPS.findIndex(s => s.key === archiveInfo.phase)
     const visibleSteps = ALL_STEPS.slice(Math.min(currentIdx, 1))
     const now = Date.now()
-    const phaseStart = archiveInfo.phase === 'uploading' && uploadStart.current ? uploadStart.current : archiveStart.current
+    const phaseStart = archiveInfo.phase === 'uploading' ? (archiveInfo as any).uploadStartTime || Date.now() : (archiveInfo as any).archiveStartTime || Date.now()
     const elapsedSec = Math.floor((now - phaseStart) / 1000)
     const etaSec = (archiveInfo.sent !== undefined && archiveInfo.total && elapsedSec > 0)
       ? Math.round((archiveInfo.total - archiveInfo.sent) / (archiveInfo.sent / elapsedSec))
@@ -210,7 +124,63 @@ export default function UploadPage() {
         <p>или используйте кнопки ниже</p>
         <div className="up-actions">
           <button className="v3-btn primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
-          <button className="v3-btn" onClick={pickFolder}><FolderOpen size={16} /> Выбрать папку</button>
+          <button className="v3-btn" onClick={() => pickFolder(encryptNext)}><FolderOpen size={16} /> Выбрать папку</button>
+        </div>
+        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
+          <div 
+            onClick={async (e) => {
+              e.stopPropagation()
+              const checked = !encryptNext
+              if (checked) {
+                const has = await window.electronAPI.vault.hasPassword()
+                const unl = await window.electronAPI.vault.isUnlocked()
+                if (!has || !unl) return setShowPwdPrompt(true)
+              }
+              setEncryptNext(checked)
+              localStorage.setItem('v3.encryptNext', checked ? '1' : '0')
+            }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer',
+              padding: '14px 24px', borderRadius: 20,
+              background: encryptNext ? 'linear-gradient(135deg, rgba(46,204,113,0.08), rgba(39,174,96,0.15))' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${encryptNext ? 'rgba(46,204,113,0.3)' : 'rgba(255,255,255,0.05)'}`,
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: encryptNext ? '0 8px 32px rgba(46,204,113,0.15), inset 0 1px 0 rgba(255,255,255,0.1)' : 'inset 0 1px 0 rgba(255,255,255,0.02)',
+              backdropFilter: 'blur(10px)'
+            }}
+          >
+            <div style={{
+              width: 44, height: 24, borderRadius: 12, position: 'relative',
+              background: encryptNext ? '#2ecc71' : 'rgba(255,255,255,0.1)',
+              transition: 'background 0.3s',
+            }}>
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: '#fff',
+                position: 'absolute', top: 2, left: encryptNext ? 22 : 2,
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+              }} />
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 15, fontWeight: 600, color: encryptNext ? '#2ecc71' : 'var(--text-main)', transition: 'color 0.3s' }}>
+                Сквозное шифрование (Сейф)
+              </span>
+              <span style={{ fontSize: 13, color: 'var(--text-mute)', marginTop: 2 }}>
+                {encryptNext ? 'Файлы будут зашифрованы локально' : 'Нажмите, чтобы включить защиту'}
+              </span>
+            </div>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 36, height: 36, borderRadius: '50%',
+              background: encryptNext ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.05)',
+              color: encryptNext ? '#2ecc71' : 'var(--text-mute)',
+              transition: 'all 0.3s', marginLeft: 8
+            }}>
+              {encryptNext ? <Lock size={18} /> : <Unlock size={18} />}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -227,6 +197,7 @@ export default function UploadPage() {
               <li key={q.id} className={'up-item up-item-' + q.status}>
                 <div className="up-item-info">
                   <div className="up-item-name">
+                    {q.encrypt && <span title="Будет зашифровано">🔒 </span>}
                     {q.fileName}
                     {q.fileSize > TG_LIMIT && (
                       <span className="up-warn"><AlertTriangle size={12} /> Exceeds Telegram 2GB limit</span>
@@ -245,6 +216,27 @@ export default function UploadPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {showPwdPrompt && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="v3-card" style={{ padding: 24, width: 400, maxWidth: '90%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h3 style={{ margin: 0 }}>Настройка Сейфа</h3>
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)' }}>Придумайте мастер-пароль. Он будет надежно сохранен на вашем устройстве.</p>
+            <input type="password" id="vault-pwd" placeholder="Мастер-пароль" style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', fontSize: 16 }} autoFocus />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="v3-btn ghost" onClick={() => setShowPwdPrompt(false)}>Отмена</button>
+              <button className="v3-btn primary" onClick={async () => {
+                const pwd = (document.getElementById('vault-pwd') as HTMLInputElement).value
+                if (!pwd) return
+                await window.electronAPI.vault.setPassword(pwd)
+                setShowPwdPrompt(false)
+                setEncryptNext(true)
+                localStorage.setItem('v3.encryptNext', '1')
+              }}>Сохранить</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

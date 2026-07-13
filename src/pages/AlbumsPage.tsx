@@ -333,6 +333,7 @@ export default function AlbumsPage() {
                     <button key={a.id} onClick={() => {
                       if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
                       else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
+                      setAlbums(v3store.getAlbums())
                       showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
                       closeCtx()
                     }} style={{ paddingLeft: 36, fontSize: 12 }}>
