@@ -288,7 +288,7 @@ ipcMain.handle('telegram:get-user-info', async () => {
 })
 
 // ===== Upload queue =====
-type UploadJob = { id: string; filePath: string; encrypt?: boolean; event: { sender: { send: (c: string, d: any) => void } } }
+type UploadJob = { id: string; filePath: string; encrypt?: boolean; customFileName?: string; event: { sender: { send: (c: string, d: any) => void } } }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
 async function getConcurrency(): Promise<number> {
@@ -318,7 +318,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     sendProgress(0, 1)
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
       sendProgress(sent, total)
-    }, job.encrypt)
+    }, job.encrypt, job.customFileName)
     sendProgress(result.fileSize, result.fileSize)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
@@ -326,11 +326,11 @@ async function runUpload(job: UploadJob): Promise<void> {
   }
 }
 
-ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string, encrypt?: boolean) => {
+ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => {
   try {
     const jobId = id || Math.random().toString(36).slice(2)
     return await new Promise((resolve) => {
-      uploadQueue.push({ id: jobId, filePath, encrypt, event: {
+      uploadQueue.push({ id: jobId, filePath, encrypt, customFileName, event: {
         sender: {
           send: (channel: string, data: any) => {
             event.sender.send(channel, data)

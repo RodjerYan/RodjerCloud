@@ -282,15 +282,24 @@ export class TelegramService {
     return await this.createPrivateChannel()
   }
 
-  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean) {
+  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
     let uploadPath = filePath
     let ivHex = ''
     let isTemp = false
 
+    if (customFileName) {
+      const tempDir = app.getPath('temp')
+      const newPath = path.join(tempDir, customFileName)
+      fs.copyFileSync(filePath, newPath)
+      uploadPath = newPath
+      isTemp = true
+    }
+
     if (encrypt) {
-      const encrypted = await vaultService.encryptFile(filePath)
+      const encrypted = await vaultService.encryptFile(uploadPath)
+      if (isTemp) fs.unlinkSync(uploadPath).catch(() => {})
       uploadPath = encrypted.tempPath
       ivHex = encrypted.ivHex
       isTemp = true
@@ -298,7 +307,7 @@ export class TelegramService {
 
     const fileStats = fs.statSync(uploadPath)
     const originalStats = fs.statSync(filePath)
-    const fileName = path.basename(filePath)
+    const fileName = customFileName || path.basename(filePath)
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
     const TWO_GB = 2 * 1024 * 1024 * 1024

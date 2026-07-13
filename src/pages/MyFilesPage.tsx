@@ -121,6 +121,8 @@ export default function MyFilesPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [preview])
 
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
+
   const loadFolders = async () => {
     const r = await window.electronAPI.folders.loadFromTelegram()
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
@@ -190,8 +192,40 @@ export default function MyFilesPage() {
     if (dropped.length === 0) return
     setDropProgress({ current: 0, total: dropped.length, pct: 0 })
     for (let i = 0; i < dropped.length; i++) {
+      const file = dropped[i]
       setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
-      await window.electronAPI.telegram.uploadFile(dropped[i].filePath).then(async (res: any) => {
+
+      const currentFiles = targetFolderId ? files.filter((f: any) => fileFolders[f.messageId] === targetFolderId) : files.filter((f: any) => !fileFolders[f.messageId])
+      const existing = currentFiles.find((f: any) => f.fileName === file.fileName)
+      
+      let uploadCustomName: string | undefined = undefined
+
+      if (existing) {
+        const choice = await new Promise<'replace' | 'copy' | 'skip'>(resolve => {
+          setDuplicatePrompt({ file, existingId: existing.messageId, resolve })
+        })
+        setDuplicatePrompt(null)
+
+        if (choice === 'skip') continue
+        if (choice === 'replace') {
+          await window.electronAPI.telegram.deleteFile(existing.messageId)
+          // Optionally reload here if needed, but the upload will complete later anyway
+        }
+        if (choice === 'copy') {
+          const extMatch = file.fileName.lastIndexOf('.')
+          const base = extMatch !== -1 ? file.fileName.slice(0, extMatch) : file.fileName
+          const ext = extMatch !== -1 ? file.fileName.slice(extMatch) : ''
+          let copyNum = 1
+          let newName = `${base} (${copyNum})${ext}`
+          while (currentFiles.find((f: any) => f.fileName === newName)) {
+            copyNum++
+            newName = `${base} (${copyNum})${ext}`
+          }
+          uploadCustomName = newName
+        }
+      }
+
+      await window.electronAPI.telegram.uploadFile(file.filePath, undefined, false, uploadCustomName).then(async (res: any) => {
         if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
         if (res.success && res.data?.messageId && targetFolderId) {
           await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
@@ -601,6 +635,22 @@ export default function MyFilesPage() {
 
         <button className="v3-btn ghost" onClick={createFolder} title="Создать папку" style={{ padding: '8px 10px', borderColor: 'transparent' }}><FolderPlus size={16} /></button>
       </div>
+
+      {duplicatePrompt && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--panel)', padding: 24, borderRadius: 16, width: 360, boxShadow: '0 10px 40px rgba(0,0,0,0.3)', border: '1px solid var(--border)' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>Файл уже существует</h3>
+            <p style={{ margin: '0 0 24px 0', fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              Файл с именем <b>{duplicatePrompt.file.fileName}</b> уже есть в этой папке. Что вы хотите сделать?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')}>Заменить</button>
+              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('copy')} style={{ background: 'var(--bg)' }}>Сохранить оба</button>
+              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')}>Пропустить</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
         <span>Выбрано: {selected.size}</span>
