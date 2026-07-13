@@ -80,7 +80,7 @@ export default function MyFilesPage() {
   const [newFolderName, setNewFolderName] = useState('')
   const [moveTarget, setMoveTarget] = useState<number[] | null>(null)
   const [duckAnim, setDuckAnim] = useState<any>(null)
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file?: any; folder?: any; type?: 'global' } | null>(null)
   const closeCtx = useCallback(() => { setCtxMenu(null); setShowSub(null) }, [])
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
@@ -129,7 +129,7 @@ export default function MyFilesPage() {
   const createFolder = () => { setShowCreateFolder(true); setNewFolderName('') }
   const confirmCreateFolder = async () => {
     if (!newFolderName.trim()) return
-    const r = await window.electronAPI.folders.create(newFolderName.trim())
+    const r = await window.electronAPI.folders.create(newFolderName.trim(), folderDrill)
     setShowCreateFolder(false)
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}); showToast('Папка создана') }
   }
@@ -315,14 +315,33 @@ export default function MyFilesPage() {
   useEffect(() => {
     const onMousedown = (e: MouseEvent) => {
       if (e.button !== 2) return
+      
+      const fldEl = (e.target as HTMLElement).closest<HTMLElement>('[data-folder-id]')
+      if (fldEl) {
+        e.stopPropagation()
+        const fid = fldEl.dataset.folderId
+        const f = folders.find(x => x.id === fid)
+        if (f) setCtxMenu({ x: e.clientX, y: e.clientY, folder: f })
+        return
+      }
+
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
-      if (!el) return
-      const mid = Number(el.dataset.mid)
-      const f = files.find(x => x.messageId === mid)
-      if (f) setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
+      if (el) {
+        e.stopPropagation()
+        const mid = Number(el.dataset.mid)
+        const f = files.find(x => x.messageId === mid)
+        if (f) setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
+        return
+      }
+
+      const content = (e.target as HTMLElement).closest<HTMLElement>('.mf-sections, .mf-gallery, .mf-root')
+      if (content) {
+        e.stopPropagation()
+        setCtxMenu({ x: e.clientX, y: e.clientY, type: 'global' })
+      }
     }
     const onContext = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest('[data-mid]')) e.preventDefault()
+      if ((e.target as HTMLElement).closest('[data-mid]') || (e.target as HTMLElement).closest('[data-folder-id]') || (e.target as HTMLElement).closest('.mf-sections, .mf-gallery, .mf-root')) e.preventDefault()
     }
     document.addEventListener('mousedown', onMousedown)
     document.addEventListener('contextmenu', onContext)
@@ -330,7 +349,7 @@ export default function MyFilesPage() {
       document.removeEventListener('mousedown', onMousedown)
       document.removeEventListener('contextmenu', onContext)
     }
-  }, [files])
+  }, [files, folders])
 
   useEffect(() => {
     if (!ctxMenu) return
@@ -590,7 +609,8 @@ export default function MyFilesPage() {
                 </tr></thead>
                 <tbody>
                   {galleryFiles.map(f => (
-                    <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                    <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                      draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                       <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
                       <td>{fmtSize(f.fileSize)}</td>
@@ -621,6 +641,7 @@ export default function MyFilesPage() {
                               const isVideo = drillDown === 'Видео'
                               return (
                                 <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                  draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                                   onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                 <div className="mf-gm-icon" data-type={drillDown}>
@@ -681,6 +702,7 @@ export default function MyFilesPage() {
                       <div className="mf-grid">
                         {items.map((f, i) => (
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
@@ -706,6 +728,7 @@ export default function MyFilesPage() {
                         <tbody>
                           {items.map((f, i) => (
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                                   <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.isEncrypted && '🔒 '}{f.fileName}</span></td>
@@ -737,103 +760,153 @@ export default function MyFilesPage() {
             )
           })}
 
-          {folders.length > 0 && (
-            <div className="mf-section" style={{ marginTop: 4 }}>
-              <div className="mf-section-head" style={{ cursor: 'default', opacity: 0.7 }}>
-                <Folder size={14} />
-                <span className="mf-section-title">Папки</span>
-                <span className="mf-section-count">{folders.length}</span>
-              </div>
-              {folders.map(fld => {
-                const ffiles = files.filter((f: any) => fileFolders[f.messageId] === fld.id)
-                const open = folderDrill === fld.id
-                return (
-                  <div key={fld.id} className={'mf-section' + (open ? ' open' : '')} style={{ paddingLeft: 14 }}>
-                    <div className="mf-section-head" onClick={() => setFolderDrill(open ? null : fld.id)}
-                      style={{ '--cat-color': '#7c83ff' } as React.CSSProperties}>
-                      <ChevronDown size={14} />
-                      <Folder size={16} style={{ color: '#7c83ff' }} />
-                      <span className="mf-section-title">{fld.name}</span>
-                      <span className="mf-section-count">{ffiles.length}</span>
-                      {ffiles.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginRight: 4 }}
-                        onClick={(e) => { e.stopPropagation(); handleArchive(fld.name, ffiles) }} title="Архивировать и загрузить">
-                        <Archive size={12} />
-                      </button>}
-                      <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
-                        onClick={(e) => { e.stopPropagation(); setFolderDrill(fld.id); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
-                        <Pencil size={12} />
-                      </button>
-                      <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#34d399', fontSize: 11 }}
-                        onClick={(e) => { e.stopPropagation(); uploadToFolder(fld.id) }} title="Загрузить в папку">
-                        <FolderPlus size={12} />
-                      </button>
-                      <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-err)', fontSize: 11 }}
-                        onClick={(e) => { e.stopPropagation(); deleteFolder(fld.id) }} title="Удалить папку">
-                        <Trash2 size={12} />
-                      </button>
+          {(folders.length > 0 || folderDrill) && (() => {
+            const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
+            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : [];
+
+            return (
+              <div className="mf-section" style={{ marginTop: 4 }}>
+                {folderDrill ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--panel)', borderRadius: 8, marginBottom: 8, fontSize: 13, fontWeight: 500 }}>
+                    <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => setFolderDrill(null)}>Мои файлы</span>
+                    {(() => {
+                      const crumbs = [];
+                      let curr = folderDrill;
+                      while (curr) {
+                        const f = folders.find(x => x.id === curr);
+                        if (f) {
+                          crumbs.unshift(f);
+                          curr = f.parentId;
+                        } else break;
+                      }
+                      return crumbs.map(c => (
+                        <React.Fragment key={c.id}>
+                          <ChevronRight size={14} style={{ color: 'var(--text-dim)' }} />
+                          <span style={{ cursor: 'pointer', color: c.id === folderDrill ? 'var(--text)' : 'var(--text-dim)' }} onClick={() => setFolderDrill(c.id)}>{c.name}</span>
+                        </React.Fragment>
+                      ));
+                    })()}
+                  </div>
+                ) : (
+                  <div className="mf-section-head" style={{ cursor: 'default', opacity: 0.7 }}>
+                    <Folder size={14} />
+                    <span className="mf-section-title">Папки</span>
+                    <span className="mf-section-count">{folders.length}</span>
+                  </div>
+                )}
+                {currentLevelFolders.map(fld => {
+                  const ffiles = files.filter((f: any) => fileFolders[f.messageId] === fld.id)
+                  return (
+                    <div key={fld.id} className={'mf-section'} style={{ paddingLeft: 14 }}
+                         data-folder-id={fld.id}
+                         draggable={true}
+                         onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: fld.id })) }}
+                         onDragOver={(e) => e.preventDefault()}
+                         onDrop={async (e) => {
+                           e.preventDefault(); e.stopPropagation();
+                           try {
+                             const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                             if (data.type === 'file' && data.id) {
+                               await window.electronAPI.folders.moveFile(data.id, fld.id);
+                               loadFolders();
+                             } else if (data.type === 'folder' && data.id && data.id !== fld.id) {
+                               await window.electronAPI.folders.moveFolder(data.id, fld.id);
+                               loadFolders();
+                             }
+                           } catch (err) {}
+                         }}>
+                      <div className="mf-section-head" onClick={() => setFolderDrill(fld.id)}
+                        style={{ '--cat-color': '#7c83ff' } as React.CSSProperties}>
+                        <ChevronRight size={14} />
+                        <Folder size={16} style={{ color: '#7c83ff' }} />
+                        <span className="mf-section-title">{fld.name}</span>
+                        <span className="mf-section-count">{ffiles.length}</span>
+                        {ffiles.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginRight: 4 }}
+                          onClick={(e) => { e.stopPropagation(); handleArchive(fld.name, ffiles) }} title="Архивировать и загрузить">
+                          <Archive size={12} />
+                        </button>}
+                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
+                          onClick={(e) => { e.stopPropagation(); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
+                          <Pencil size={12} />
+                        </button>
+                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#34d399', fontSize: 11 }}
+                          onClick={(e) => { e.stopPropagation(); uploadToFolder(fld.id) }} title="Загрузить в папку">
+                          <FolderPlus size={12} />
+                        </button>
+                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-err)', fontSize: 11 }}
+                          onClick={(e) => { e.stopPropagation(); deleteFolder(fld.id) }} title="Удалить папку">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
-                    <div className={'mf-section-body' + (open ? ' open' : '')}>
-                      {renameId === fld.id && (
-                        <div style={{ padding: '8px 22px' }}>
-                          <input value={renameVal} onChange={e => setRenameVal(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && renameFolder(fld.id)}
-                            style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 13, width: '100%' }}
-                            autoFocus />
+                  )
+                })}
+                {folderDrill && (
+                  <div className={'mf-section-body open'}>
+                    {renameId === folderDrill && (() => {
+                      const fld = folders.find(x => x.id === folderDrill);
+                      return fld ? (
+                      <div style={{ padding: '8px 22px' }}>
+                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && renameFolder(fld.id)}
+                          style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 13, width: '100%' }}
+                          autoFocus />
+                      </div>
+                      ) : null;
+                    })()}
+                    {currentFiles.length > 0 && (
+                      view === 'grid' ? (
+                        <div className="mf-grid">
+                          {currentFiles.map(f => (
+                            <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
+                              <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                              <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                              <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                              <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                              <div className="mf-card-actions">
+                                <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                                <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                                <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                                <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      )}
-                      {ffiles.length > 0 && (
-                        view === 'grid' ? (
-                          <div className="mf-grid">
-                            {ffiles.map(f => (
-                              <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                                >
-                                <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                                <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
-                                <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                                <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                                <div className="mf-card-actions">
-                                  <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                      ) : (
+                        <table className="mf-table">
+                          <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
+                          <tbody>
+                            {currentFiles.map(f => (
+                               <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                 draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
+                            <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
+                                <td>{fmtSize(f.fileSize)}</td>
+                                <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
+                                <td>
                                   <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                   <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                                   <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
-                                </div>
-                              </div>
+                                </td>
+                              </tr>
                             ))}
-                          </div>
-                        ) : (
-                          <table className="mf-table">
-                            <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
-                            <tbody>
-                              {ffiles.map(f => (
-                                 <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
-                              <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
-                                  <td>{fmtSize(f.fileSize)}</td>
-                                  <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
-                                  <td>
-                                    <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                                    <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                                    <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )
+                          </tbody>
+                        </table>
+                      )
+                    )}
+                    {currentFiles.length === 0 && currentLevelFolders.length === 0 && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 22px', gap: 8 }}>
+                      {duckAnim ? (
+                        <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                      ) : (
+                        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
                       )}
-                      {ffiles.length === 0 && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 22px', gap: 8 }}>
-                        {duckAnim ? (
-                          <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
-                        ) : (
-                          <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
-                        )}
-                        <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Здесь пока никого…</span>
-                      </div>}
-                    </div>
+                      <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Здесь пока никого…</span>
+                    </div>}
                   </div>
-                )
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -957,58 +1030,78 @@ export default function MyFilesPage() {
 
       {ctxMenu && createPortal(
         <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
-          <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {selected.has(ctxMenu.file.messageId)
-                ? <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>
-                : <circle cx="12" cy="12" r="10"/>}
-            </svg>
-            Выбрать
-          </button>
-          <button onClick={() => { handleCopyLink(ctxMenu.file); closeCtx() }}>
-            <Share2 size={14} /> Поделиться
-          </button>
-          <button onClick={() => { handleDownload(ctxMenu.file); closeCtx() }}>
-            <Download size={14} /> Скачать
-          </button>
-          <button onClick={() => { moveFileToFolder(ctxMenu.file.messageId); closeCtx() }}>
-            <MoveRight size={14} /> Переместить
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); setShowSub(showSub === 'albums' ? null : 'albums') } }
-            style={{ position: 'relative' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M21 9H3"/></svg>
-            В альбом {showSub === 'albums' && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5 }}>‹</span>}
-          </button>
-          {showSub === 'albums' && (
+          {ctxMenu.type === 'global' && (
+            <button onClick={() => { createFolder(); closeCtx() }}>
+              <FolderPlus size={14} /> Создать папку
+            </button>
+          )}
+          {ctxMenu.folder && (
             <>
-              {v3store.getAlbums().length === 0 && (
-                <div style={{ paddingLeft: 36, fontSize: 11, color: 'var(--text-dim)' }}>Нет пользовательских альбомов</div>
-              )}
-              {v3store.getAlbums().map(a => {
-                const inAlbum = a.messageIds.includes(ctxMenu.file.messageId)
-                return (
-                  <button key={a.id} onClick={() => {
-                    if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
-                    else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
-                    showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
-                    closeCtx()
-                  }} style={{ paddingLeft: 36, fontSize: 12 }}>
-                    <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
-                      {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
-                    </span>
-                    {a.name}
-                  </button>
-                )
-              }              )}
+              <button onClick={() => { setRenameId(ctxMenu.folder.id); setRenameVal(ctxMenu.folder.name); closeCtx() }}>
+                <Pencil size={14} /> Переименовать
+              </button>
+              <div className="mf-ctx-divider" />
+              <button className="danger" onClick={() => { deleteFolder(ctxMenu.folder.id); closeCtx() }}>
+                <Trash2 size={14} /> Удалить
+              </button>
             </>
           )}
-          <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}>
-            <Pencil size={14} /> Переименовать
-          </button>
-          <div className="mf-ctx-divider" />
-          <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
-            <Trash2 size={14} /> Удалить
-          </button>
+          {ctxMenu.file && (
+            <>
+              <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {selected.has(ctxMenu.file.messageId)
+                    ? <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>
+                    : <circle cx="12" cy="12" r="10"/>}
+                </svg>
+                Выбрать
+              </button>
+              <button onClick={() => { handleCopyLink(ctxMenu.file); closeCtx() }}>
+                <Share2 size={14} /> Поделиться
+              </button>
+              <button onClick={() => { handleDownload(ctxMenu.file); closeCtx() }}>
+                <Download size={14} /> Скачать
+              </button>
+              <button onClick={() => { moveFileToFolder(ctxMenu.file.messageId); closeCtx() }}>
+                <MoveRight size={14} /> Переместить
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); setShowSub(showSub === 'albums' ? null : 'albums') } }
+                style={{ position: 'relative' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M21 9H3"/></svg>
+                В альбом {showSub === 'albums' && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5 }}>‹</span>}
+              </button>
+              {showSub === 'albums' && (
+                <>
+                  {v3store.getAlbums().length === 0 && (
+                    <div style={{ paddingLeft: 36, fontSize: 11, color: 'var(--text-dim)' }}>Нет пользовательских альбомов</div>
+                  )}
+                  {v3store.getAlbums().map(a => {
+                    const inAlbum = a.messageIds.includes(ctxMenu.file.messageId)
+                    return (
+                      <button key={a.id} onClick={() => {
+                        if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
+                        else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
+                        showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
+                        closeCtx()
+                      }} style={{ paddingLeft: 36, fontSize: 12 }}>
+                        <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
+                          {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
+                        </span>
+                        {a.name}
+                      </button>
+                    )
+                  }              )}
+                </>
+              )}
+              <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}>
+                <Pencil size={14} /> Переименовать
+              </button>
+              <div className="mf-ctx-divider" />
+              <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
+                <Trash2 size={14} /> Удалить
+              </button>
+            </>
+          )}
         </div>,
         document.body
       )}

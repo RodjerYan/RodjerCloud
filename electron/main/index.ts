@@ -839,11 +839,11 @@ ipcMain.handle('folders:load-from-telegram', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('folders:create', async (_, name: string) => {
+ipcMain.handle('folders:create', async (_, name: string, parentId?: string) => {
   try {
     const d = readFolders()
     const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-    d.folders.push({ id, name, createdAt: Math.floor(Date.now() / 1000) })
+    d.folders.push({ id, name, parentId: parentId || null, createdAt: Math.floor(Date.now() / 1000) })
     writeFolders(d)
     await syncFoldersToTelegram()
     return { success: true, data: d }
@@ -885,11 +885,28 @@ ipcMain.handle('folders:remove-file', async (_, messageId: number) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string) => {
+ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string | null) => {
   try {
-    const d = readFolders(); d.fileFolders[messageId] = folderId; writeFolders(d)
+    const d = readFolders(); 
+    if (folderId) d.fileFolders[messageId] = folderId;
+    else delete d.fileFolders[messageId];
+    writeFolders(d)
     await syncFoldersToTelegram()
     return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:move-folder', async (_, folderId: string, parentId: string | null) => {
+  try {
+    const d = readFolders()
+    const f = d.folders.find((x: any) => x.id === folderId)
+    if (!f) throw new Error('Folder not found')
+    // Prevent moving folder into itself
+    if (folderId === parentId) throw new Error('Cannot move folder into itself')
+    f.parentId = parentId || null
+    writeFolders(d)
+    await syncFoldersToTelegram()
+    return { success: true, data: d }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

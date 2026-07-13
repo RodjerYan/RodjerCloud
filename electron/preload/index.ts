@@ -93,12 +93,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   folders: {
     list: () => ipcRenderer.invoke('folders:list'),
     loadFromTelegram: () => ipcRenderer.invoke('folders:load-from-telegram'),
-    create: (name: string) => ipcRenderer.invoke('folders:create', name),
+    create: (name: string, parentId?: string) => ipcRenderer.invoke('folders:create', name, parentId),
     rename: (id: string, name: string) => ipcRenderer.invoke('folders:rename', id, name),
     delete: (id: string) => ipcRenderer.invoke('folders:delete', id),
     addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
     removeFile: (messageId: number) => ipcRenderer.invoke('folders:remove-file', messageId),
-    moveFile: (messageId: number, folderId: string) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
+    moveFile: (messageId: number, folderId: string | null) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
+    moveFolder: (folderId: string, parentId: string | null) => ipcRenderer.invoke('folders:move-folder', folderId, parentId),
     archiveAndUpload: (opts: { folderPath?: string; folderName?: string; files?: Array<{ messageId: number; fileName: string }> }) =>
       ipcRenderer.invoke('folder:archive-and-upload', opts),
     onArchiveProgress: (cb: (data: { percent: number; phase: string; fileName?: string }) => void) => {
