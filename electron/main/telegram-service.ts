@@ -1002,23 +1002,18 @@ export class TelegramService {
     if (me.photo) {
       const cacheDir = path.join(app.getPath('userData'), 'profile-cache')
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-      const tmpPath = path.join(cacheDir, 'avatar_tmp')
       try {
-        await this.client.downloadProfilePhoto(me, { outputFile: tmpPath } as any)
-        if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
-          const buf = Buffer.alloc(8)
-          const fd = fs.openSync(tmpPath, 'r')
-          fs.readSync(fd, buf, 0, 8, 0)
-          fs.closeSync(fd)
-          const isMp4 = buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70
+        const buffer = await this.client.downloadProfilePhoto(me, { isBig: true }) as Buffer
+        if (buffer && buffer.length > 8) {
+          const isMp4 = buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
           const ext = isMp4 ? '.mp4' : '.jpg'
           const cachePath = path.join(cacheDir, `avatar${ext}`)
-          fs.renameSync(tmpPath, cachePath)
+          fs.writeFileSync(cachePath, buffer)
           info.photoPath = cachePath
           info.isVideo = isMp4
         }
       } catch (e) {
-        try { fs.rmSync(tmpPath, { force: true }) } catch {}
+        console.warn('Failed to download profile photo:', e)
       }
     }
 

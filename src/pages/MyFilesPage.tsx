@@ -696,7 +696,7 @@ export default function MyFilesPage() {
         </div>
       ) : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
         <div className="mf-sections">
-          {CATEGORIES.map(cat => {
+          {!folderDrill && CATEGORIES.map(cat => {
             const items = grouped[cat]
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
@@ -783,19 +783,16 @@ export default function MyFilesPage() {
             const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : [];
 
             return (
-              <div className="mf-section" style={{ marginTop: 4 }}>
+              <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
                 {folderDrill ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--panel)', borderRadius: 8, marginBottom: 8, fontSize: 13, fontWeight: 500 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--panel)', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 500 }}>
                     <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => setFolderDrill(null)}>Мои файлы</span>
                     {(() => {
                       const crumbs = [];
                       let curr = folderDrill;
                       while (curr) {
                         const f = folders.find(x => x.id === curr);
-                        if (f) {
-                          crumbs.unshift(f);
-                          curr = f.parentId;
-                        } else break;
+                        if (f) { crumbs.unshift(f); curr = f.parentId; } else break;
                       }
                       return crumbs.map(c => (
                         <React.Fragment key={c.id}>
@@ -805,84 +802,71 @@ export default function MyFilesPage() {
                       ));
                     })()}
                   </div>
-                ) : (
-                  <div className="mf-section-head" style={{ cursor: 'default', opacity: 0.7 }}>
-                    <Folder size={14} />
-                    <span className="mf-section-title">Папки</span>
-                    <span className="mf-section-count">{folders.length}</span>
+                ) : currentLevelFolders.length > 0 ? (
+                  <div style={{ padding: '6px 0', fontSize: 12, color: 'var(--text-dim)', fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 }}>
+                    Папки
+                  </div>
+                ) : null}
+
+                {renameId && folders.find(x => x.id === renameId) && (
+                  <div style={{ padding: '8px 0', marginBottom: 16 }}>
+                    <input value={renameVal} onChange={e => setRenameVal(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && renameFolder(renameId)}
+                      style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, width: '100%', outline: 'none' }}
+                      placeholder="Новое имя папки"
+                      autoFocus />
                   </div>
                 )}
-                {currentLevelFolders.map(fld => {
-                  const ffiles = files.filter((f: any) => fileFolders[f.messageId] === fld.id)
-                  return (
-                    <div key={fld.id} className={'mf-section'} style={{ paddingLeft: 14 }}
-                         data-folder-id={fld.id}
-                         draggable={true}
-                         onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: fld.id })) }}
-                         onDragOver={(e) => e.preventDefault()}
-                         onDrop={async (e) => {
-                           e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
-                           
-                           // Handle OS file dropping
-                           if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                             const dropped = extractDroppedFiles(e)
-                             if (dropped.length > 0) {
-                               await uploadDroppedFiles(dropped, fld.id)
-                               return
-                             }
-                           }
 
-                           // Handle internal drag and drop
-                           try {
-                             const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
-                             if (data.type === 'file' && data.id) {
-                               await window.electronAPI.folders.moveFile(data.id, fld.id);
-                               loadFolders();
-                             } else if (data.type === 'folder' && data.id && data.id !== fld.id) {
-                               await window.electronAPI.folders.moveFolder(data.id, fld.id);
-                               loadFolders();
-                             }
-                           } catch (err) {}
-                         }}>
-                      <div className="mf-section-head" onClick={() => setFolderDrill(fld.id)}
-                        style={{ '--cat-color': '#7c83ff' } as React.CSSProperties}>
-                        <ChevronRight size={14} />
-                        <Folder size={16} style={{ color: '#7c83ff' }} />
-                        <span className="mf-section-title">{fld.name}</span>
-                        <span className="mf-section-count">{countFilesRecursive(fld.id)}</span>
-                        {ffiles.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginRight: 4 }}
-                          onClick={(e) => { e.stopPropagation(); handleArchive(fld.name, ffiles) }} title="Архивировать и загрузить">
-                          <Archive size={12} />
-                        </button>}
-                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-text-dim)', fontSize: 11, marginRight: 4 }}
-                          onClick={(e) => { e.stopPropagation(); setRenameId(fld.id); setRenameVal(fld.name) }} title="Переименовать">
-                          <Pencil size={12} />
-                        </button>
-                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#34d399', fontSize: 11 }}
-                          onClick={(e) => { e.stopPropagation(); uploadToFolder(fld.id) }} title="Загрузить в папку">
-                          <FolderPlus size={12} />
-                        </button>
-                        <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: 'var(--v3-err)', fontSize: 11 }}
-                          onClick={(e) => { e.stopPropagation(); deleteFolder(fld.id) }} title="Удалить папку">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                {(currentLevelFolders.length > 0 || currentFiles.length > 0) && (
+                  view === 'grid' ? (
+                    <div className="mf-grid">
+                      {currentLevelFolders.map(sf => (
+                        <div key={sf.id} className="mf-card" style={{ cursor: 'pointer' }}
+                             draggable={true}
+                             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
+                             onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
+                             onDragLeave={(e) => { e.currentTarget.style.outline = 'none' }}
+                             onDrop={async (e) => {
+                               e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
+                               e.currentTarget.style.outline = 'none';
+                               if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                 const dropped = extractDroppedFiles(e)
+                                 if (dropped.length > 0) { await uploadDroppedFiles(dropped, sf.id); return }
+                               }
+                               try {
+                                 const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+                                 if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
+                                 else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
+                               } catch {}
+                             }}
+                             onClick={() => setFolderDrill(sf.id)}
+                             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+                          <div className="mf-card-icon" style={{ background: 'rgba(124,131,255,0.15)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Folder size={32} />
+                          </div>
+                          <div className="mf-card-name" title={sf.name}>{sf.name}</div>
+                          <div className="mf-card-meta">{countFilesRecursive(sf.id)} файл.</div>
+                        </div>
+                      ))}
+                      {currentFiles.map(f => (
+                        <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                           draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                          <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                          <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                          <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                          <div className="mf-card-actions">
+                            <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                            <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                            <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                            <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  )
-                })}
-                {folderDrill && (
-                  <div style={{ marginTop: 8 }}>
-                    {renameId === folderDrill && (() => {
-                      const fld = folders.find(x => x.id === folderDrill);
-                      return fld ? (
-                      <div style={{ padding: '8px 0' }}>
-                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && renameFolder(fld.id)}
-                          style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 13, width: '100%' }}
-                          autoFocus />
-                      </div>
-                      ) : null;
-                    })()}
+                  ) : (
                     <table className="mf-table">
                       <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
                       <tbody>
@@ -930,14 +914,17 @@ export default function MyFilesPage() {
                         ))}
                       </tbody>
                     </table>
-                    {currentFiles.length === 0 && currentLevelFolders.length === 0 && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 22px', gap: 8 }}>
-                      {duckAnim ? (
-                        <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
-                      ) : (
-                        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
-                      )}
-                      <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Папка пуста. Перетащите файлы сюда.</span>
-                    </div>}
+                  )
+                )}
+
+                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
+                    {duckAnim ? (
+                      <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                    ) : (
+                      <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
+                    )}
+                    <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Папка пуста. Перетащите файлы сюда.</span>
                   </div>
                 )}
               </div>
