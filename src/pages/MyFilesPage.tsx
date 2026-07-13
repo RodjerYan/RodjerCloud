@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload } from 'lucide-react'
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle } from 'lucide-react'
 import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
@@ -637,16 +637,32 @@ export default function MyFilesPage() {
       </div>
 
       {duplicatePrompt && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--panel)', padding: 24, borderRadius: 16, width: 360, boxShadow: '0 10px 40px rgba(0,0,0,0.3)', border: '1px solid var(--border)' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>Файл уже существует</h3>
-            <p style={{ margin: '0 0 24px 0', fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-              Файл с именем <b>{duplicatePrompt.file.fileName}</b> уже есть в этой папке. Что вы хотите сделать?
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')}>Заменить</button>
-              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('copy')} style={{ background: 'var(--bg)' }}>Сохранить оба</button>
-              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')}>Пропустить</button>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--panel)', padding: '28px 32px', borderRadius: 20, width: 440, boxShadow: '0 20px 40px rgba(0,0,0,0.4)', border: '1px solid var(--border)' }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertCircle size={26} strokeWidth={2.5} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Файл уже существует</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-dim)' }}>В этой папке уже есть файл с таким именем.</p>
+              </div>
+            </div>
+
+            <div style={{ background: 'var(--bg)', borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28, border: '1px solid var(--border)' }}>
+              <div className="mf-card-icon" data-type={typeOf(duplicatePrompt.file.fileName)} style={{ width: 36, height: 36, fontSize: 11, background: 'rgba(124, 131, 255, 0.1)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, fontWeight: 600 }}>
+                {(duplicatePrompt.file.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {duplicatePrompt.file.fileName}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid transparent', color: 'var(--text-dim)' }}>Пропустить</button>
+              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('copy')} style={{ background: 'var(--bg)', padding: '8px 16px', border: '1px solid var(--border)' }}>Сохранить оба</button>
+              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')} style={{ padding: '8px 16px', background: 'var(--v3-primary)', color: '#fff', border: 'none' }}>Заменить</button>
             </div>
           </div>
         </div>
