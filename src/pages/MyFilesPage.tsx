@@ -483,10 +483,7 @@ export default function MyFilesPage() {
     setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
     loadFolders()
     load()
-    setTimeout(() => setDropProgress(null), 2000)
-  }
     dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
-    load()
   }
 
   return (
@@ -1117,10 +1114,9 @@ export default function MyFilesPage() {
                         <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
                           {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
                         </span>
-                        {a.name}
                       </button>
                     )
-                  }              )}
+                  })}
                 </>
               )}
               <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}>
