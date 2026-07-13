@@ -553,6 +553,131 @@ export class TelegramService {
     }
   }
 
+  async searchGlobal(query: string) {
+    if (!this.client) throw new Error('Client not initialized')
+    const result: any = await this.client.invoke(
+      new Api.messages.SearchGlobal({
+        q: query,
+        limit: 50,
+        offsetRate: 0,
+        offsetPeer: 'Empty',
+        offsetId: 0,
+        folderId: undefined,
+      })
+    )
+
+    const chatsMap = new Map<string, any>()
+    result.chats?.forEach((c: any) => chatsMap.set(c.id?.toString(), c))
+    result.users?.forEach((u: any) => chatsMap.set(u.id?.toString(), u))
+
+    return result.messages.map((m: any) => {
+      let peerId = m.peerId?.channelId || m.peerId?.chatId || m.peerId?.userId
+      if (peerId) peerId = peerId.toString()
+      const authorEntity = peerId ? chatsMap.get(peerId) : null
+      const authorName = authorEntity ? (authorEntity.title || authorEntity.firstName || authorEntity.username || 'Unknown') : 'Unknown'
+
+      let fileName = 'Unknown'
+      let fileSize = 0
+      let mimeType = ''
+      
+      if (m.media && m.media.document) {
+        const doc = m.media.document
+        fileSize = this.toNum(doc.size)
+        mimeType = doc.mimeType
+        const attr = doc.attributes?.find((a: any) => a.className === 'DocumentAttributeFilename')
+        if (attr) fileName = attr.fileName
+      } else if (m.media && m.media.photo) {
+        fileName = 'photo.jpg'
+        mimeType = 'image/jpeg'
+      }
+
+      return {
+        messageId: this.msgId(m),
+        peerId,
+        authorName,
+        text: m.message || '',
+        date: this.toNum(m.date),
+        fileName,
+        fileSize,
+        mimeType,
+        hasMedia: !!m.media
+      }
+    }).filter((m: any) => m.hasMedia)
+  }
+
+  async saveGlobalMediaToCloud(messageId: number, peerIdStr: string) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized')
+    
+    const peerEntity = await this.client.getEntity(peerIdStr).catch(() => peerIdStr)
+    const messages = await this.client.getMessages(peerEntity, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    
+    const message: any = messages[0]
+    if (!message.media) throw new Error('No media attached to message')
+
+    // Find if "Контент" folder exists in our channel
+    let folderId = ''
+    try {
+      const foldersStr = await this.client.getMessages(this.channelId as any, { search: '#folders_metadata' })
+      if (foldersStr && foldersStr.length > 0) {
+        const metadataStr = foldersStr[0].message.replace('#folders_metadata\n', '')
+        const meta = JSON.parse(metadataStr)
+        const contentFolder = meta.folders.find((f: any) => f.name === 'Контент')
+        if (contentFolder) {
+          folderId = contentFolder.id
+        } else {
+          folderId = crypto.randomUUID()
+          meta.folders.push({ id: folderId, name: 'Контент', parentId: null })
+          await this.client.editMessage(this.channelId as any, { message: this.msgId(foldersStr[0]), text: `#folders_metadata\n${JSON.stringify(meta)}` })
+        }
+      } else {
+        // Create metadata message if it doesn't exist
+        folderId = crypto.randomUUID()
+        const meta = { folders: [{ id: folderId, name: 'Контент', parentId: null }], fileFolders: {} }
+        await this.client.sendMessage(this.channelId as any, { message: `#folders_metadata\n${JSON.stringify(meta)}` })
+      }
+    } catch (e) {
+      console.error('Failed to parse folders metadata', e)
+    }
+
+    const caption = `#folder_${folderId}\n${message.message || ''}`
+
+    // We can use SendMedia to resend the media with a new caption
+    let inputMedia: any
+    if (message.media.document) {
+      inputMedia = new Api.InputMediaDocument({
+        id: new Api.InputDocument({
+          id: message.media.document.id,
+          accessHash: message.media.document.accessHash,
+          fileReference: message.media.document.fileReference
+        })
+      })
+    } else if (message.media.photo) {
+      inputMedia = new Api.InputMediaPhoto({
+        id: new Api.InputPhoto({
+          id: message.media.photo.id,
+          accessHash: message.media.photo.accessHash,
+          fileReference: message.media.photo.fileReference
+        })
+      })
+    }
+
+    if (inputMedia) {
+      await this.client.invoke(new Api.messages.SendMedia({
+        peer: this.channelId as any,
+        media: inputMedia,
+        message: caption
+      }))
+    } else {
+      // Fallback: forward the message
+      await this.client.invoke(new Api.messages.ForwardMessages({
+        fromPeer: peerEntity,
+        id: [messageId],
+        toPeer: this.channelId as any
+      }))
+    }
+  }
+
   async downloadFile(messageId: number, fileName: string) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })

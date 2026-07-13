@@ -11,6 +11,7 @@ const items = [
   { to: "/files", label: "Мои файлы", icon: FolderOpen },
   { to: "/upload", label: "Загрузить", icon: Upload },
   { to: "/audioplayer", label: "Аудиоплеер", icon: Headphones },
+  { to: "/content", label: "Контент", icon: Command },
   { to: "/albums", label: "Альбомы", icon: ImgIcon },
   { to: "/autosync", label: "Авто-синх.", icon: RefreshCw },
 
