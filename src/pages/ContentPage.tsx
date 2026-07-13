@@ -66,24 +66,24 @@ export default function ContentPage() {
   }
 
   return (
-    <div className="v2-page">
+    <div className="v3-page">
       <header className="v2-page-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 16, borderBottom: 'none', paddingBottom: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="v2-header-icon"><Globe size={24} /></div>
           <h1 className="v2-h1">Контент</h1>
         </div>
         
-        <form onSubmit={handleSearch} className="content-search-bar" style={{ display: 'flex', gap: 12, position: 'relative' }}>
-          <Search size={20} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+        <form onSubmit={handleSearch} className="content-search-bar" style={{ display: 'flex', gap: 12, position: 'relative', WebkitAppRegion: 'no-drag' as any }}>
+          <Search size={20} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)', pointerEvents: 'none' }} />
           <input 
             type="text" 
             placeholder="Искать фильмы, сериалы, музыку по всему Telegram..." 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="v2-input"
-            style={{ flex: 1, paddingLeft: 48, height: 52, fontSize: 16, borderRadius: 16, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)' }}
+            className="v3-input"
+            style={{ flex: 1, paddingLeft: 48, height: 52, fontSize: 16, borderRadius: 16, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text)' }}
           />
-          <button type="submit" className="v2-btn-primary" style={{ height: 52, padding: '0 24px', borderRadius: 16 }} disabled={loading}>
+          <button type="submit" className="v3-btn primary" style={{ height: 52, padding: '0 24px', borderRadius: 16 }} disabled={loading}>
             {loading ? <Loader className="spin" size={20} /> : "Найти"}
           </button>
         </form>
@@ -162,7 +162,7 @@ export default function ContentPage() {
                     <button 
                       onClick={() => handleSave(r.messageId, r.peerId)}
                       disabled={isSaved || isSaving}
-                      className={isSaved ? "v2-btn-secondary" : "v2-btn-primary"}
+                      className={isSaved ? "v3-btn" : "v3-btn primary"}
                       style={{ padding: '6px 12px', height: 32, fontSize: 13, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, opacity: isSaved ? 0.7 : 1 }}
                     >
                       {isSaving ? <Loader size={14} className="spin" /> : (isSaved ? <Check size={14} /> : <Download size={14} />)}
