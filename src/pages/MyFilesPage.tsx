@@ -659,10 +659,10 @@ export default function MyFilesPage() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid transparent', color: 'var(--text-dim)' }}>Пропустить</button>
-              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('copy')} style={{ background: 'var(--bg)', padding: '8px 16px', border: '1px solid var(--border)' }}>Сохранить оба</button>
-              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')} style={{ padding: '8px 16px', background: 'var(--v3-primary)', color: '#fff', border: 'none' }}>Заменить</button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button className="v3-btn ghost" onClick={() => duplicatePrompt.resolve('skip')}>Пропустить</button>
+              <button className="v3-btn" onClick={() => duplicatePrompt.resolve('copy')}>Сохранить оба</button>
+              <button className="v3-btn primary" onClick={() => duplicatePrompt.resolve('replace')}>Заменить</button>
             </div>
           </div>
         </div>
