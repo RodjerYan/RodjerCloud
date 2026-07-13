@@ -653,13 +653,14 @@ export default function MyFilesPage() {
             <style>{`
               @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
               @keyframes modalPop { 
-                0% { opacity: 0; transform: scale(0.95) translateY(10px); } 
+                0% { opacity: 0; transform: scale(0.96) translateY(8px); } 
                 100% { opacity: 1; transform: scale(1) translateY(0); } 
               }
               .btn-premium {
-                padding: 12px 24px; border-radius: 12px; font-weight: 600; font-size: 14px;
-                cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                display: flex; align-items: center; justify-content: center;
+                padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 13.5px;
+                cursor: pointer; transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+                display: inline-flex; align-items: center; justify-content: center;
+                white-space: nowrap; letter-spacing: 0.2px;
               }
               .btn-premium:hover { transform: translateY(-1px); }
               .btn-premium:active { transform: translateY(1px); }
@@ -667,48 +668,50 @@ export default function MyFilesPage() {
               .btn-premium.danger {
                 background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
                 color: white; border: none;
-                box-shadow: 0 8px 16px rgba(239, 68, 68, 0.25), inset 0 1px 1px rgba(255,255,255,0.2);
+                box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3), inset 0 1px 1px rgba(255,255,255,0.25);
               }
-              .btn-premium.danger:hover { box-shadow: 0 12px 20px rgba(239, 68, 68, 0.35), inset 0 1px 1px rgba(255,255,255,0.2); filter: brightness(1.1); }
+              .btn-premium.danger:hover { box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4), inset 0 1px 1px rgba(255,255,255,0.3); filter: brightness(1.1); }
               
               .btn-premium.secondary {
-                background: rgba(255,255,255,0.05);
-                color: #e2e8f0; border: 1px solid rgba(255,255,255,0.1);
-                backdrop-filter: blur(8px);
+                background: rgba(255,255,255,0.06);
+                color: #f1f5f9; border: 1px solid rgba(255,255,255,0.12);
+                backdrop-filter: blur(12px);
               }
-              .btn-premium.secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); color: #fff; }
+              .btn-premium.secondary:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
 
               .btn-premium.ghost {
                 background: transparent; color: #94a3b8; border: 1px solid transparent;
               }
-              .btn-premium.ghost:hover { color: #f1f5f9; background: rgba(255,255,255,0.03); }
+              .btn-premium.ghost:hover { color: #f8fafc; background: rgba(255,255,255,0.04); }
 
               .file-chip {
-                background: rgba(15, 23, 42, 0.6);
-                border: 1px solid rgba(255, 255, 255, 0.05);
-                border-radius: 16px; padding: 16px;
-                display: flex; align-items: center; gap: 16px;
-                box-shadow: inset 0 1px 1px rgba(255,255,255,0.03), 0 4px 12px rgba(0,0,0,0.2);
+                background: linear-gradient(145deg, rgba(15, 23, 42, 0.5), rgba(15, 23, 42, 0.8));
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 16px; padding: 14px 16px;
+                display: flex; align-items: center; gap: 14px;
+                box-shadow: inset 0 1px 1px rgba(255,255,255,0.04), 0 4px 16px rgba(0,0,0,0.25);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
               }
+              .file-chip:hover { transform: translateY(-2px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.06), 0 8px 24px rgba(0,0,0,0.3); border-color: rgba(255, 255, 255, 0.1); }
               
               .icon-glow-wrap {
-                position: relative; width: 56px; height: 56px;
+                position: relative; width: 52px; height: 52px;
                 display: flex; align-items: center; justify-content: center;
               }
               .icon-glow-bg {
                 position: absolute; inset: 0; border-radius: 50%;
                 background: linear-gradient(135deg, #f59e0b, #ea580c);
-                opacity: 0.2; filter: blur(8px);
-                animation: pulseGlow 2s ease-in-out infinite alternate;
+                opacity: 0.15; filter: blur(10px);
+                animation: pulseGlow 3s ease-in-out infinite alternate;
               }
               .icon-glow-inner {
-                position: relative; width: 48px; height: 48px; border-radius: 50%;
-                background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.1));
-                border: 1px solid rgba(245, 158, 11, 0.3);
+                position: relative; width: 44px; height: 44px; border-radius: 50%;
+                background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(234, 88, 12, 0.05));
+                border: 1px solid rgba(245, 158, 11, 0.25);
                 display: flex; align-items: center; justify-content: center; color: #fbbf24;
-                box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
+                box-shadow: inset 0 2px 4px rgba(255,255,255,0.05);
               }
-              @keyframes pulseGlow { from { opacity: 0.15; transform: scale(0.95); } to { opacity: 0.3; transform: scale(1.05); } }
+              @keyframes pulseGlow { from { opacity: 0.1; transform: scale(0.9); } to { opacity: 0.25; transform: scale(1.1); } }
             `}</style>
             
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 28 }}>
