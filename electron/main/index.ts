@@ -861,8 +861,16 @@ ipcMain.handle('folders:rename', async (_, id: string, name: string) => {
 
 ipcMain.handle('folders:delete', async (_, id: string) => {
   try {
-    const d = readFolders(); d.folders = d.folders.filter((x: any) => x.id !== id)
-    Object.keys(d.fileFolders).forEach(k => { if (d.fileFolders[k] === id) delete d.fileFolders[k] })
+    const d = readFolders()
+    // Collect all descendant folder IDs recursively
+    const idsToDelete = new Set<string>()
+    const collect = (parentId: string) => {
+      idsToDelete.add(parentId)
+      d.folders.filter((x: any) => x.parentId === parentId).forEach((x: any) => collect(x.id))
+    }
+    collect(id)
+    d.folders = d.folders.filter((x: any) => !idsToDelete.has(x.id))
+    Object.keys(d.fileFolders).forEach(k => { if (idsToDelete.has(d.fileFolders[k])) delete d.fileFolders[k] })
     writeFolders(d)
     await syncFoldersToTelegram()
     return { success: true, data: d }
@@ -901,8 +909,19 @@ ipcMain.handle('folders:move-folder', async (_, folderId: string, parentId: stri
     const d = readFolders()
     const f = d.folders.find((x: any) => x.id === folderId)
     if (!f) throw new Error('Folder not found')
-    // Prevent moving folder into itself
     if (folderId === parentId) throw new Error('Cannot move folder into itself')
+    // Prevent cycles: walk up from parentId and ensure folderId is not an ancestor
+    if (parentId) {
+      let curr: string | null = parentId
+      const visited = new Set<string>()
+      while (curr) {
+        if (curr === folderId) throw new Error('Cannot move folder into its own descendant')
+        if (visited.has(curr)) break
+        visited.add(curr)
+        const p = d.folders.find((x: any) => x.id === curr)
+        curr = p?.parentId || null
+      }
+    }
     f.parentId = parentId || null
     writeFolders(d)
     await syncFoldersToTelegram()

@@ -185,18 +185,29 @@ export default function MyFilesPage() {
     setLoading(false)
   }
 
+  // Shared helper: upload files from OS drop or dialog and assign to a folder
+  const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string }[], targetFolderId?: string | null) => {
+    if (dropped.length === 0) return
+    setDropProgress({ current: 0, total: dropped.length, pct: 0 })
+    for (let i = 0; i < dropped.length; i++) {
+      setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
+      await window.electronAPI.telegram.uploadFile(dropped[i].filePath).then(async (res: any) => {
+        if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
+        if (res.success && res.data?.messageId && targetFolderId) {
+          await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
+        }
+      })
+    }
+    setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
+    loadFolders()
+    load()
+    dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
+  }
+
   const uploadToFolder = async (folderId: string) => {
     const pick = await window.electronAPI.dialog.pickMultipleFiles()
     if (!pick.success || !pick.data?.length) return
-    for (const f of pick.data) {
-      const res = await window.electronAPI.telegram.uploadFile(f.filePath)
-      if (res.success && res.data?.messageId) {
-        await window.electronAPI.folders.addFile(folderId, res.data.messageId)
-        if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
-      }
-    }
-    loadFolders()
-    load()
+    await uploadDroppedFiles(pick.data.map((f: any) => ({ filePath: f.filePath, fileName: f.fileName })), folderId)
   }
 
   useEffect(() => { load(); loadFolders() }, [])
@@ -447,6 +458,7 @@ export default function MyFilesPage() {
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number } | null>(null)
   const dropDoneRef = useRef<NodeJS.Timeout>()
+  const dragCounter = useRef(0)
 
   useEffect(() => {
     const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
@@ -461,35 +473,34 @@ export default function MyFilesPage() {
     if (r.success) navigate('/upload', { state: { initialFiles: r.data } })
   }
 
-  const onDrop = async (e: React.DragEvent) => {
-    e.preventDefault(); setIsDragOver(false)
+  const extractDroppedFiles = (e: React.DragEvent) => {
     const dropped: { filePath: string; fileName: string }[] = []
     for (const file of Array.from(e.dataTransfer.files)) {
       const p = window.electronAPI.getPathForFile(file)
       if (p) dropped.push({ filePath: p, fileName: file.name })
     }
-    if (dropped.length === 0) return
-    setDropProgress({ current: 0, total: dropped.length, pct: 0 })
-    for (let i = 0; i < dropped.length; i++) {
-      const f = dropped[i]
-      setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
-      await window.electronAPI.telegram.uploadFile(f.filePath).then(async (res: any) => {
-        if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
-        if (res.success && res.data?.messageId && folderDrill) {
-          await window.electronAPI.folders.addFile(folderDrill, res.data.messageId)
-        }
-      })
-    }
-    setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
-    loadFolders()
-    load()
-    dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
+    return dropped
   }
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); dragCounter.current = 0; setIsDragOver(false)
+    const dropped = extractDroppedFiles(e)
+    if (dropped.length === 0) return
+    await uploadDroppedFiles(dropped, folderDrill)
+  }
+
+  // Recursive file count for a folder (includes files in subfolders)
+  const countFilesRecursive = useCallback((folderId: string): number => {
+    const directFiles = files.filter((f: any) => fileFolders[f.messageId] === folderId).length
+    const childFolders = folders.filter(f => f.parentId === folderId)
+    return directFiles + childFolders.reduce((sum, cf) => sum + countFilesRecursive(cf.id), 0)
+  }, [files, fileFolders, folders])
 
   return (
     <div className={"mf-root mf-hide-checks" + (isDragOver ? " drag-over" : "")}
-         onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
-         onDragLeave={() => setIsDragOver(false)}
+         onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsDragOver(true) }}
+         onDragOver={(e) => { e.preventDefault() }}
+         onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsDragOver(false) } }}
          onDrop={onDrop}>
       <div style={{
         maxHeight: shareProgress ? 48 : 0,
@@ -810,33 +821,15 @@ export default function MyFilesPage() {
                          onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: fld.id })) }}
                          onDragOver={(e) => e.preventDefault()}
                          onDrop={async (e) => {
-                           e.preventDefault(); e.stopPropagation(); setIsDragOver(false);
+                           e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
                            
                            // Handle OS file dropping
                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                             const dropped: { filePath: string; fileName: string }[] = []
-                             for (const file of Array.from(e.dataTransfer.files)) {
-                               const p = window.electronAPI.getPathForFile(file)
-                               if (p) dropped.push({ filePath: p, fileName: file.name })
-                             }
+                             const dropped = extractDroppedFiles(e)
                              if (dropped.length > 0) {
-                               setDropProgress({ current: 0, total: dropped.length, pct: 0 })
-                               for (let i = 0; i < dropped.length; i++) {
-                                 const f = dropped[i]
-                                 setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
-                                 await window.electronAPI.telegram.uploadFile(f.filePath).then(async (res: any) => {
-                                   if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
-                                   if (res.success && res.data?.messageId) {
-                                     await window.electronAPI.folders.addFile(fld.id, res.data.messageId)
-                                   }
-                                 })
-                               }
-                               setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
-                               loadFolders()
-                               load()
-                               setTimeout(() => setDropProgress(null), 2000)
+                               await uploadDroppedFiles(dropped, fld.id)
+                               return
                              }
-                             return
                            }
 
                            // Handle internal drag and drop
@@ -856,7 +849,7 @@ export default function MyFilesPage() {
                         <ChevronRight size={14} />
                         <Folder size={16} style={{ color: '#7c83ff' }} />
                         <span className="mf-section-title">{fld.name}</span>
-                        <span className="mf-section-count">{ffiles.length}</span>
+                        <span className="mf-section-count">{countFilesRecursive(fld.id)}</span>
                         {ffiles.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginRight: 4 }}
                           onClick={(e) => { e.stopPropagation(); handleArchive(fld.name, ffiles) }} title="Архивировать и загрузить">
                           <Archive size={12} />
