@@ -757,7 +757,7 @@ ipcMain.handle('app:check-update', async () => {
   }
 })
 
-function downloadWithNet(event: any, url: string, destPath: string): Promise<number> {
+function downloadWithNet(event: any, url: string, destPath: string, accept?: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const fileStream = fs.createWriteStream(destPath)
     fileStream.on('error', (err) => { reject(err) })
@@ -767,15 +767,25 @@ function downloadWithNet(event: any, url: string, destPath: string): Promise<num
       url,
       headers: {
         'User-Agent': 'RodjerCloud',
-        'Accept': 'application/octet-stream',
+        'Accept': accept || 'application/octet-stream',
         ...(_githubToken ? { 'Authorization': `token ${_githubToken}` } : {}),
       },
     })
 
     let total = 0
     let downloaded = 0
+    let redirected = false
 
     request.on('response', (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        const location = String(response.headers['location'] || '')
+        if (location) {
+          redirected = true
+          fileStream.close()
+          fs.unlink(destPath, () => {})
+          return downloadWithNet(event, location, destPath, accept).then(resolve).catch(reject)
+        }
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         fileStream.destroy()
         fs.unlink(destPath, () => {})
@@ -794,12 +804,11 @@ function downloadWithNet(event: any, url: string, destPath: string): Promise<num
       })
 
       response.on('end', () => {
-        fileStream.end(() => resolve(total))
+        if (!redirected) fileStream.end(() => resolve(total))
       })
 
       response.on('error', (err) => {
-        fileStream.destroy()
-        fs.unlink(destPath, () => {})
+        if (!redirected) { fileStream.destroy(); fs.unlink(destPath, () => {}) }
         reject(err)
       })
     })
@@ -818,10 +827,9 @@ ipcMain.handle('app:download-update', async (event, assetId: number, assetName: 
   try {
     const tempDir = app.getPath('temp')
     const destPath = pathMod.join(tempDir, 'update.exe')
-    const tag = (latestVersion || app.getVersion()).replace(/^v/, '')
-    // Use direct CDN URL — works for public repos without auth via Chromium's network stack
-    const downloadUrl = `https://github.com/${GITHUB_REPO}/releases/download/v${tag}/${assetName}`
-    await downloadWithNet(event, downloadUrl, destPath)
+    // Use API URL to download — CDN URL may return 404
+    const downloadUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${assetId}`
+    await downloadWithNet(event, downloadUrl, destPath, 'application/octet-stream')
     return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
   } catch (error) {
     return { success: false, error: (error as Error).message }
