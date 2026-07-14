@@ -121,6 +121,7 @@ async function checkUpdate() {
       if (wins.length > 0) wins[0].webContents.send('app:update-available', {
         version: tag,
         assetId: asset?.id || 0,
+        assetName: asset?.name || '',
         htmlUrl: res.html_url || '',
       })
     }
@@ -763,7 +764,7 @@ function downloadFile(event: any, url: string, destPath: string, redirects = 0, 
     const mod = url.startsWith('https') ? https : http
     const dlHeaders: any = { 'User-Agent': 'RodjerCloud', 'Accept': 'application/octet-stream' }
     if (_githubToken && isFirst) dlHeaders['Authorization'] = `token ${_githubToken}`
-    const req = mod.get(url, { headers: dlHeaders }, (res: any) => {
+    const req = mod.get(url, { headers: dlHeaders, timeout: 30000 }, (res: any) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume()
         return downloadFile(event, res.headers.location, destPath, redirects + 1, false).then(resolve, reject)
@@ -775,6 +776,8 @@ function downloadFile(event: any, url: string, destPath: string, redirects = 0, 
       const total = parseInt(res.headers['content-length'] || '0', 10)
       let downloaded = 0
       const fileStream = fs.createWriteStream(destPath)
+      fileStream.on('error', (err: Error) => { res.unpipe(); fs.unlink(destPath, () => {}); reject(err) })
+      res.on('error', (err: Error) => { fileStream.destroy(); fs.unlink(destPath, () => {}); reject(err) })
       res.pipe(fileStream)
       res.on('data', (chunk: Buffer) => {
         downloaded += chunk.length
@@ -783,13 +786,28 @@ function downloadFile(event: any, url: string, destPath: string, redirects = 0, 
       res.on('end', () => { fileStream.end(() => resolve(total)) })
     })
     req.on('error', (err: Error) => { fs.unlink(destPath, () => {}); reject(err) })
+    req.on('timeout', () => { req.destroy(); fs.unlink(destPath, () => {}); reject(new Error('Connection timeout')) })
   })
 }
 
-ipcMain.handle('app:download-update', async (event, assetId: number) => {
+ipcMain.handle('app:download-update', async (event, assetId: number, assetName: string) => {
   try {
     const tempDir = app.getPath('temp')
     const destPath = pathMod.join(tempDir, 'update.exe')
+
+    // Try direct download first (no auth needed for public repos)
+    if (assetName) {
+      const dlUrl = `https://github.com/${GITHUB_REPO}/releases/latest/download/${assetName}`
+      try {
+        await downloadFile(event, dlUrl, destPath)
+        return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
+      } catch {
+        // If direct download fails, clear dest and fall through to API path
+        try { fs.unlinkSync(destPath) } catch {}
+      }
+    }
+
+    // Fallback: API-based download (may require token for private repos)
     const downloadUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${assetId}`
     await downloadFile(event, downloadUrl, destPath)
     return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }

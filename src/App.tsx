@@ -50,7 +50,7 @@ function App() {
   const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ firstName: string; lastName?: string; username?: string; photoPath?: string } | null>(null)
-  const [updateData, setUpdateData] = useState<{ version: string; assetId: number } | null>(null)
+  const [updateData, setUpdateData] = useState<{ version: string; assetId: number; assetName: string } | null>(null)
   const [dlProgress, setDlProgress] = useState(0)
   const [dlPath, setDlPath] = useState('')
   const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
@@ -77,8 +77,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number }) => {
-      setUpdateData({ version: data.version, assetId: data.assetId })
+    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number; assetName: string }) => {
+      setUpdateData({ version: data.version, assetId: data.assetId, assetName: data.assetName })
     })
     return () => unsub?.()
   }, [])
@@ -91,7 +91,7 @@ function App() {
       setDlProgress(p.percent)
     })
     unsubDlRef.current = unsub
-    const r = await window.electronAPI.app.downloadUpdate(updateData.assetId)
+    const r = await window.electronAPI.app.downloadUpdate(updateData.assetId, updateData.assetName)
     unsubDlRef.current = null
     if (r.success && r.data) {
       setDlPath(r.data.filePath)
