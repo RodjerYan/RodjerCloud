@@ -560,9 +560,9 @@ export class TelegramService {
         q: query,
         limit: 50,
         offsetRate: 0,
-        offsetPeer: 'Empty',
+        offsetPeer: new Api.InputPeerEmpty(),
         offsetId: 0,
-        folderId: undefined,
+        folderId: 0,
       })
     )
 
