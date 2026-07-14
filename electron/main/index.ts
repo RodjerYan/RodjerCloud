@@ -448,33 +448,6 @@ ipcMain.handle('telegram:list-files', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('telegram:search-global', async (_, query: string) => {
-  try {
-    const data = await telegramService.searchGlobal(query)
-    return { success: true, data }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-})
-
-ipcMain.handle('telegram:save-global-media', async (_, messageId: number, peerId: string, mediaDoc?: any, mediaType?: string, originalText?: string) => {
-  try {
-    await telegramService.saveGlobalMediaToCloud(messageId, peerId, mediaDoc, mediaType, originalText)
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-})
-
-ipcMain.handle('telegram:preview-global-media', async (_, previewKey: string) => {
-  try {
-    const data = await telegramService.previewGlobalMedia(previewKey)
-    return { success: true, data }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-})
-
 ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: string) => {
   try {
     const prefs = await readPrefs()

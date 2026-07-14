@@ -2,7 +2,7 @@ import React from "react"
 import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, Settings,
   LogOut, Trash2, Star, Image as ImgIcon,
-  Command, Headphones, Cloud } from "lucide-react"
+  Headphones, Cloud } from "lucide-react"
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void }
 
@@ -11,7 +11,7 @@ const items = [
   { to: "/files", label: "Мои файлы", icon: FolderOpen },
   { to: "/upload", label: "Загрузить", icon: Upload },
   { to: "/audioplayer", label: "Аудиоплеер", icon: Headphones },
-  { to: "/content", label: "Контент", icon: Command },
+
   { to: "/albums", label: "Альбомы", icon: ImgIcon },
   { to: "/autosync", label: "Авто-синх.", icon: RefreshCw },
 

@@ -25,7 +25,7 @@ import SearchPage from "./pages/SearchPage"
 import CalendarPage from "./pages/CalendarPage"
 import AlbumsPage from "./pages/AlbumsPage"
 import AudioPlayerPage from "./pages/AudioPlayerPage"
-import ContentPage from "./pages/ContentPage"
+
 import { v3store, loadStateFromTelegram } from "./lib/v3store"
 import "./styles/tokens.css"
 import "./styles/base.css"
@@ -175,7 +175,6 @@ function App() {
                 <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
                 <Route path="/files" element={<MyFilesPage />} />
                 <Route path="/upload" element={<UploadPage />} />
-                <Route path="/content" element={<ContentPage />} />
                 <Route path="/autosync" element={<AutoSyncPage />} />
 
                 <Route path="/trash" element={<TrashPage />} />
