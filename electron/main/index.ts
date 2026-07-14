@@ -748,16 +748,16 @@ ipcMain.handle('app:check-update', async () => {
   }
 })
 
-function downloadFile(event: any, url: string, destPath: string, redirects = 0): Promise<number> {
+function downloadFile(event: any, url: string, destPath: string, redirects = 0, isFirst = true): Promise<number> {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Too many redirects'))
     const mod = url.startsWith('https') ? https : http
     const dlHeaders: any = { 'User-Agent': 'RodjerCloud', 'Accept': 'application/octet-stream' }
-    if (_githubToken) dlHeaders['Authorization'] = `token ${_githubToken}`
+    if (_githubToken && isFirst) dlHeaders['Authorization'] = `token ${_githubToken}`
     const req = mod.get(url, { headers: dlHeaders }, (res: any) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume()
-        return downloadFile(event, res.headers.location, destPath, redirects + 1).then(resolve, reject)
+        return downloadFile(event, res.headers.location, destPath, redirects + 1, false).then(resolve, reject)
       }
       if (res.statusCode !== 200) {
         res.resume()

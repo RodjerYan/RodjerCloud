@@ -75,7 +75,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   }
 
   const startDownload = async () => {
-    if (!updateModal?.assetId) return
+    if (!updateModal?.assetId) { show('Ошибка: файл обновления не найден'); return }
     setDownloading(true)
     setDownloadProgress(0)
     const unsub = window.electronAPI.app.onDownloadProgress((p) => {
