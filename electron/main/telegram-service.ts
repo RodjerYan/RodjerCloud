@@ -555,79 +555,128 @@ export class TelegramService {
     }
   }
 
+  private mapMessage(m: any, authorName: string) {
+    const previewKey = 'preview_' + (++this.globalPreviewIdCounter)
+    this.globalPreviewCache.set(previewKey, m)
+    let fileName = 'Unknown'
+    let fileSize = 0
+    let mimeType = ''
+    let mediaDoc: any = null
+    let mediaType: string | null = null
+
+    if (m.media?.document) {
+      const doc = m.media.document
+      fileSize = this.toNum(doc.size)
+      mimeType = doc.mimeType
+      const attr = doc.attributes?.find((a: any) => a.className === 'DocumentAttributeFilename')
+      if (attr) fileName = attr.fileName
+      if (doc.id && doc.accessHash && doc.fileReference) {
+        const fr = Buffer.isBuffer(doc.fileReference) ? doc.fileReference : Buffer.from(doc.fileReference)
+        mediaDoc = { id: String(doc.id), accessHash: String(doc.accessHash), fileReference: Array.from(fr) }
+        mediaType = 'document'
+      }
+    } else if (m.media?.photo) {
+      fileName = 'photo.jpg'
+      mimeType = 'image/jpeg'
+      const p = m.media.photo
+      if (p.id && p.accessHash && p.fileReference) {
+        const fr = Buffer.isBuffer(p.fileReference) ? p.fileReference : Buffer.from(p.fileReference)
+        mediaDoc = { id: String(p.id), accessHash: String(p.accessHash), fileReference: Array.from(fr) }
+        mediaType = 'photo'
+      }
+    }
+
+    if (!mediaDoc || !mediaType) return null
+
+    return {
+      messageId: this.msgId(m),
+      peerId: m.peerId?.channelId?.toString() || m.peerId?.chatId?.toString() || m.peerId?.userId?.toString() || '',
+      authorName,
+      text: m.message || '',
+      date: this.toNum(m.date),
+      fileName,
+      fileSize,
+      mimeType,
+      hasMedia: true,
+      mediaDoc,
+      mediaType,
+      previewKey,
+    }
+  }
+
   async searchGlobal(query: string) {
     if (!this.client) throw new Error('Client not initialized')
-    const result: any = await this.client.invoke(
-      new Api.messages.SearchGlobal({
-        q: query,
-        filter: new Api.InputMessagesFilterEmpty(),
-        minDate: 0,
-        maxDate: 0,
-        limit: 200,
-        offsetRate: 0,
-        offsetPeer: new Api.InputPeerEmpty(),
-        offsetId: 0,
-        folderId: 0,
-      })
-    )
 
-    const chatsMap = new Map<string, any>()
-    result.chats?.forEach((c: any) => chatsMap.set(c.id?.toString(), c))
-    result.users?.forEach((u: any) => chatsMap.set(u.id?.toString(), u))
+    const results: any[] = []
+    const seenIds = new Set<string>()
 
-    return result.messages.map((m: any) => {
-      const previewKey = 'preview_' + (++this.globalPreviewIdCounter)
-      this.globalPreviewCache.set(previewKey, m)
-      let peerId = m.peerId?.channelId || m.peerId?.chatId || m.peerId?.userId
-      if (peerId) peerId = peerId.toString()
-      const authorEntity = peerId ? chatsMap.get(peerId) : null
-      const authorName = authorEntity ? (authorEntity.title || authorEntity.firstName || authorEntity.username || 'Unknown') : 'Unknown'
+    // Step 1: Find public channels matching the query
+    let publicChannels: any[] = []
+    try {
+      const contactsResult: any = await this.client.invoke(
+        new Api.contacts.Search({ q: query, limit: 30 })
+      )
+      publicChannels = (contactsResult.chats || []).filter((c: any) => c.className === 'Channel' && c.username)
+    } catch {}
 
-      let fileName = 'Unknown'
-      let fileSize = 0
-      let mimeType = ''
-      let mediaDoc: any = null
-      
-      let mediaType: string | null = null
-      if (m.media?.document) {
-        const doc = m.media.document
-        fileSize = this.toNum(doc.size)
-        mimeType = doc.mimeType
-        const attr = doc.attributes?.find((a: any) => a.className === 'DocumentAttributeFilename')
-        if (attr) fileName = attr.fileName
-        if (doc.id && doc.accessHash && doc.fileReference) {
-          const fr = Buffer.isBuffer(doc.fileReference) ? doc.fileReference : Buffer.from(doc.fileReference)
-          mediaDoc = { id: String(doc.id), accessHash: String(doc.accessHash), fileReference: Array.from(fr) }
-          mediaType = 'document'
+    // Step 2: Search messages in each public channel
+    const channelPromises = publicChannels.slice(0, 10).map(async (ch: any) => {
+      try {
+        const peer = new Api.InputPeerChannel({ channelId: ch.id, accessHash: ch.accessHash })
+        const searchResult: any = await this.client!.invoke(
+          new Api.messages.Search({
+            peer,
+            q: query,
+            filter: new Api.InputMessagesFilterEmpty(),
+            minDate: 0, maxDate: 0,
+            limit: 20, offsetId: 0, addOffset: 0,
+            maxId: 0, minId: 0, hash: 0,
+          })
+        )
+        const msgs = searchResult.messages || []
+        const channelName = ch.title || ch.username || 'Unknown'
+        for (const m of msgs) {
+          const id = this.msgId(m) + '_' + (m.peerId?.channelId?.toString() || ch.id.toString())
+          if (!seenIds.has(id)) {
+            seenIds.add(id)
+            const mapped = this.mapMessage(m, channelName)
+            if (mapped) results.push(mapped)
+          }
         }
-      } else if (m.media?.photo) {
-        fileName = 'photo.jpg'
-        mimeType = 'image/jpeg'
-        const p = m.media.photo
-        if (p.id && p.accessHash && p.fileReference) {
-          const fr = Buffer.isBuffer(p.fileReference) ? p.fileReference : Buffer.from(p.fileReference)
-          mediaDoc = { id: String(p.id), accessHash: String(p.accessHash), fileReference: Array.from(fr) }
-          mediaType = 'photo'
+      } catch {}
+    })
+
+    await Promise.all(channelPromises)
+
+    // Step 3: Also search subscribed channels as fallback
+    try {
+      const globalResult: any = await this.client.invoke(
+        new Api.messages.SearchGlobal({
+          q: query,
+          filter: new Api.InputMessagesFilterEmpty(),
+          minDate: 0, maxDate: 0, limit: 50,
+          offsetRate: 0, offsetPeer: new Api.InputPeerEmpty(), offsetId: 0,
+        })
+      )
+      const chatsMap = new Map<string, any>()
+      globalResult.chats?.forEach((c: any) => chatsMap.set(c.id?.toString(), c))
+      globalResult.users?.forEach((u: any) => chatsMap.set(u.id?.toString(), u))
+
+      for (const m of globalResult.messages || []) {
+        const peerId = m.peerId?.channelId?.toString() || m.peerId?.chatId?.toString() || m.peerId?.userId?.toString() || ''
+        const id = this.msgId(m) + '_' + peerId
+        if (!seenIds.has(id)) {
+          seenIds.add(id)
+          const authorEntity = peerId ? chatsMap.get(peerId) : null
+          const authorName = authorEntity ? (authorEntity.title || authorEntity.firstName || authorEntity.username || 'Unknown') : 'Unknown'
+          const mapped = this.mapMessage(m, authorName)
+          if (mapped) results.push(mapped)
         }
       }
+    } catch {}
 
-      const canDownload = !!(mediaDoc && mediaType)
-
-      return {
-        messageId: this.msgId(m),
-        peerId,
-        authorName,
-        text: m.message || '',
-        date: this.toNum(m.date),
-        fileName,
-        fileSize,
-        mimeType,
-        hasMedia: canDownload,
-        mediaDoc,
-        mediaType,
-        previewKey,
-      }
-    }).filter((m: any) => m.hasMedia)
+    results.sort((a: any, b: any) => b.date - a.date)
+    return results
   }
 
   async previewGlobalMedia(previewKey: string) {
