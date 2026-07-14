@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     bulkDelete: (ids: number[]) => ipcRenderer.invoke('telegram:bulk-delete', ids),
     logout: () => ipcRenderer.invoke('telegram:logout'),
     getUserInfo: () => ipcRenderer.invoke('telegram:get-user-info'),
+    searchGlobal: (query: string) => ipcRenderer.invoke('telegram:search-global', query),
+    saveGlobalMedia: (messageId: number, peerId: string) => ipcRenderer.invoke('telegram:save-global-media', messageId, peerId),
   },
   dialog: {
     pickFile: () => ipcRenderer.invoke('dialog:pick-file'),
