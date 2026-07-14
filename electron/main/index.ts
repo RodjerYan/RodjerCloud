@@ -1279,9 +1279,25 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
       if (needsConversion) {
         try {
           if (fs.existsSync(jpgPath)) fs.unlinkSync(jpgPath)
-          require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', filePath, '--out', jpgPath], { timeout: 15000 })
+          const inputBuffer = fs.readFileSync(filePath)
+          
+          if (inputBuffer.length > 2 && inputBuffer[0] === 0xFF && inputBuffer[1] === 0xD8 && inputBuffer[2] === 0xFF) {
+            fs.writeFileSync(jpgPath, inputBuffer)
+          } else {
+            if (process.platform === 'darwin') {
+              require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', filePath, '--out', jpgPath], { timeout: 15000 })
+            } else {
+              const heicConvert = require('heic-convert')
+              const outputBuffer = await heicConvert({
+                buffer: inputBuffer,
+                format: 'JPEG',
+                quality: 0.8
+              })
+              fs.writeFileSync(jpgPath, Buffer.from(outputBuffer))
+            }
+          }
         } catch (e: any) {
-          console.error('sips FAIL for thumbnail:', filePath, e.message)
+          console.error('HEIC convert FAIL for thumbnail:', filePath, e.message)
         }
       }
       finalPath = jpgPath
