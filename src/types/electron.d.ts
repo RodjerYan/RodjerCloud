@@ -47,7 +47,7 @@ declare global {
         getVersion: () => Promise<{ success: boolean; data?: string; error?: string }>
         log: (level: string, msg: string) => void
         checkUpdate: () => Promise<{ success: boolean; data?: { hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseNotes: string; downloadUrl: string; assetName: string; htmlUrl: string }; error?: string }>
-        downloadUpdate: (assetId: number, assetName?: string) => Promise<{ success: boolean; data?: { filePath: string; fileName: string }; error?: string }>
+        downloadUpdate: (assetId: number, assetName?: string, latestVersion?: string) => Promise<{ success: boolean; data?: { filePath: string; fileName: string }; error?: string }>
         installUpdate: (filePath: string) => Promise<{ success: boolean; error?: string }>
         onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => () => void
         onUpdateAvailable: (cb: (data: { version: string; assetId: number; assetName: string }) => void) => () => void

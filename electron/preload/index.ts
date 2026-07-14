@@ -68,7 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     log: (level: string, msg: string) => ipcRenderer.send('app:log', level, msg),
     checkUpdate: () => ipcRenderer.invoke('app:check-update'),
-    downloadUpdate: (assetId: number, assetName?: string) => ipcRenderer.invoke('app:download-update', assetId, assetName),
+    downloadUpdate: (assetId: number, assetName?: string, latestVersion?: string) => ipcRenderer.invoke('app:download-update', assetId, assetName, latestVersion),
     installUpdate: (filePath: string) => ipcRenderer.invoke('app:install-update', filePath),
     onDownloadProgress: (cb: (data: { downloaded: number; total: number; percent: number }) => void) => {
       const listener = (_: any, data: any) => cb(data)

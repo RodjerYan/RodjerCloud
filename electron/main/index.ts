@@ -758,58 +758,71 @@ ipcMain.handle('app:check-update', async () => {
   }
 })
 
-function downloadFile(event: any, url: string, destPath: string, redirects = 0, isFirst = true): Promise<number> {
+function downloadWithNet(event: any, url: string, destPath: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    if (redirects > 5) return reject(new Error('Too many redirects'))
-    const mod = url.startsWith('https') ? https : http
-    const dlHeaders: any = { 'User-Agent': 'RodjerCloud', 'Accept': 'application/octet-stream' }
-    if (_githubToken && isFirst) dlHeaders['Authorization'] = `token ${_githubToken}`
-    const req = mod.get(url, { headers: dlHeaders, timeout: 30000 }, (res: any) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        res.resume()
-        return downloadFile(event, res.headers.location, destPath, redirects + 1, false).then(resolve, reject)
-      }
-      if (res.statusCode !== 200) {
-        res.resume()
-        return reject(new Error(`HTTP ${res.statusCode}`))
-      }
-      const total = parseInt(res.headers['content-length'] || '0', 10)
-      let downloaded = 0
-      const fileStream = fs.createWriteStream(destPath)
-      fileStream.on('error', (err: Error) => { res.unpipe(); fs.unlink(destPath, () => {}); reject(err) })
-      res.on('error', (err: Error) => { fileStream.destroy(); fs.unlink(destPath, () => {}); reject(err) })
-      res.pipe(fileStream)
-      res.on('data', (chunk: Buffer) => {
-        downloaded += chunk.length
-        event.sender.send('app:download-progress', { downloaded, total, percent: total ? Math.round(downloaded / total * 100) : 0 })
-      })
-      res.on('end', () => { fileStream.end(() => resolve(total)) })
+    const fileStream = fs.createWriteStream(destPath)
+    fileStream.on('error', (err) => { reject(err) })
+
+    const request = net.request({
+      method: 'GET',
+      url,
+      headers: {
+        'User-Agent': 'RodjerCloud',
+        'Accept': 'application/octet-stream',
+        ...(_githubToken ? { 'Authorization': `token ${_githubToken}` } : {}),
+      },
     })
-    req.on('error', (err: Error) => { fs.unlink(destPath, () => {}); reject(err) })
-    req.on('timeout', () => { req.destroy(); fs.unlink(destPath, () => {}); reject(new Error('Connection timeout')) })
+
+    let total = 0
+    let downloaded = 0
+
+    request.on('response', (response) => {
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        fileStream.destroy()
+        fs.unlink(destPath, () => {})
+        return reject(new Error(`HTTP ${response.statusCode}`))
+      }
+
+      total = parseInt(String(response.headers['content-length'] || '0'), 10)
+
+      response.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length
+        fileStream.write(chunk)
+        event.sender.send('app:download-progress', {
+          downloaded, total,
+          percent: total ? Math.round(downloaded / total * 100) : 0,
+        })
+      })
+
+      response.on('end', () => {
+        fileStream.end(() => resolve(total))
+      })
+
+      response.on('error', (err) => {
+        fileStream.destroy()
+        fs.unlink(destPath, () => {})
+        reject(err)
+      })
+    })
+
+    request.on('error', (err) => {
+      fileStream.destroy()
+      fs.unlink(destPath, () => {})
+      reject(err)
+    })
+
+    request.end()
   })
 }
 
-ipcMain.handle('app:download-update', async (event, assetId: number, assetName: string) => {
+ipcMain.handle('app:download-update', async (event, assetId: number, assetName: string, latestVersion: string) => {
   try {
     const tempDir = app.getPath('temp')
     const destPath = pathMod.join(tempDir, 'update.exe')
-
-    // Try direct download first (no auth needed for public repos)
-    if (assetName) {
-      const dlUrl = `https://github.com/${GITHUB_REPO}/releases/latest/download/${assetName}`
-      try {
-        await downloadFile(event, dlUrl, destPath)
-        return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
-      } catch {
-        // If direct download fails, clear dest and fall through to API path
-        try { fs.unlinkSync(destPath) } catch {}
-      }
-    }
-
-    // Fallback: API-based download (may require token for private repos)
-    const downloadUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${assetId}`
-    await downloadFile(event, downloadUrl, destPath)
+    const tag = (latestVersion || app.getVersion()).replace(/^v/, '')
+    // Use direct CDN URL — works for public repos without auth via Chromium's network stack
+    const downloadUrl = `https://github.com/${GITHUB_REPO}/releases/download/v${tag}/${assetName}`
+    await downloadWithNet(event, downloadUrl, destPath)
     return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
   } catch (error) {
     return { success: false, error: (error as Error).message }
