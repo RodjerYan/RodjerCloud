@@ -588,21 +588,20 @@ export class TelegramService {
         mimeType = doc.mimeType
         const attr = doc.attributes?.find((a: any) => a.className === 'DocumentAttributeFilename')
         if (attr) fileName = attr.fileName
-        mediaDoc = {
-          id: String(doc.id),
-          accessHash: String(doc.accessHash),
-          fileReference: Array.from(Buffer.isBuffer(doc.fileReference) ? doc.fileReference : Buffer.from(doc.fileReference)),
+        if (doc.id && doc.accessHash && doc.fileReference) {
+          const fr = Buffer.isBuffer(doc.fileReference) ? doc.fileReference : Buffer.from(doc.fileReference)
+          mediaDoc = { id: String(doc.id), accessHash: String(doc.accessHash), fileReference: Array.from(fr) }
+          mediaType = 'document'
         }
-        mediaType = 'document'
       } else if (m.media && m.media.photo) {
         fileName = 'photo.jpg'
         mimeType = 'image/jpeg'
-        mediaDoc = {
-          id: String(m.media.photo.id),
-          accessHash: String(m.media.photo.accessHash),
-          fileReference: Array.from(Buffer.isBuffer(m.media.photo.fileReference) ? m.media.photo.fileReference : Buffer.from(m.media.photo.fileReference)),
+        const p = m.media.photo
+        if (p.id && p.accessHash && p.fileReference) {
+          const fr = Buffer.isBuffer(p.fileReference) ? p.fileReference : Buffer.from(p.fileReference)
+          mediaDoc = { id: String(p.id), accessHash: String(p.accessHash), fileReference: Array.from(fr) }
+          mediaType = 'photo'
         }
-        mediaType = 'photo'
       }
 
       return {
