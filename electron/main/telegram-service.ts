@@ -558,6 +558,9 @@ export class TelegramService {
     const result: any = await this.client.invoke(
       new Api.messages.SearchGlobal({
         q: query,
+        filter: new Api.InputMessagesFilterEmpty(),
+        minDate: 0,
+        maxDate: 0,
         limit: 50,
         offsetRate: 0,
         offsetPeer: new Api.InputPeerEmpty(),
