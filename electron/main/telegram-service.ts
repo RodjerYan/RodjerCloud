@@ -31,6 +31,48 @@ function deferred<T>(): Deferred<T> {
 
 const CHANNEL_NAME = 'My area'
 
+async function splitFileLocal(filePath: string, chunkSize: number): Promise<string[]> {
+  const fileStats = fs.statSync(filePath)
+  if (fileStats.size <= chunkSize) return [filePath]
+
+  const tempDir = app.getPath('temp')
+  const baseName = path.basename(filePath)
+  const parts: string[] = []
+  
+  const readStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })
+  let currentPartIndex = 0
+  let currentPartPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${currentPartIndex}`)
+  let writeStream = fs.createWriteStream(currentPartPath)
+  parts.push(currentPartPath)
+  let bytesWritten = 0
+
+  return new Promise((resolve, reject) => {
+    readStream.on('data', (chunk: Buffer) => {
+      if (bytesWritten + chunk.length > chunkSize) {
+        const spaceLeft = chunkSize - bytesWritten
+        writeStream.write(chunk.slice(0, spaceLeft))
+        writeStream.end()
+        
+        currentPartIndex++
+        currentPartPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${currentPartIndex}`)
+        parts.push(currentPartPath)
+        writeStream = fs.createWriteStream(currentPartPath)
+        writeStream.write(chunk.slice(spaceLeft))
+        bytesWritten = chunk.length - spaceLeft
+      } else {
+        writeStream.write(chunk)
+        bytesWritten += chunk.length
+      }
+    })
+    readStream.on('end', () => {
+      writeStream.end()
+      resolve(parts)
+    })
+    readStream.on('error', reject)
+    writeStream.on('error', reject)
+  })
+}
+
 export class TelegramService {
   private client: TelegramClient | null = null
   private phoneNumber: string = ''
@@ -311,19 +353,7 @@ export class TelegramService {
     const fileName = customFileName || path.basename(filePath)
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
-    const TWO_GB = 2 * 1024 * 1024 * 1024
-
-    if (sizeBytes > TWO_GB) {
-      if (isTemp) fs.unlinkSync(uploadPath).catch(() => {})
-      throw new Error('File splitting not implemented yet. Files must be under 2GB.')
-    }
-
-    let lastSent = 0
-
-    let captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
-    if (encrypt) {
-      captionStr += `\n#vault ${ivHex}`
-    }
+    const CHUNK_SIZE = 1.95 * 1024 * 1024 * 1024 // 1.95 GB
 
     let turboMode = false
     try {
@@ -343,9 +373,6 @@ export class TelegramService {
       if (sizeBytes > 100 * 1024 * 1024) workersCount = 4
       else workersCount = 2
     }
-
-    // Usually gramjs allows setting maxChunkSize but uploadFile defaults it correctly.
-    // We just pass workers.
 
     let thumbBuffer: Buffer | undefined = undefined
     if (!isTemp) {
@@ -371,36 +398,83 @@ export class TelegramService {
       }
     }
 
-    const result = await this.client.sendFile(this.channelId as any, {
-      file: uploadPath,
-      caption: captionStr,
-      forceDocument: true,
-      workers: workersCount,
-      thumb: thumbBuffer,
-      progressCallback: (progress: any) => {
-        try {
-          const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
-          const sent = val <= 1 ? Math.round(val * sizeBytes) : Math.min(val, sizeBytes)
-          if (sent > (lastSent ?? 0)) lastSent = sent
-          onProgress?.(lastSent, sizeBytes)
-        } catch (err) {
-          console.error('Progress callback error:', err)
-        }
-      },
-    } as any)
+    const parts = await splitFileLocal(uploadPath, CHUNK_SIZE)
+    const isMultipart = parts.length > 1
+    
+    let mainMessageId: number | null = null
+    const multipartIds: number[] = []
+    let totalSent = 0
+    let fileHash = ''
+    try { fileHash = await computeFileHash(filePath) } catch {}
 
+    let mainCaptionStr = ''
+
+    for (let i = 0; i < parts.length; i++) {
+      const partPath = parts[i]
+      const partSizeBytes = fs.statSync(partPath).size
+      let partSent = 0
+
+      let captionStr = ''
+      if (i === 0) {
+        // @ts-ignore
+        captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
+        if (encrypt) {
+          captionStr += `\n#vault ${ivHex}`
+        }
+        mainCaptionStr = captionStr
+      } else {
+        captionStr = `#chunk_of ${mainMessageId}`
+      }
+
+      const result = await this.client.sendFile(this.channelId as any, {
+        file: partPath,
+        caption: captionStr,
+        forceDocument: true,
+        workers: workersCount,
+        thumb: i === 0 ? thumbBuffer : undefined,
+        progressCallback: (progress: any) => {
+          try {
+            const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
+            const sent = val <= 1 ? Math.round(val * partSizeBytes) : Math.min(val, partSizeBytes)
+            if (sent > partSent) {
+              const diff = sent - partSent
+              totalSent += diff
+              partSent = sent
+              onProgress?.(totalSent, sizeBytes)
+            }
+          } catch (err) {
+            console.error('Progress callback error:', err)
+          }
+        },
+      } as any)
+
+      const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
+      if (i === 0) {
+        mainMessageId = msgId
+      } else {
+        multipartIds.push(msgId)
+      }
+
+      if (isMultipart) {
+        fs.unlink(partPath, () => {})
+      }
+    }
+
+    if (isMultipart && multipartIds.length > 0 && mainMessageId !== null) {
+      mainCaptionStr += `\n#multipart ${multipartIds.join(',')}`
+      await this.client.editMessage(this.channelId as any, { message: mainMessageId, text: mainCaptionStr })
+    }
+    
     if (isTemp) {
-      fs.unlink(uploadPath, () => {})
+        fs.unlink(uploadPath, () => {})
     }
 
     const fileTime = originalStats.birthtimeMs && originalStats.birthtimeMs > 0
       ? Math.floor(originalStats.birthtimeMs / 1000)
       : Math.floor(originalStats.mtimeMs / 1000)
-    const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
-    let fileHash = ''
-    try { fileHash = await computeFileHash(filePath) } catch {}
+
     return {
-      messageId: msgId,
+      messageId: mainMessageId as number,
       fileName,
       fileSize: originalSizeBytes,
       uploadedAt: fileTime,
@@ -461,12 +535,13 @@ export class TelegramService {
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
         const caption: string = m.message || ''
-        return !caption.includes(this.TRASH_MARKER)
+        return !caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
       })
       .map((m: any) => {
         const caption = m.message || ''
         const createdMatch = caption.match(/Created:\s*(.+)/)
         const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
+        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
         const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
         return {
           messageId: this.msgId(m),
@@ -478,6 +553,8 @@ export class TelegramService {
           caption,
           chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
           isEncrypted: !!vaultMatch,
+          isMultipart: !!multipartMatch,
+          multipartIds: multipartMatch ? multipartMatch[1].split(',').map(Number) : [],
         }
       })
   }
@@ -489,7 +566,7 @@ export class TelegramService {
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
         const caption: string = m.message || ''
-        return caption.includes(this.TRASH_MARKER)
+        return caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
       })
       .map((m: any) => {
         const caption = m.message || ''
@@ -520,6 +597,19 @@ export class TelegramService {
       ? oldCaption
       : oldCaption + `\n${this.TRASH_MARKER}${Date.now()}`
     await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
+    
+    const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
+    if (multipartMatch) {
+      const partIds = multipartMatch[1].split(',').map(Number)
+      for (const id of partIds) {
+        const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
+        if (pMsgs && pMsgs.length > 0) {
+           const pOld = pMsgs[0].message || ''
+           const pNew = pOld.includes(this.TRASH_MARKER) ? pOld : pOld + `\n${this.TRASH_MARKER}${Date.now()}`
+           await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
+        }
+      }
+    }
   }
 
   async restoreFile(messageId: number) {
@@ -532,25 +622,77 @@ export class TelegramService {
     if (newCaption !== oldCaption) {
       await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
     }
+    
+    const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
+    if (multipartMatch) {
+      const partIds = multipartMatch[1].split(',').map(Number)
+      for (const id of partIds) {
+        const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
+        if (pMsgs && pMsgs.length > 0) {
+           const pOld = pMsgs[0].message || ''
+           const pNew = pOld.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
+           if (pNew !== pOld) {
+              await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
+           }
+        }
+      }
+    }
   }
 
   async permanentDelete(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    let idsToDelete = [messageId]
+    if (messages && messages.length > 0) {
+       const caption = messages[0].message || ''
+       const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+       if (multipartMatch) {
+          idsToDelete.push(...multipartMatch[1].split(',').map(Number))
+       }
+    }
     await this.client.invoke(
-      new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [messageId] })
+      new Api.channels.DeleteMessages({ channel: this.channelId as any, id: idsToDelete })
     )
   }
 
   private async performDownload(message: any, targetPath: string) {
     const caption = message.message || ''
     const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
-    if (vaultMatch) {
-      const encTemp = targetPath + '.enc'
-      await this.client.downloadMedia(message, { outputFile: encTemp } as any)
-      await vaultService.decryptFile(encTemp, targetPath, vaultMatch[1])
-      try { fs.unlinkSync(encTemp) } catch {}
+    const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+    const isEncrypted = !!vaultMatch
+
+    let finalTargetPath = targetPath
+    if (isEncrypted) finalTargetPath = targetPath + '.enc'
+
+    if (multipartMatch) {
+      const partIds = multipartMatch[1].split(',').map(Number)
+      
+      await this.client!.downloadMedia(message, { outputFile: finalTargetPath } as any)
+      
+      for (const id of partIds) {
+        const partMessages = await this.client!.getMessages(this.channelId as any, { ids: [id] })
+        if (partMessages && partMessages.length > 0) {
+          const partPath = finalTargetPath + `.part_${id}`
+          await this.client!.downloadMedia(partMessages[0], { outputFile: partPath } as any)
+          
+          const readStream = fs.createReadStream(partPath)
+          const writeStream = fs.createWriteStream(finalTargetPath, { flags: 'a' })
+          await new Promise((resolve, reject) => {
+            readStream.pipe(writeStream)
+            readStream.on('end', resolve)
+            readStream.on('error', reject)
+            writeStream.on('error', reject)
+          })
+          fs.unlinkSync(partPath)
+        }
+      }
     } else {
-      await this.client.downloadMedia(message, { outputFile: targetPath } as any)
+      await this.client!.downloadMedia(message, { outputFile: finalTargetPath } as any)
+    }
+
+    if (isEncrypted) {
+      await vaultService.decryptFile(finalTargetPath, targetPath, vaultMatch[1])
+      try { fs.unlinkSync(finalTargetPath) } catch {}
     }
   }
 
