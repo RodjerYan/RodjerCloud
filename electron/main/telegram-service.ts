@@ -563,7 +563,7 @@ export class TelegramService {
         filter: new Api.InputMessagesFilterEmpty(),
         minDate: 0,
         maxDate: 0,
-        limit: 50,
+        limit: 200,
         offsetRate: 0,
         offsetPeer: new Api.InputPeerEmpty(),
         offsetId: 0,
@@ -589,7 +589,7 @@ export class TelegramService {
       let mediaDoc: any = null
       
       let mediaType: string | null = null
-      if (m.media && m.media.document) {
+      if (m.media?.document) {
         const doc = m.media.document
         fileSize = this.toNum(doc.size)
         mimeType = doc.mimeType
@@ -600,7 +600,7 @@ export class TelegramService {
           mediaDoc = { id: String(doc.id), accessHash: String(doc.accessHash), fileReference: Array.from(fr) }
           mediaType = 'document'
         }
-      } else if (m.media && m.media.photo) {
+      } else if (m.media?.photo) {
         fileName = 'photo.jpg'
         mimeType = 'image/jpeg'
         const p = m.media.photo
@@ -611,6 +611,8 @@ export class TelegramService {
         }
       }
 
+      const canDownload = !!(mediaDoc && mediaType)
+
       return {
         messageId: this.msgId(m),
         peerId,
@@ -620,7 +622,7 @@ export class TelegramService {
         fileName,
         fileSize,
         mimeType,
-        hasMedia: !!m.media,
+        hasMedia: canDownload,
         mediaDoc,
         mediaType,
         previewKey,
@@ -633,6 +635,10 @@ export class TelegramService {
     const msg: any = this.globalPreviewCache.get(previewKey)
     if (!msg) throw new Error('Preview not found, please search again')
 
+    if (!msg.media?.document && !msg.media?.photo) {
+      throw new Error('This result has no downloadable media (webpage preview)')
+    }
+
     try {
       const tempDir = app.getPath('temp')
       const ext = this.guessExtension(msg)
@@ -643,7 +649,8 @@ export class TelegramService {
       const stat = await fs.promises.stat(finalPath).catch(() => null)
       if (!stat || stat.size === 0) throw new Error('Downloaded file is empty')
 
-      return { filePath: finalPath, mimeType: msg.media?.document?.mimeType || msg.media?.photo ? 'image/jpeg' : 'application/octet-stream' }
+      const mime = msg.media?.document?.mimeType || (msg.media?.photo ? 'image/jpeg' : 'application/octet-stream')
+      return { filePath: finalPath, mimeType: mime }
     } catch (e) {
       throw e
     }

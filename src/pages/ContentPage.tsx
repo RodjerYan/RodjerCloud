@@ -12,6 +12,7 @@ export default function ContentPage() {
   const [previewData, setPreviewData] = useState<{ filePath: string; mimeType: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -61,6 +62,7 @@ export default function ContentPage() {
     setPreviewLoading(true)
     setPreviewUrl(null)
     setPreviewData(null)
+    setPreviewError(null)
 
     try {
       const res = await window.electronAPI.telegram.previewGlobalMedia(r.previewKey)
@@ -76,12 +78,10 @@ export default function ContentPage() {
           if (urlRes.success) setPreviewUrl(urlRes.data)
         }
       } else {
-        alert("Ошибка загрузки: " + (res.error || "Unknown error"))
-        closePreview()
+        setPreviewError(res.error || "Неизвестная ошибка")
       }
     } catch (e: any) {
-      alert("Ошибка: " + e.message)
-      closePreview()
+      setPreviewError(e.message)
     } finally {
       setPreviewLoading(false)
     }
@@ -91,6 +91,7 @@ export default function ContentPage() {
     setPreviewItem(null)
     setPreviewData(null)
     setPreviewUrl(null)
+    setPreviewError(null)
   }
 
   const formatSize = (bytes: number) => {
@@ -258,6 +259,11 @@ export default function ContentPage() {
             {previewLoading ? (
               <div style={{ padding: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Loader size={40} className="spin" style={{ opacity: 0.5 }} />
+              </div>
+            ) : previewError ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <FileText size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+                <p style={{ fontSize: 14, color: '#ef4444', margin: 0 }}>{previewError}</p>
               </div>
             ) : previewUrl && previewItem.mimeType.startsWith('image/') ? (
               <div style={{ padding: 16, display: 'flex', justifyContent: 'center' }}>
