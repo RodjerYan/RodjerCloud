@@ -25,6 +25,7 @@ declare global {
         getUserInfo: () => Promise<{ success: boolean; data?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }; error?: string }>
         searchGlobal: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
         saveGlobalMedia: (messageId: number, peerId: string, mediaDoc?: any, mediaType?: string, originalText?: string) => Promise<{ success: boolean; error?: string }>
+        previewGlobalMedia: (previewKey: string) => Promise<{ success: boolean; data?: { filePath: string; mimeType: string }; error?: string }>
       }
       dialog: {
         pickFile: () => Promise<{ success: boolean; data?: { filePath: string; fileName: string; fileSize: number }; error?: string }>

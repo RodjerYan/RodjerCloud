@@ -35,6 +35,8 @@ export class TelegramService {
   private client: TelegramClient | null = null
   private phoneNumber: string = ''
   private channelId: bigint | null = null
+  private globalPreviewCache = new Map<string, any>()
+  private globalPreviewIdCounter = 0
 
   private startPromise: Promise<void> | null = null
   private phoneCodeDef: Deferred<string> | null = null
@@ -574,6 +576,8 @@ export class TelegramService {
     result.users?.forEach((u: any) => chatsMap.set(u.id?.toString(), u))
 
     return result.messages.map((m: any) => {
+      const previewKey = 'preview_' + (++this.globalPreviewIdCounter)
+      this.globalPreviewCache.set(previewKey, m)
       let peerId = m.peerId?.channelId || m.peerId?.chatId || m.peerId?.userId
       if (peerId) peerId = peerId.toString()
       const authorEntity = peerId ? chatsMap.get(peerId) : null
@@ -619,8 +623,44 @@ export class TelegramService {
         hasMedia: !!m.media,
         mediaDoc,
         mediaType,
+        previewKey,
       }
     }).filter((m: any) => m.hasMedia)
+  }
+
+  async previewGlobalMedia(previewKey: string) {
+    if (!this.client) throw new Error('Client not initialized')
+    const msg: any = this.globalPreviewCache.get(previewKey)
+    if (!msg) throw new Error('Preview not found, please search again')
+
+    try {
+      const tempDir = app.getPath('temp')
+      const ext = this.guessExtension(msg)
+      const tempPath = path.join(tempDir, `preview_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`)
+      const result = await this.client.downloadMedia(msg, { outputFile: tempPath })
+
+      const finalPath = typeof result === 'string' && result ? result : tempPath
+      const stat = await fs.promises.stat(finalPath).catch(() => null)
+      if (!stat || stat.size === 0) throw new Error('Downloaded file is empty')
+
+      return { filePath: finalPath, mimeType: msg.media?.document?.mimeType || msg.media?.photo ? 'image/jpeg' : 'application/octet-stream' }
+    } catch (e) {
+      throw e
+    }
+  }
+
+  private guessExtension(msg: any): string {
+    if (msg.media?.document?.mimeType) {
+      const map: Record<string, string> = {
+        'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+        'video/mp4': '.mp4', 'video/x-matroska': '.mkv', 'video/quicktime': '.mov',
+        'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/flac': '.flac',
+        'application/zip': '.zip', 'application/x-rar-compressed': '.rar',
+        'text/plain': '.txt', 'application/pdf': '.pdf',
+      }
+      return map[msg.media.document.mimeType] || ''
+    }
+    return ''
   }
 
   async saveGlobalMediaToCloud(messageId: number, peerIdStr: string, mediaDoc?: any, mediaType?: string, originalText?: string) {
