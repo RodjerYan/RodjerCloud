@@ -2,8 +2,6 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
-import * as https from 'https'
-import * as http from 'http'
 import * as zlib from 'zlib'
 import * as crypto from 'crypto'
 import * as pathMod from 'path'
