@@ -34,7 +34,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('telegram:logout'),
     getUserInfo: () => ipcRenderer.invoke('telegram:get-user-info'),
     searchGlobal: (query: string) => ipcRenderer.invoke('telegram:search-global', query),
-    saveGlobalMedia: (messageId: number, peerId: string) => ipcRenderer.invoke('telegram:save-global-media', messageId, peerId),
+    saveGlobalMedia: (messageId: number, peerId: string, mediaDoc?: any, mediaType?: string, originalText?: string) =>
+      ipcRenderer.invoke('telegram:save-global-media', messageId, peerId, mediaDoc, mediaType, originalText),
   },
   dialog: {
     pickFile: () => ipcRenderer.invoke('dialog:pick-file'),

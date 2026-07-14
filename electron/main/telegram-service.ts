@@ -579,16 +579,30 @@ export class TelegramService {
       let fileName = 'Unknown'
       let fileSize = 0
       let mimeType = ''
+      let mediaDoc: any = null
       
+      let mediaType: string | null = null
       if (m.media && m.media.document) {
         const doc = m.media.document
         fileSize = this.toNum(doc.size)
         mimeType = doc.mimeType
         const attr = doc.attributes?.find((a: any) => a.className === 'DocumentAttributeFilename')
         if (attr) fileName = attr.fileName
+        mediaDoc = {
+          id: String(doc.id),
+          accessHash: String(doc.accessHash),
+          fileReference: Array.from(Buffer.isBuffer(doc.fileReference) ? doc.fileReference : Buffer.from(doc.fileReference)),
+        }
+        mediaType = 'document'
       } else if (m.media && m.media.photo) {
         fileName = 'photo.jpg'
         mimeType = 'image/jpeg'
+        mediaDoc = {
+          id: String(m.media.photo.id),
+          accessHash: String(m.media.photo.accessHash),
+          fileReference: Array.from(Buffer.isBuffer(m.media.photo.fileReference) ? m.media.photo.fileReference : Buffer.from(m.media.photo.fileReference)),
+        }
+        mediaType = 'photo'
       }
 
       return {
@@ -600,20 +614,68 @@ export class TelegramService {
         fileName,
         fileSize,
         mimeType,
-        hasMedia: !!m.media
+        hasMedia: !!m.media,
+        mediaDoc,
+        mediaType,
       }
     }).filter((m: any) => m.hasMedia)
   }
 
-  async saveGlobalMediaToCloud(messageId: number, peerIdStr: string) {
+  async saveGlobalMediaToCloud(messageId: number, peerIdStr: string, mediaDoc?: any, mediaType?: string, originalText?: string) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized')
-    
-    const peerEntity = await this.client.getEntity(peerIdStr).catch(() => peerIdStr)
-    const messages = await this.client.getMessages(peerEntity, { ids: [messageId] })
-    if (!messages || messages.length === 0) throw new Error('Message not found')
-    
-    const message: any = messages[0]
-    if (!message.media) throw new Error('No media attached to message')
+
+    let inputMedia: any = null
+    let caption = ''
+
+    if (mediaDoc && mediaType) {
+      const fr = Buffer.isBuffer(mediaDoc.fileReference) ? mediaDoc.fileReference : Buffer.from(mediaDoc.fileReference)
+      if (mediaType === 'document') {
+        inputMedia = new Api.InputMediaDocument({
+          id: new Api.InputDocument({
+            id: mediaDoc.id,
+            accessHash: mediaDoc.accessHash,
+            fileReference: fr,
+          })
+        })
+      } else if (mediaType === 'photo') {
+        inputMedia = new Api.InputMediaPhoto({
+          id: new Api.InputPhoto({
+            id: mediaDoc.id,
+            accessHash: mediaDoc.accessHash,
+            fileReference: fr,
+          })
+        })
+      }
+      caption = originalText || ''
+    } else {
+      const peerEntity = await this.client.getEntity(peerIdStr).catch(() => peerIdStr)
+      const messages = await this.client.getMessages(peerEntity, { ids: [messageId] })
+      if (!messages || messages.length === 0) throw new Error('Message not found')
+      
+      const message: any = messages[0]
+      if (!message.media) throw new Error('No media attached to message')
+      caption = message.message || ''
+
+      if (message.media.document) {
+        inputMedia = new Api.InputMediaDocument({
+          id: new Api.InputDocument({
+            id: message.media.document.id,
+            accessHash: message.media.document.accessHash,
+            fileReference: message.media.document.fileReference
+          })
+        })
+      } else if (message.media.photo) {
+        inputMedia = new Api.InputMediaPhoto({
+          id: new Api.InputPhoto({
+            id: message.media.photo.id,
+            accessHash: message.media.photo.accessHash,
+            fileReference: message.media.photo.fileReference
+          })
+        })
+      }
+    }
+
+    if (!inputMedia) throw new Error('No media to save')
 
     // Find if "Контент" folder exists in our channel
     let folderId = ''
@@ -631,7 +693,6 @@ export class TelegramService {
           await this.client.editMessage(this.channelId as any, { message: this.msgId(foldersStr[0]), text: `#folders_metadata\n${JSON.stringify(meta)}` })
         }
       } else {
-        // Create metadata message if it doesn't exist
         folderId = crypto.randomUUID()
         const meta = { folders: [{ id: folderId, name: 'Контент', parentId: null }], fileFolders: {} }
         await this.client.sendMessage(this.channelId as any, { message: `#folders_metadata\n${JSON.stringify(meta)}` })
@@ -640,42 +701,13 @@ export class TelegramService {
       console.error('Failed to parse folders metadata', e)
     }
 
-    const caption = `#folder_${folderId}\n${message.message || ''}`
+    caption = `#folder_${folderId}\n${caption}`
 
-    // We can use SendMedia to resend the media with a new caption
-    let inputMedia: any
-    if (message.media.document) {
-      inputMedia = new Api.InputMediaDocument({
-        id: new Api.InputDocument({
-          id: message.media.document.id,
-          accessHash: message.media.document.accessHash,
-          fileReference: message.media.document.fileReference
-        })
-      })
-    } else if (message.media.photo) {
-      inputMedia = new Api.InputMediaPhoto({
-        id: new Api.InputPhoto({
-          id: message.media.photo.id,
-          accessHash: message.media.photo.accessHash,
-          fileReference: message.media.photo.fileReference
-        })
-      })
-    }
-
-    if (inputMedia) {
-      await this.client.invoke(new Api.messages.SendMedia({
-        peer: this.channelId as any,
-        media: inputMedia,
-        message: caption
-      }))
-    } else {
-      // Fallback: forward the message
-      await this.client.invoke(new Api.messages.ForwardMessages({
-        fromPeer: peerEntity,
-        id: [messageId],
-        toPeer: this.channelId as any
-      }))
-    }
+    await this.client.invoke(new Api.messages.SendMedia({
+      peer: this.channelId as any,
+      media: inputMedia,
+      message: caption
+    }))
   }
 
   async downloadFile(messageId: number, fileName: string) {

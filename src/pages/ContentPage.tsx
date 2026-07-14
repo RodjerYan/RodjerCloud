@@ -31,12 +31,12 @@ export default function ContentPage() {
     }
   }
 
-  const handleSave = async (messageId: number, peerId: string) => {
-    if (savedIds.has(messageId)) return
+  const handleSave = async (r: any) => {
+    if (savedIds.has(r.messageId)) return
     
-    setSavingId(messageId)
+    setSavingId(r.messageId)
     try {
-      const res = await window.electronAPI.telegram.saveGlobalMedia(messageId, peerId)
+      const res = await window.electronAPI.telegram.saveGlobalMedia(r.messageId, r.peerId, r.mediaDoc, r.mediaType, r.text)
       if (res.success) {
         setSavedIds(prev => new Set(prev).add(messageId))
         // Show success somehow, maybe a toast. But icon change is enough
@@ -160,7 +160,7 @@ export default function ContentPage() {
                     </div>
                     
                     <button 
-                      onClick={() => handleSave(r.messageId, r.peerId)}
+                      onClick={() => handleSave(r)}
                       disabled={isSaved || isSaving}
                       className={isSaved ? "v3-btn" : "v3-btn primary"}
                       style={{ padding: '6px 12px', height: 32, fontSize: 13, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, opacity: isSaved ? 0.7 : 1 }}

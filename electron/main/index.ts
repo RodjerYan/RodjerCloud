@@ -457,9 +457,9 @@ ipcMain.handle('telegram:search-global', async (_, query: string) => {
   }
 })
 
-ipcMain.handle('telegram:save-global-media', async (_, messageId: number, peerId: string) => {
+ipcMain.handle('telegram:save-global-media', async (_, messageId: number, peerId: string, mediaDoc?: any, mediaType?: string, originalText?: string) => {
   try {
-    await telegramService.saveGlobalMediaToCloud(messageId, peerId)
+    await telegramService.saveGlobalMediaToCloud(messageId, peerId, mediaDoc, mediaType, originalText)
     return { success: true }
   } catch (error) {
     return { success: false, error: (error as Error).message }
