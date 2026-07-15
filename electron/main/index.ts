@@ -17,6 +17,10 @@ import { startVideoStreamServer } from './video-stream-server'
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 app.commandLine.appendSwitch('enable-transparent-visuals')
 
+if (process.env.NODE_ENV === 'development') {
+  process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
+}
+
 // Logger
 const logFile = path.join(app.getPath('userData'), 'rodjercloud.log')
 function log(level: string, msg: string) {
