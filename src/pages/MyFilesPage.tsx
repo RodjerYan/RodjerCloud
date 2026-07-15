@@ -40,6 +40,10 @@ const CAT_COLOR: Record<string, string> = {
 
 export default function MyFilesPage() {
   const navigate = useNavigate()
+  const [favs, setFavs] = useState<any[]>([])
+  const [displayCount, setDisplayCount] = useState(100)
+  const loaderRef = useRef<HTMLDivElement>(null)
+
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -68,7 +72,6 @@ export default function MyFilesPage() {
   const [botToken, setBotToken] = useState('')
   const [botConfigured, setBotConfigured] = useState(false)
   const [shareProgress, setShareProgress] = useState<'generating' | 'done' | null>(null)
-  const [favs, setFavs] = useState(v3store.getFavs())
   const [renameTarget, setRenameTarget] = useState<any>(null)
   const [renameInput, setRenameInput] = useState('')
   const [showSub, setShowSub] = useState<string | null>(null)
@@ -94,6 +97,19 @@ export default function MyFilesPage() {
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        setDisplayCount(prev => prev + 100)
+      }
+    }, { rootMargin: '200px' })
+    if (loaderRef.current) observer.observe(loaderRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    setDisplayCount(100)
+  }, [folderDrill, search, sort])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
@@ -185,7 +201,6 @@ export default function MyFilesPage() {
     setLoading(false)
   }
 
-  // Shared helper: upload files from OS drop or dialog and assign to a folder
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
     setDropProgress({ current: 0, total: dropped.length, pct: 0 })
@@ -207,7 +222,6 @@ export default function MyFilesPage() {
         if (choice === 'skip') continue
         if (choice === 'replace') {
           await window.electronAPI.telegram.deleteFile(existing.messageId)
-          // Optionally reload here if needed, but the upload will complete later anyway
         }
         if (choice === 'copy') {
           const extMatch = file.fileName.lastIndexOf('.')
@@ -520,11 +534,6 @@ export default function MyFilesPage() {
     return () => { off(); clearTimeout(dropDoneRef.current) }
   }, [])
 
-  const onQuickUpload = async () => {
-    const r = await window.electronAPI.dialog.pickMultipleFiles()
-    if (r.success) navigate('/upload', { state: { initialFiles: r.data } })
-  }
-
   const extractDroppedFiles = (e: React.DragEvent) => {
     const dropped: { filePath: string; fileName: string }[] = []
     for (const file of Array.from(e.dataTransfer.files)) {
@@ -541,7 +550,6 @@ export default function MyFilesPage() {
     await uploadDroppedFiles(dropped, folderDrill)
   }
 
-  // Recursive file count for a folder (includes files in subfolders)
   const countFilesRecursive = useCallback((folderId: string): number => {
     const directFiles = files.filter((f: any) => fileFolders[f.messageId] === folderId).length
     const childFolders = folders.filter(f => f.parentId === folderId)
@@ -731,7 +739,7 @@ export default function MyFilesPage() {
                   <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                 </tr></thead>
                 <tbody>
-                  {galleryFiles.map(f => (
+                  {galleryFiles.slice(0, displayCount).map(f => (
                     <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                       draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
@@ -823,7 +831,7 @@ export default function MyFilesPage() {
                   {items.length > 0 && (
                     view === 'grid' ? (
                       <div className="mf-grid">
-                        {items.map((f, i) => (
+                        {items.slice(0, displayCount).map(f => (
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
@@ -849,7 +857,7 @@ export default function MyFilesPage() {
                           <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                         </tr></thead>
                         <tbody>
-                          {items.map((f, i) => (
+                          {items.slice(0, displayCount).map(f => (
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
@@ -959,7 +967,7 @@ export default function MyFilesPage() {
                           <div className="mf-card-meta">{countFilesRecursive(sf.id)} файл.</div>
                         </div>
                       ))}
-                      {currentFiles.map(f => (
+                      {currentFiles.slice(0, displayCount).map(f => (
                         <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                            draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
@@ -1008,7 +1016,7 @@ export default function MyFilesPage() {
                             </td>
                           </tr>
                         ))}
-                        {currentFiles.map(f => (
+                        {currentFiles.slice(0, displayCount).map(f => (
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
@@ -1025,6 +1033,10 @@ export default function MyFilesPage() {
                       </tbody>
                     </table>
                   )
+                )}
+
+                {currentFiles.length > displayCount && (
+                  <div ref={loaderRef} style={{ height: 20, width: '100%', marginTop: 20 }} />
                 )}
 
                 {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && (

@@ -71,10 +71,36 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   }
 
   useEffect(() => {
+    let lastUpdate = 0;
+    let pendingUpdates = new Map<string, number>();
+    let rafId: number | null = null;
+
     const off = window.electronAPI.telegram.onUploadProgress?.((data: any) => {
-      setQueue(prev => prev.map(q => q.id === data.id ? { ...q, percent: data.percent } : q))
-    })
-    return () => { off && off() }
+      pendingUpdates.set(data.id, data.percent);
+      const now = Date.now();
+
+      // Only schedule a state update if we haven't done one recently (throttle to 100ms)
+      if (now - lastUpdate > 100) {
+        if (!rafId) {
+          rafId = window.requestAnimationFrame(() => {
+            setQueue(prev => prev.map(q => {
+              if (pendingUpdates.has(q.id)) {
+                return { ...q, percent: pendingUpdates.get(q.id)! };
+              }
+              return q;
+            }));
+            pendingUpdates.clear();
+            lastUpdate = Date.now();
+            rafId = null;
+          });
+        }
+      }
+    });
+
+    return () => {
+      if (off) off();
+      if (rafId) cancelAnimationFrame(rafId);
+    }
   }, [])
 
   const pickFolder = async (encryptNext: boolean) => {
