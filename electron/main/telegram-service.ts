@@ -278,15 +278,21 @@ export class TelegramService {
     if (!this.client) throw new Error('Client not initialized')
 
     try {
-      const dialogs = await this.client.getDialogs({ limit: 200 })
+      const dialogs = await this.client.getDialogs()
+      const matches: any[] = []
       for (const dialog of dialogs) {
         const entity = dialog.entity as any
         if (entity?.title && typeof entity.title === 'string' && entity.title === CHANNEL_NAME) {
-          this.channelId = BigInt(entity.id.toString())
-          return {
-            channelId: this.channelId.toString(),
-            channelName: entity.title,
-          }
+          matches.push(entity)
+        }
+      }
+      if (matches.length > 0) {
+        matches.sort((a, b) => Number(a.id) - Number(b.id)) // Smallest ID is the oldest channel
+        const oldest = matches[0]
+        this.channelId = BigInt(oldest.id.toString())
+        return {
+          channelId: this.channelId.toString(),
+          channelName: oldest.title,
         }
       }
     } catch (e) {
@@ -318,15 +324,21 @@ export class TelegramService {
     this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5 })
     await this.client.connect()
 
-    const dialogs = await this.client.getDialogs({ limit: 200 })
+    const dialogs = await this.client.getDialogs()
+    const matches: any[] = []
     for (const dialog of dialogs) {
       const entity = dialog.entity as any
       if (entity?.title && typeof entity.title === 'string' && entity.title === CHANNEL_NAME) {
-        this.channelId = BigInt(entity.id.toString())
-        return {
-          channelId: this.channelId.toString(),
-          channelName: entity.title,
-        }
+        matches.push(entity)
+      }
+    }
+    if (matches.length > 0) {
+      matches.sort((a, b) => Number(a.id) - Number(b.id))
+      const oldest = matches[0]
+      this.channelId = BigInt(oldest.id.toString())
+      return {
+        channelId: this.channelId.toString(),
+        channelName: oldest.title,
       }
     }
     return await this.createPrivateChannel()
