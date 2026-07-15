@@ -101,7 +101,7 @@ export default function AutoSyncPage() {
   const clearToast = (id: string) => setToasts(prev => prev.filter(x => x.id !== id))
 
   return (
-    <div style={{ padding: '28px 36px', minHeight: '100vh', position: 'relative', zIndex: 1 }}>
+    <div className="se-root">
       {showSettings && <AutoSyncSettings onClose={() => setShowSettings(false)} />}
 
       {/* ===== Toast container ===== */}
@@ -119,48 +119,34 @@ export default function AutoSyncPage() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: t.status === 'uploaded' ? '#34d399' : '#f87171' }}>
                   {t.status === 'uploaded' ? 'Загружен' : 'Ошибка загрузки'}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--v3-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {t.fileName}{t.fileSize ? ` • ${fmtSize(t.fileSize)}` : ''}
                 </div>
                 {t.error && <div style={{ fontSize: 11, color: '#f87171', marginTop: 2 }}>{t.error}</div>}
               </div>
-              <button onClick={() => clearToast(t.id)} style={{ background: 'none', border: 'none', color: 'var(--v3-text-dim)', cursor: 'pointer', padding: 2, fontSize: 14, lineHeight: 1, opacity: 0.5 }}>✕</button>
+              <button onClick={() => clearToast(t.id)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 2, fontSize: 14, lineHeight: 1, opacity: 0.5 }}>✕</button>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700, letterSpacing: '-0.02em', background: 'linear-gradient(135deg, #22d3ee 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
+      <div style={{ marginBottom: 24, paddingTop: 12 }}>
+        <h1 style={{ margin: '0 0 8px', fontSize: 28, letterSpacing: '-0.5px' }}>
           Авто-синхронизация
         </h1>
-        <p style={{ color: 'var(--v3-text-dim)', fontSize: 14, margin: '4px 0 0' }}>Автоматическая загрузка новых файлов из отслеживаемых папок в Telegram</p>
+        <p style={{ color: 'var(--text-dim)', fontSize: 14, margin: 0 }}>Автоматическая загрузка новых файлов из отслеживаемых папок в Telegram</p>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, marginBottom: 24 }}>
-        <button onClick={() => save({ ...config, enabled: !config.enabled })} style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 12,
-          border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit',
-          background: config.enabled ? 'linear-gradient(135deg, #f87171, #ef4444)' : 'linear-gradient(135deg, #22d3ee 0%, #a855f7 100%)',
-          color: '#fff', boxShadow: config.enabled ? '0 4px 20px rgba(248,113,113,0.3)' : '0 4px 20px rgba(34,211,238,0.25)',
-        }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+        <button onClick={() => save({ ...config, enabled: !config.enabled })} className={`v3-btn ${config.enabled ? '' : 'primary'}`}>
           {config.enabled ? <Square size={15} /> : <Play size={15} />}
           {config.enabled ? 'Остановить' : 'Запустить'}
         </button>
-        <button onClick={() => setShowSettings(true)} style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 12,
-          border: '1px solid var(--v3-border-strong)', cursor: 'pointer', fontWeight: 500, fontSize: 14, fontFamily: 'inherit',
-          background: 'rgba(255,255,255,0.03)', color: 'var(--v3-text)',
-        }}>
+        <button onClick={() => setShowSettings(true)} className="v3-btn">
           <Settings2 size={15} /> Настроить
         </button>
         {config.enabled && (
-          <button onClick={runScan} disabled={scanning} style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 12,
-            border: '1px dashed var(--v3-border-strong)', cursor: scanning ? 'wait' : 'pointer',
-            fontWeight: 500, fontSize: 14, fontFamily: 'inherit',
-            background: 'rgba(255,255,255,0.03)', color: 'var(--v3-text)',
-          }}>
+          <button onClick={runScan} disabled={scanning} className="v3-btn">
             {scanning ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
             {scanning ? 'Сканирование...' : 'Сканировать'}
           </button>
@@ -228,95 +214,89 @@ export default function AutoSyncPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 16 }}>
-        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Файлов в папках</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#e0e0e0' }}>{totalFileCount}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Файлов в папках</div>
+          <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--text)' }}>{totalFileCount}</div>
         </div>
-        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Загружено</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#34d399' }}>{status.uploadedCount}</div>
+        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Загружено</div>
+          <div style={{ fontSize: 32, fontWeight: 700, color: '#34d399' }}>{status.uploadedCount}</div>
         </div>
-        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ошибок</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#f87171' }}>{status.failedCount}</div>
+        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Ошибок</div>
+          <div style={{ fontSize: 32, fontWeight: 700, color: '#f87171' }}>{status.failedCount}</div>
         </div>
-        <div className="v3-card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ color: 'var(--v3-text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Статус</div>
+        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Статус</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: config.enabled ? '#34d399' : '#f87171', boxShadow: config.enabled ? '0 0 12px #34d399' : '0 0 12px #f87171', animation: config.enabled ? 'v3-pulse 1.4s ease-in-out infinite' : 'none' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: config.enabled ? '#34d399' : '#f87171' }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: config.enabled ? '#34d399' : '#f87171', boxShadow: config.enabled ? '0 0 12px rgba(52,211,153,0.5)' : 'none', animation: config.enabled ? 'v3-pulse 1.4s ease-in-out infinite' : 'none' }} />
+            <span style={{ fontSize: 15, fontWeight: 600, color: config.enabled ? '#34d399' : '#f87171' }}>
               {config.enabled ? 'Активна' : 'Остановлена'}
             </span>
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 16 }}>
-        <div className="v3-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Clock size={16} style={{ color: 'var(--v3-text-dim)' }} />
-            <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Режим</h2>
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 16, borderRadius: 14, cursor: 'pointer', background: config.mode === 'default' ? 'rgba(124,200,255,0.08)' : 'rgba(255,255,255,0.02)', border: `1.5px solid ${config.mode === 'default' ? 'rgba(124,200,255,0.35)' : 'var(--v3-border-soft)'}` }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>📁</div>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>Стандартные</div>
-              <div style={{ color: 'var(--v3-text-dim)', fontSize: 12, marginBottom: 8 }}>Documents, Downloads, Pictures, Desktop</div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      <div className="settings-card">
+        <div className="settings-header">
+          <Clock size={18} className="settings-header-icon" />
+          <h2>Режим</h2>
+        </div>
+        <div className="settings-body" style={{ padding: '20px 24px' }}>
+          <div style={{ display: 'flex', gap: 14 }}>
+            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 20, borderRadius: 16, cursor: 'pointer', background: config.mode === 'default' ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'rgba(255,255,255,0.02)', border: `1px solid ${config.mode === 'default' ? 'var(--accent)' : 'var(--border)'}`, transition: 'all 0.2s' }}>
+              <div style={{ fontSize: 26, marginBottom: 12 }}>📁</div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Стандартные</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 12 }}>Documents, Downloads, Pictures, Desktop</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {DEFAULTS.map(d => (
-                  <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 99, fontSize: 10, background: 'rgba(124,200,255,0.1)', color: '#b9d8ff', border: '1px solid rgba(124,200,255,0.2)' }}>{d}</span>
+                  <span key={d} className="v3-chip">{d}</span>
                 ))}
               </div>
             </div>
-            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 16, borderRadius: 14, cursor: 'pointer', background: config.mode === 'custom' ? 'rgba(124,200,255,0.08)' : 'rgba(255,255,255,0.02)', border: `1.5px solid ${config.mode === 'custom' ? 'rgba(124,200,255,0.35)' : 'var(--v3-border-soft)'}` }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>📂</div>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>Свои папки</div>
-              <div style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Выберите конкретные папки вручную</div>
+            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 20, borderRadius: 16, cursor: 'pointer', background: config.mode === 'custom' ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'rgba(255,255,255,0.02)', border: `1px solid ${config.mode === 'custom' ? 'var(--accent)' : 'var(--border)'}`, transition: 'all 0.2s' }}>
+              <div style={{ fontSize: 26, marginBottom: 12 }}>📂</div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Свои папки</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Выберите конкретные папки вручную</div>
               {config.mode === 'custom' && config.customPaths?.length > 0 && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--v3-text-dim)' }}>{config.customPaths.length} папка(и)</div>
+                <div style={{ marginTop: 12, fontSize: 13, color: 'var(--accent)', fontWeight: 500 }}>{config.customPaths.length} папка(и)</div>
               )}
             </div>
           </div>
         </div>
-
-
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {config.mode === 'custom' && (
-            <div className="v3-card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                <FolderOpen size={16} style={{ color: 'var(--v3-text-dim)' }} />
-                <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)' }}>Папки</h2>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                {(config.customPaths || []).length === 0 && (
-                  <div style={{ color: 'var(--v3-text-dim)', textAlign: 'center', padding: '20px 0', fontSize: 13 }}>Папки ещё не добавлены</div>
-                )}
-                {(config.customPaths || []).map((p: string) => (
-                  <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--v3-border-soft)' }}>
-                    <span style={{ fontSize: 14 }}>📁</span>
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.split('\\').pop() || p}</div>
-                      <div style={{ fontSize: 11, color: 'var(--v3-text-dim)', marginTop: 1 }}>{p}</div>
-                    </div>
-                    <button onClick={() => removePath(p)} style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#f87171', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', display: 'flex', fontSize: 12 }}>✕</button>
+      {config.mode === 'custom' && (
+        <div className="settings-card">
+          <div className="settings-header">
+            <FolderOpen size={18} className="settings-header-icon" />
+            <h2>Папки</h2>
+          </div>
+          <div className="settings-body" style={{ padding: '20px 24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+              {(config.customPaths || []).length === 0 && (
+                <div style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '20px 0', fontSize: 14 }}>Папки ещё не добавлены</div>
+              )}
+              {(config.customPaths || []).map((p: string) => (
+                <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 18 }}>📁</span>
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.split('\\').pop() || p}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p}</div>
                   </div>
-                ))}
-              </div>
-              <button onClick={addPath} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: '10px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, #22d3ee 0%, #a855f7 100%)', color: '#0a0a14', fontWeight: 700, fontSize: 14, fontFamily: 'inherit', boxShadow: '0 4px 16px rgba(124,200,255,0.15)' }}>
-                <FolderPlus size={15} /> Добавить папку
-              </button>
+                  <button onClick={() => removePath(p)} className="v3-btn" style={{ padding: '6px 10px', color: 'var(--danger)' }} title="Удалить">
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
-
-
+            <button onClick={addPath} className="v3-btn primary" style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
+              <FolderPlus size={16} /> Добавить папку
+            </button>
+          </div>
         </div>
-
-
-      </div>
+      )}
     </div>
   )
 }
