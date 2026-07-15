@@ -2,10 +2,13 @@
 html, body, #root { height: 100%; margin: 0; }
 body {
   font-family: var(--font-sans);
-  background: rgba(0, 0, 0, 0.4); /* translucent for Mica */
-  background-image:
-    radial-gradient(1200px 600px at 0% -10%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 60%),
-    radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.15), transparent 60%);
+  background: #0a0a0f;
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(34, 211, 238, 0.12), transparent 40%),
+    radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.12), transparent 40%),
+    radial-gradient(circle at 50% 80%, rgba(59, 130, 246, 0.12), transparent 40%);
+  background-size: 200% 200%;
+  animation: meshGradient 25s ease-in-out infinite;
   color: var(--text);
   overflow: hidden;
 }
@@ -28,7 +31,12 @@ body::before {
 @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
 @keyframes spin { to { transform: rotate(360deg) } }
 @keyframes shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(200%) } }
+@keyframes meshGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 .spin { animation: spin 1s linear infinite; }
+
+.page-enter {
+  animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
 
 /* App shell */
 .v2-shell { display: flex; height: 100vh; width: 100%; position: relative; z-index: 1; }

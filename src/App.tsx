@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react"
-import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom"
+import { MemoryRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import SplashScreen from "./components/SplashScreen"
 import DuckSplash from "./components/DuckSplash"
 import LoginScreen from "./components/LoginScreen"
@@ -44,6 +44,32 @@ import Titlebar from "./components/Titlebar"
 
 declare global { interface Window { electronAPI: any } }
 
+function AnimatedRoutes({ channelInfo, userInfo, handleLogout }: any) {
+  const location = useLocation()
+  return (
+    <div key={location.pathname} className="page-enter" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <Routes location={location}>
+        <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
+        <Route path="/files" element={<MyFilesPage />} />
+        <Route path="/upload" element={<UploadPage />} />
+        <Route path="/autosync" element={<AutoSyncPage />} />
+
+        <Route path="/trash" element={<TrashPage />} />
+        <Route path="/favorites" element={<FavoritesPage />} />
+        <Route path="/shared" element={<SharedPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/tags" element={<TagsPage />} />
+        <Route path="/search" element={<SearchPage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/albums" element={<AlbumsPage />} />
+        <Route path="/audioplayer" element={<AudioPlayerPage />} />
+        <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
+  )
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -56,6 +82,29 @@ function App() {
   const [dlPath, setDlPath] = useState('')
   const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
   const unsubDlRef = useRef<(() => void) | null>(null)
+
+  // Global Magnetic Hover Effect
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      document.querySelectorAll('.magnetic:hover').forEach((el: any) => {
+        const rect = el.getBoundingClientRect();
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        el.style.transform = `translate(${x * 0.15}px, ${y * 0.15}px) scale(1.02)`;
+      });
+    };
+    const handleMouseLeave = (e: MouseEvent) => {
+      if ((e.target as Element)?.classList?.contains('magnetic')) {
+        (e.target as HTMLElement).style.transform = '';
+      }
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseout', handleMouseLeave);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseout', handleMouseLeave);
+    };
+  }, []);
 
   const fetchUserInfo = useCallback(async () => {
     try {
@@ -176,24 +225,7 @@ function App() {
                 </div>
               )}
               <AggregateProgress />
-              <Routes>
-                <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
-                <Route path="/files" element={<MyFilesPage />} />
-                <Route path="/upload" element={<UploadPage />} />
-                <Route path="/autosync" element={<AutoSyncPage />} />
-
-                <Route path="/trash" element={<TrashPage />} />
-                <Route path="/favorites" element={<FavoritesPage />} />
-                <Route path="/shared" element={<SharedPage />} />
-                <Route path="/activity" element={<ActivityPage />} />
-                <Route path="/tags" element={<TagsPage />} />
-                <Route path="/search" element={<SearchPage />} />
-                <Route path="/calendar" element={<CalendarPage />} />
-                <Route path="/albums" element={<AlbumsPage />} />
-                <Route path="/audioplayer" element={<AudioPlayerPage />} />
-                <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              <AnimatedRoutes channelInfo={channelInfo} userInfo={userInfo} handleLogout={handleLogout} />
             </main>
             <AudioPlayerBar />
           </UploadQueueProvider>
