@@ -572,6 +572,7 @@ export class TelegramService {
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
     }
+    log.info(`[listFiles] Fetched ${messages.length} total messages from channel ${this.channelId}`)
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false

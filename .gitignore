@@ -9,3 +9,4 @@ dist/
 RodjerCloud.app/
 dist-manual/
 *.zip
+.vercel

@@ -750,7 +750,7 @@ function platformAssetPattern(): (name: string) => boolean {
 ipcMain.handle('app:check-update', async () => {
   try {
     const currentVersion = app.getVersion()
-    const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
+    const res = await proxyFetch(`/api/latest`)
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (!tag) return { success: true, data: { hasUpdate: false } }
     const hasUpdate = isNewer(tag, currentVersion)
