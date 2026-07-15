@@ -58,20 +58,20 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
     }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '90%', maxWidth: 640, maxHeight: '85vh', overflow: 'auto',
-        background: 'var(--v3-bg-1)', border: '1px solid var(--v3-border-strong)',
+        background: 'rgba(15,18,30,0.85)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: '1px solid var(--border-strong)',
         borderRadius: 20, boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
       }}>
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '22px 28px', borderBottom: '1px solid var(--v3-border-soft)',
+          padding: '22px 28px', borderBottom: '1px solid var(--border)',
         }}>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, background: 'var(--v3-grad-cool)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
             Настройки авто-синхронизации
           </h2>
           <button onClick={onClose} style={{
             width: 34, height: 34, borderRadius: 10,
-            background: 'rgba(255,255,255,0.05)', border: '1px solid var(--v3-border-soft)',
-            color: 'var(--v3-text-dim)', cursor: 'pointer', fontSize: 16,
+            background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
+            color: 'var(--text-dim)', cursor: 'pointer', fontSize: 16,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>✕</button>
         </div>
@@ -102,7 +102,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                 <span style={{
                   position: 'absolute', cursor: 'pointer', inset: 0,
                   background: config.enabled ? 'linear-gradient(135deg, #7cc8ff, #a855f7)' : 'rgba(255,255,255,0.1)',
-                  border: '1px solid var(--v3-border-soft)', borderRadius: 99, transition: '0.3s',
+                  border: '1px solid var(--border)', borderRadius: 99, transition: '0.3s',
                 }}>
                   <span style={{
                     position: 'absolute', content: '', height: 18, width: 18, borderRadius: '50%',
@@ -117,7 +117,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
           {config.enabled && (
             <>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)', marginBottom: 12 }}>Режим синхронизации</div>
+                <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-dim)', marginBottom: 12 }}>Режим синхронизации</div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   {[
                     { key: 'all' as const, icon: '📁', title: 'Все папки', desc: 'Стандартные папки пользователя' },
@@ -125,7 +125,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                   ].map(opt => (
                     <div key={opt.key} onClick={() => saveConfig({ ...config, mode: opt.key })} style={{
                       flex: 1, padding: '14px 16px', borderRadius: 14, cursor: 'pointer',
-                      border: `2px solid ${config.mode === opt.key ? 'rgba(124,200,255,0.45)' : 'var(--v3-border-soft)'}`,
+                      border: `2px solid ${config.mode === opt.key ? 'rgba(124,200,255,0.45)' : 'var(--border)'}`,
                       background: config.mode === opt.key ? 'rgba(124,200,255,0.06)' : 'rgba(255,255,255,0.02)',
                       transition: 'all 0.2s',
                     }}>
@@ -139,14 +139,14 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
 
               {config.mode === 'custom' && (
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)', marginBottom: 10 }}>Пользовательские папки</div>
+                  <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-dim)', marginBottom: 10 }}>Пользовательские папки</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                     {config.customPaths.length === 0 ? (
                       <div className="v3-sub" style={{ textAlign: 'center', padding: '16px 0' }}>Папки ещё не добавлены</div>
                     ) : config.customPaths.map((p, i) => (
                       <div key={i} style={{
                         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-                        background: 'rgba(255,255,255,0.03)', border: '1px solid var(--v3-border-soft)', borderRadius: 10,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10,
                       }}>
                         <span style={{ fontSize: 16 }}>📁</span>
                         <span style={{ flex: 1, fontSize: 13 }}>{p}</span>
@@ -182,7 +182,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                     <span style={{
                       position: 'absolute', cursor: 'pointer', inset: 0,
                       background: config.fileFilters.enabled ? 'linear-gradient(135deg, #7cc8ff, #a855f7)' : 'rgba(255,255,255,0.1)',
-                      border: '1px solid var(--v3-border-soft)', borderRadius: 99, transition: '0.3s',
+                      border: '1px solid var(--border)', borderRadius: 99, transition: '0.3s',
                     }}>
                       <span style={{
                         position: 'absolute', height: 16, width: 16, borderRadius: '50%', background: 'white', transition: '0.3s',
@@ -195,7 +195,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{
                       display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 38,
-                      padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--v3-border-soft)', borderRadius: 10,
+                      padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 10,
                     }}>
                       {config.fileFilters.extensions.length === 0 ? (
                         <div className="v3-sub" style={{ fontSize: 12, width: '100%', textAlign: 'center', padding: '4px 0' }}>Все типы файлов будут синхронизироваться</div>
@@ -223,10 +223,10 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
               </div>
 
               <div>
-                <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)', marginBottom: 10 }}>Исключения</div>
+                <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-dim)', marginBottom: 10 }}>Исключения</div>
                 <div style={{
                   display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 38,
-                  padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--v3-border-soft)', borderRadius: 10, marginBottom: 10,
+                  padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 10,
                 }}>
                   {config.excludePatterns.map((p, i) => (
                     <span key={i} className="v3-chip warm" style={{ paddingRight: 4 }}>
@@ -251,7 +251,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
 
               {syncStatus?.watchPaths?.length > 0 && (
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--v3-text-dim)', marginBottom: 10 }}>Сейчас отслеживается</div>
+                  <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-dim)', marginBottom: 10 }}>Сейчас отслеживается</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {syncStatus.watchPaths.map((p: string, i: number) => (
                       <div key={i} style={{
@@ -269,7 +269,7 @@ const AutoSyncSettings: React.FC<AutoSyncSettingsProps> = ({ onClose }) => {
           )}
         </div>
 
-        <div style={{ padding: '16px 28px', borderTop: '1px solid var(--v3-border-soft)', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '16px 28px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
           <button className="v3-btn" onClick={onClose}>Закрыть</button>
         </div>
       </div>
