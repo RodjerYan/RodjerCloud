@@ -132,7 +132,16 @@ export default function AlbumsPage() {
           setHashing(false)
         })
       }
-      if (albumFiles.length > 0) loadThumbs(albumFiles.slice(0, 50))
+      if (albumFiles.length > 0) {
+        const loadBatch = async () => {
+          const BATCH = 10
+          for (let i = 0; i < albumFiles.length && i < 100; i += BATCH) {
+            await loadThumbs(albumFiles.slice(i, i + BATCH))
+            await new Promise(r => setTimeout(r, 100)) // yield to event loop
+          }
+        }
+        loadBatch()
+      }
     }
   }, [openAlbum])
 
