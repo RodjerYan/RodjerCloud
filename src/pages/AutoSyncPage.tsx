@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { Play, Square, FolderPlus, Clock, Shield, FolderOpen, Settings2, Upload, CheckCircle, AlertCircle, Loader2, RefreshCw, FileText } from 'lucide-react'
+import { Play, Square, FolderPlus, Clock, Shield, FolderOpen, Settings2, Upload, CheckCircle, AlertCircle, Loader2, RefreshCw, FileText, X } from 'lucide-react'
 import AutoSyncSettings from '../components/AutoSyncSettings'
 import { fmtSize } from '../lib/utils'
 
@@ -181,7 +181,6 @@ export default function AutoSyncPage() {
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflow: 'auto' }}>
-            {queue.map(item => (
             {queue.map(item => (
               <div key={item.id} style={{
                 display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderRadius: 12,
