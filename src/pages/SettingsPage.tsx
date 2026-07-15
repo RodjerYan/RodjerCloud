@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock } from 'lucide-react'
+import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock, CheckCircle2 } from 'lucide-react'
+import confetti from 'canvas-confetti'
 import iconUrl from '../assets/icon.png'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
@@ -61,7 +62,11 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     show('Ключ скопирован')
   }
 
-  const checkUpdates = async () => {
+  const checkUpdates = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = (rect.left + rect.width / 2) / window.innerWidth
+    const y = (rect.top + rect.height / 2) / window.innerHeight
+
     setCheckingUpdate(true)
     const r = await window.electronAPI.app.checkUpdate()
     setCheckingUpdate(false)
@@ -69,6 +74,12 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       setUpdateModal(r.data)
       if (!r.data.hasUpdate) {
         show('У вас последняя версия')
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { x, y },
+          colors: ['#7c83ff', '#b14aff', '#ffffff']
+        })
       }
     } else {
       show(r.error || 'Ошибка проверки обновлений')
@@ -265,7 +276,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
           </p>
 
           <button className="v3-btn primary se-update-btn" onClick={checkUpdates} disabled={checkingUpdate}>
-            <Download size={16} />
+            {checkingUpdate ? <Download size={16} /> : <CheckCircle2 size={16} />}
             {checkingUpdate ? 'Проверка обновлений…' : 'Проверить обновления'}
           </button>
 
