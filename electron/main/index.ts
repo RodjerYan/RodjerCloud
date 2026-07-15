@@ -86,18 +86,12 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
-let _githubToken = process.env.GITHUB_TOKEN || ''
-async function githubFetch(path: string): Promise<any> {
-  if (!_githubToken) {
-    const prefs = await readPrefs()
-    _githubToken = prefs.githubToken || ''
-  }
+const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://rodjercloud.vercel.app'
+
+async function proxyFetch(path: string): Promise<any> {
   return new Promise<any>((resolve, reject) => {
-    const opts: any = {
-      headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' },
-    }
-    if (_githubToken) opts.headers['Authorization'] = `token ${_githubToken}`
-    https.get(`https://api.github.com${path}`, opts, (res) => {
+    const opts: any = { headers: { 'User-Agent': 'RodjerCloud' } }
+    https.get(`${UPDATE_SERVER_URL}${path}`, opts, (res) => {
       let data = ''
       res.on('data', (chunk) => data += chunk)
       res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
@@ -108,7 +102,7 @@ async function githubFetch(path: string): Promise<any> {
 async function checkUpdate() {
   try {
     const current = app.getVersion()
-    const res = await githubFetch(`/repos/${GITHUB_REPO}/releases/latest`)
+    const res = await proxyFetch(`/api/latest`)
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (tag && isNewer(tag, current)) {
       const matchFn = platformAssetPattern()
@@ -854,9 +848,8 @@ ipcMain.handle('app:download-update', async (event, assetId: number, _assetName?
   try {
     const tempDir = app.getPath('temp')
     const destPath = path.join(tempDir, 'update.exe')
-    // Use API URL to download — CDN URL may return 404
-    const downloadUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${assetId}`
-    await downloadWithNet(event, downloadUrl, destPath, 'application/octet-stream')
+    const downloadUrl = `${UPDATE_SERVER_URL}/api/download?id=${assetId}`
+    await downloadWithNet(event, downloadUrl, destPath)
     return { success: true, data: { filePath: destPath, fileName: 'update.exe' } }
   } catch (error) {
     return { success: false, error: (error as Error).message }
