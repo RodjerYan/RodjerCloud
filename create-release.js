@@ -4,7 +4,7 @@ const path = require('path');
 
 const token = "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";
 const repo = "RodjerYan/RodjerCloud";
-const version = "v1.0.53";
+const version = "v1.0.54";
 
 function request(options, body) {
     return new Promise((resolve, reject) => {
@@ -32,7 +32,7 @@ async function createRelease() {
     const releaseData = {
         tag_name: version,
         name: version,
-        body: "feat: implement 2GB file splitting",
+        body: "v1.0.54",
         draft: false,
         prerelease: false
     };
@@ -128,9 +128,14 @@ function uploadAsset(releaseId, filename) {
 async function run() {
     try {
         const releaseId = await createRelease();
-        await uploadAsset(releaseId, 'RodjerCloud-1.0.53.exe');
-        await uploadAsset(releaseId, 'RodjerCloud-1.0.53.exe.blockmap');
+        await uploadAsset(releaseId, 'RodjerCloud-1.0.54.exe');
+        await uploadAsset(releaseId, 'RodjerCloud-1.0.54.exe.blockmap');
         await uploadAsset(releaseId, 'latest.yml');
+        
+        await uploadAsset(releaseId, 'RodjerCloud-1.0.54-arm64.dmg');
+        await uploadAsset(releaseId, 'RodjerCloud-1.0.54-arm64.dmg.blockmap');
+        await uploadAsset(releaseId, 'RodjerCloud-1.0.54-arm64-mac.zip');
+        await uploadAsset(releaseId, 'latest-mac.yml');
         console.log("All assets uploaded.");
     } catch (e) {
         console.error("Script failed:", e);
