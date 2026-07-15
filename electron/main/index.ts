@@ -784,7 +784,6 @@ function downloadWithNet(event: any, url: string, destPath: string, accept?: str
       headers: {
         'User-Agent': 'RodjerCloud',
         'Accept': accept || 'application/octet-stream',
-        ...(_githubToken ? { 'Authorization': `token ${_githubToken}` } : {}),
       },
     })
 
