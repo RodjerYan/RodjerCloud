@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { createPortal } from 'react-dom'
-import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil } from "lucide-react"
+import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
 import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from "../lib/dialogs"
 
-const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
+const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
 import { fileDate, groupByDay } from '../lib/utils'
 
@@ -190,7 +190,7 @@ export default function AlbumsPage() {
     return (
       <div key={f.messageId} className="mf-gm-card" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
         <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
-          {thumbUrl ? (<><img src={thumbUrl} className="mf-gm-img" />{isVid && <div className="mf-gm-play"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 24 24' fill='white'%3E%3Cpolygon points='5,3 19,12 5,21'/%3E%3C/svg%3E" /></div>}</>) : isVid ? '🎬' : '🖼️'}
+          {thumbUrl ? (<><img src={thumbUrl} className="mf-gm-img" />{isVid && <div className="mf-gm-play"><Play size={22} /></div>}</>) : isVid ? '🎬' : '🖼️'}
         </div>
         <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
         <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
