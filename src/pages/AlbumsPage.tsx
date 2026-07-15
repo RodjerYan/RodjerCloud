@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { createPortal } from 'react-dom'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil } from "lucide-react"
+import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'

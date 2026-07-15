@@ -789,7 +789,7 @@ export default function MyFilesPage() {
             {galleryFiles.length === 0 && drillDown !== 'Аудио' && <div className="mf-empty">Нет файлов</div>}
           </div>
         </div>
-      ) : !hasFiles && !search ? <div className="mf-empty">Нет файлов</div> : (
+      ) : !hasFiles && folders.length === 0 && !search ? <div className="mf-empty">Нет файлов</div> : (
         <div className="mf-sections">
           {!folderDrill && CATEGORIES.map(cat => {
             const items = grouped[cat]
