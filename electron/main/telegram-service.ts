@@ -17,8 +17,8 @@ function computeFileHash(filePath: string): Promise<string> {
   })
 }
 
-const API_ID = parseInt(process.env.TELEGRAM_API_ID || '0', 10)
-const API_HASH = process.env.TELEGRAM_API_HASH || ''
+const API_ID = process.env.TELEGRAM_API_ID ? parseInt(process.env.TELEGRAM_API_ID, 10) : 35766547
+const API_HASH = process.env.TELEGRAM_API_HASH || '5e37a0cba3964d7ca0814147562452ce'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: any) => void }
 
