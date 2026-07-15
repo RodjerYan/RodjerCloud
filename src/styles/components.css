@@ -111,7 +111,7 @@
 
 
 /* Magnetic Effect Helper */
-.magnetic { transition: transform 0.1s linear; }
+.magnetic { transition: transform 0.1s linear; will-change: transform; backface-visibility: hidden; transform: translateZ(0); }
 
 /* Glowing Dropzone for Drag-and-Drop */
 .drag-over { position: relative; }

@@ -90,7 +90,9 @@ function App() {
         const rect = el.getBoundingClientRect();
         const x = e.clientX - rect.left - rect.width / 2;
         const y = e.clientY - rect.top - rect.height / 2;
-        el.style.transform = `translate(${x * 0.15}px, ${y * 0.15}px) scale(1.02)`;
+        const tx = Math.round(x * 0.15);
+        const ty = Math.round(y * 0.15);
+        el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(1.02)`;
       });
     };
     const handleMouseLeave = (e: MouseEvent) => {
