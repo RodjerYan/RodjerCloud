@@ -23,7 +23,8 @@
 }
 .v3-btn:hover { transform: scale(1.02); background: rgba(255,255,255,0.06); }
 .v3-btn:active { transform: scale(0.97); }
-.v3-btn.primary { border-color: transparent; background-image: var(--accent-gradient); color: #fff; font-weight: 700; }
+.v3-btn.primary { border-color: transparent; background-image: var(--accent-gradient); color: #fff; font-weight: 700; box-shadow: 0 4px 12px rgba(124, 131, 255, 0.2); transition: all 0.25s ease; }
+.v3-btn.primary:hover { background-image: var(--accent-gradient); filter: brightness(1.15); box-shadow: 0 6px 16px rgba(124, 131, 255, 0.4); transform: translateY(-1px); }
 .v3-btn.ghost { background: transparent; border-color: transparent; }
 
 /* Inputs */
