@@ -86,7 +86,7 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
-const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://rodjercloud.vercel.app'
+const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://updater-proxy-rodjer1.vercel.app'
 
 async function proxyFetch(path: string): Promise<any> {
   return new Promise<any>((resolve, reject) => {
