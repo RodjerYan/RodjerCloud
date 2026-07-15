@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react"
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { createPortal } from 'react-dom'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
 import { fmtSize } from '../lib/utils'
@@ -27,6 +27,23 @@ export default function AlbumsPage() {
   const [showSub, setShowSub] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
+  const [displayCount, setDisplayCount] = useState(100)
+  const loaderRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        setDisplayCount(prev => prev + 100)
+      }
+    }, { rootMargin: '200px' })
+    if (loaderRef.current) observer.observe(loaderRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  // Reset display count when album changes
+  useEffect(() => {
+    setDisplayCount(100)
+  }, [openAlbum])
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -115,7 +132,7 @@ export default function AlbumsPage() {
     if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
   }, [currentAlbum, allFiles, albums, hashGroups])
 
-  const grouped = useMemo(() => groupByDay(albumFiles), [albumFiles])
+  const grouped = useMemo(() => groupByDay(albumFiles.slice(0, displayCount)), [albumFiles, displayCount])
 
   useEffect(() => {
     if (openAlbum) {
@@ -132,18 +149,22 @@ export default function AlbumsPage() {
           setHashing(false)
         })
       }
-      if (albumFiles.length > 0) {
-        const loadBatch = async () => {
-          const BATCH = 10
-          for (let i = 0; i < albumFiles.length && i < 100; i += BATCH) {
-            await loadThumbs(albumFiles.slice(i, i + BATCH))
-            await new Promise(r => setTimeout(r, 100)) // yield to event loop
-          }
-        }
-        loadBatch()
-      }
     }
   }, [openAlbum])
+
+  useEffect(() => {
+    if (openAlbum && albumFiles.length > 0) {
+      const visible = albumFiles.slice(0, displayCount)
+      const missing = visible.filter(f => !thumbs[f.messageId])
+      const loadBatch = async () => {
+        const BATCH = 10
+        for (let i = 0; i < missing.length; i += BATCH) {
+          await loadThumbs(missing.slice(i, i + BATCH))
+        }
+      }
+      if (missing.length > 0) loadBatch()
+    }
+  }, [openAlbum, albumFiles, displayCount, thumbs, loadThumbs])
 
   const createAlbum = () => {
     if (!newName.trim()) return
@@ -245,13 +266,14 @@ export default function AlbumsPage() {
                     </div>
                   )
                 }
-                return groups.map(([hash, files]) => (
+                return Array.from(groups.entries()).slice(0, displayCount).map(([hash, files]) => (
                   <div key={hash} className="mf-gy">
                     <div className="mf-gy-title">{files.length} дубликата</div>
-                    <div className="mf-gm-items">{files.map(f => renderCard(f, true, true))}</div>
+                    <div className="mf-gm-items">{files.slice(0, displayCount).map(f => renderCard(f, true, true))}</div>
                   </div>
                 ))
               })()}
+              <div ref={loaderRef} style={{ height: 20, flexShrink: 0 }} />
             </div>
           ) : (
             Object.entries(grouped).sort(([a], [b]) => +b - +a).map(([year, months]) => (
@@ -271,6 +293,7 @@ export default function AlbumsPage() {
               </div>
             ))
           )}
+          <div ref={loaderRef} style={{ height: 20, flexShrink: 0 }} />
           {albumFiles.length === 0 && !hashing && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 12 }}>
               {duckAnim ? (

@@ -20,7 +20,7 @@ function typeOf(name: string): string {
   return 'Другое'
 }
 
-const SIX_HOURS = 21600
+const TWELVE_HOURS = 43200
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -293,8 +293,8 @@ export default function MyFilesPage() {
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
       if (ffset.has(f.messageId)) return
-      const fd = fileDate(f)
-      if (fd > 0 && (now - fd) < SIX_HOURS) map['Недавние']?.push(f)
+      const fd = f.uploadedAt || fileDate(f)
+      if (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400) map['Недавние']?.push(f)
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
@@ -306,23 +306,27 @@ export default function MyFilesPage() {
     return filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
   }, [drillDown, filtered, fileFolders])
 
-  const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles])
+  const galleryByDay = useMemo(() => groupByDay(galleryFiles.slice(0, displayCount)), [galleryFiles, displayCount])
 
   useEffect(() => {
     if (drillDown) {
       const ffset = new Set(Object.keys(fileFolders).map(Number))
       const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
+      
+      const visible = ddFiles.slice(0, displayCount)
+      const missing = visible.filter(f => !thumbs[f.messageId])
+      
       const loadBatch = async () => {
         const BATCH = 20
-        for (let i = 0; i < ddFiles.length; i += BATCH) {
-          await loadThumbs(ddFiles.slice(i, i + BATCH))
+        for (let i = 0; i < missing.length; i += BATCH) {
+          await loadThumbs(missing.slice(i, i + BATCH))
         }
       }
-      loadBatch()
+      if (missing.length > 0) loadBatch()
     } else {
       setThumbs({})
     }
-  }, [drillDown, filtered, loadThumbs, fileFolders])
+  }, [drillDown, filtered, loadThumbs, fileFolders, displayCount, thumbs])
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const showToast = (s: string) => {
