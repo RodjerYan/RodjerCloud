@@ -8,6 +8,7 @@ import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
+import { FileThumb } from '../components/FileThumb'
 import '../styles/duplicate-modal.css'
 
 function typeOf(name: string): string {
@@ -56,7 +57,6 @@ export default function MyFilesPage() {
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
   const [toast, setToast] = useState<string>('')
   const [drillDown, setDrillDown] = useState<string | null>(null)
-  const [thumbs, setThumbs] = useState<Record<number, string>>({})
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [folders, setFolders] = useState<any[]>([])
   const [fileFolders, setFileFolders] = useState<Record<number, string>>({})
@@ -155,37 +155,6 @@ export default function MyFilesPage() {
     clearSelection()
     loadFolders()
   }
-
-  const loadThumbs = useCallback(async (files: any[]) => {
-    const map: Record<number, string> = {}
-    await Promise.all(files.map(async (f) => {
-      try {
-        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
-        if (r.success && r.data) {
-          const d = await window.electronAPI.file.getLocalUrl(r.data)
-          if (d.success) map[f.messageId] = d.data
-        }
-      } catch {}
-    }))
-    setThumbs(prev => {
-      Object.keys(map).forEach(key => {
-        const oldUrl = prev[Number(key)]
-        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl)
-      })
-      return { ...prev, ...map }
-    })
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      setThumbs(prev => {
-        Object.values(prev).forEach(url => {
-          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-        })
-        return prev
-      })
-    }
-  }, [])
 
   const [loadError, setLoadError] = useState<string | null>(null)
   const load = async () => {
@@ -307,26 +276,6 @@ export default function MyFilesPage() {
   }, [drillDown, filtered, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles.slice(0, displayCount)), [galleryFiles, displayCount])
-
-  useEffect(() => {
-    if (drillDown) {
-      const ffset = new Set(Object.keys(fileFolders).map(Number))
-      const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
-      
-      const visible = ddFiles.slice(0, displayCount)
-      const missing = visible.filter(f => !thumbs[f.messageId])
-      
-      const loadBatch = async () => {
-        const BATCH = 20
-        for (let i = 0; i < missing.length; i += BATCH) {
-          await loadThumbs(missing.slice(i, i + BATCH))
-        }
-      }
-      if (missing.length > 0) loadBatch()
-    } else {
-      setThumbs({})
-    }
-  }, [drillDown, filtered, loadThumbs, fileFolders, displayCount, thumbs])
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const showToast = (s: string) => {
@@ -772,7 +721,6 @@ export default function MyFilesPage() {
                           <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
                           <div className="mf-gm-items">
                             {items.map((f: any) => {
-                              const thumbUrl = thumbs[f.messageId]
                               const isVideo = drillDown === 'Видео'
                               return (
                                 <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
@@ -780,14 +728,7 @@ export default function MyFilesPage() {
                                   onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                 <div className="mf-gm-icon" data-type={drillDown}>
-                                  {thumbUrl ? (
-                                    <>
-                                      <img src={thumbUrl} className="mf-gm-img" />
-                                      {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
-                                    </>
-                                  ) : (
-                                    isVideo ? '🎬' : '🖼️'
-                                  )}
+                                  <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVideo} typeLabel={drillDown || ''} />
                                 </div>
                                 <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
                                 <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>

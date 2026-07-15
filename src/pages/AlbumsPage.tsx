@@ -10,6 +10,7 @@ import { appConfirm, appAlert } from "../lib/dialogs"
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
 import { fileDate, groupByDay } from '../lib/utils'
+import { FileThumb } from '../components/FileThumb'
 
 export default function AlbumsPage() {
   const [allFiles, setAllFiles] = useState<any[]>([])
@@ -17,7 +18,6 @@ export default function AlbumsPage() {
   const [albums, setAlbums] = useState(v3store.getAlbums())
   const [newName, setNewName] = useState('')
   const [openAlbum, setOpenAlbum] = useState<string | null>(null)
-  const [thumbs, setThumbs] = useState<Record<number, string>>({})
   const [hashing, setHashing] = useState(false)
   const [hashProgress, setHashProgress] = useState({ done: 0, total: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
@@ -72,20 +72,6 @@ export default function AlbumsPage() {
     e.preventDefault()
     e.stopPropagation()
     setCtxMenu({ x: e.clientX, y: e.clientY, file: f })
-  }, [])
-
-  const loadThumbs = useCallback(async (files: any[]) => {
-    const map: Record<number, string> = {}
-    await Promise.all(files.map(async (f) => {
-      try {
-        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
-        if (r.success && r.data) {
-          const d = await window.electronAPI.file.getLocalUrl(r.data)
-          if (d.success) map[f.messageId] = d.data
-        }
-      } catch {}
-    }))
-    setThumbs(prev => ({ ...prev, ...map }))
   }, [])
 
   const currentAlbum: SmartAlbum | { id: string; name: string; messageIds: number[] } | null = openAlbum
@@ -152,19 +138,6 @@ export default function AlbumsPage() {
     }
   }, [openAlbum])
 
-  useEffect(() => {
-    if (openAlbum && albumFiles.length > 0) {
-      const visible = albumFiles.slice(0, displayCount)
-      const missing = visible.filter(f => !thumbs[f.messageId])
-      const loadBatch = async () => {
-        const BATCH = 10
-        for (let i = 0; i < missing.length; i += BATCH) {
-          await loadThumbs(missing.slice(i, i + BATCH))
-        }
-      }
-      if (missing.length > 0) loadBatch()
-    }
-  }, [openAlbum, albumFiles, displayCount, thumbs, loadThumbs])
 
   const createAlbum = () => {
     if (!newName.trim()) return
@@ -207,11 +180,11 @@ export default function AlbumsPage() {
   }
 
   const renderCard = (f: any, isSmart: boolean, isDup?: boolean) => {
-    const thumbUrl = thumbs[f.messageId]; const isVid = f.mimeType?.startsWith('video/')
+    const isVid = f.mimeType?.startsWith('video/')
     return (
       <div key={f.messageId} className="mf-gm-card magnetic" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
         <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
-          {thumbUrl ? (<><img src={thumbUrl} className="mf-gm-img" />{isVid && <div className="mf-gm-play"><Play size={22} /></div>}</>) : isVid ? '🎬' : '🖼️'}
+          <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} />
         </div>
         <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
         <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>

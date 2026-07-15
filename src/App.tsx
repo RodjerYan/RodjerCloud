@@ -106,7 +106,10 @@ function App() {
     const handleMouseLeave = (e: MouseEvent) => {
       const el = (e.target as Element)?.closest('.magnetic') as HTMLElement;
       if (el) {
-        el.style.transform = '';
+        const related = e.relatedTarget as Node;
+        if (!el.contains(related)) {
+          el.style.transform = '';
+        }
       }
     };
     document.addEventListener('mousemove', handleMouseMove);
