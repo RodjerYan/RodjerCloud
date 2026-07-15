@@ -890,22 +890,27 @@ export default function MyFilesPage() {
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
                 {folderDrill ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--panel)', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 500 }}>
-                    <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => setFolderDrill(null)}>Мои файлы</span>
-                    {(() => {
-                      const crumbs = [];
-                      let curr = folderDrill;
-                      while (curr) {
-                        const f = folders.find(x => x.id === curr);
-                        if (f) { crumbs.unshift(f); curr = f.parentId; } else break;
-                      }
-                      return crumbs.map(c => (
-                        <React.Fragment key={c.id}>
-                          <ChevronRight size={14} style={{ color: 'var(--text-dim)' }} />
-                          <span style={{ cursor: 'pointer', color: c.id === folderDrill ? 'var(--text)' : 'var(--text-dim)' }} onClick={() => setFolderDrill(c.id)}>{c.name}</span>
-                        </React.Fragment>
-                      ));
-                    })()}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 12, marginBottom: 16, fontSize: 13, fontWeight: 500, backdropFilter: 'blur(12px)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => setFolderDrill(null)}>Мои файлы</span>
+                      {(() => {
+                        const crumbs = [];
+                        let curr = folderDrill;
+                        while (curr) {
+                          const f = folders.find(x => x.id === curr);
+                          if (f) { crumbs.unshift(f); curr = f.parentId; } else break;
+                        }
+                        return crumbs.map(c => (
+                          <React.Fragment key={c.id}>
+                            <ChevronRight size={14} style={{ color: 'var(--text-dim)' }} />
+                            <span style={{ cursor: 'pointer', color: c.id === folderDrill ? 'var(--text)' : 'var(--text-dim)' }} onClick={() => setFolderDrill(c.id)}>{c.name}</span>
+                          </React.Fragment>
+                        ));
+                      })()}
+                    </div>
+                    <button className="v3-btn primary" style={{ padding: '6px 12px', height: 'auto', fontSize: '12px', gap: '6px' }} onClick={() => uploadToFolder(folderDrill)}>
+                      <Upload size={14} /> Загрузить
+                    </button>
                   </div>
                 ) : currentLevelFolders.length > 0 ? (
                   <div style={{ padding: '6px 0', fontSize: 12, color: 'var(--text-dim)', fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 }}>
@@ -1158,7 +1163,7 @@ export default function MyFilesPage() {
           )}
           {ctxMenu.folder && (
             <>
-              <button onClick={() => { setRenameId(ctxMenu.folder.id); setRenameVal(ctxMenu.folder.name); closeCtx() }}>
+              <button onClick={() => { uploadToFolder(ctxMenu.folder.id); closeCtx() }}>\n            <Upload size={14} /> Загрузить файлы\n          </button>\n          <button onClick={() => { setRenameId(ctxMenu.folder.id); setRenameVal(ctxMenu.folder.name); closeCtx() }}>
                 <Pencil size={14} /> Переименовать
               </button>
               <div className="mf-ctx-divider" />
