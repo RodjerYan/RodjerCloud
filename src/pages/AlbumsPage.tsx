@@ -188,7 +188,7 @@ export default function AlbumsPage() {
   const renderCard = (f: any, isSmart: boolean, isDup?: boolean) => {
     const thumbUrl = thumbs[f.messageId]; const isVid = f.mimeType?.startsWith('video/')
     return (
-      <div key={f.messageId} className="mf-gm-card" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
+      <div key={f.messageId} className="mf-gm-card magnetic" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
         <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
           {thumbUrl ? (<><img src={thumbUrl} className="mf-gm-img" />{isVid && <div className="mf-gm-play"><Play size={22} /></div>}</>) : isVid ? '🎬' : '🖼️'}
         </div>
