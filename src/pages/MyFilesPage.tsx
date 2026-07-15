@@ -7,21 +7,12 @@ import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
-import { fmtSize } from '../lib/utils'
+import { fmtSize, typeOf, fileDate, groupByDay } from '../lib/utils'
+import '../styles/duplicate-modal.css'
 
 const SIX_HOURS = 21600
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-
-function typeOf(name: string): string {
-  const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif'].includes(ext)) return 'Изображения'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Видео'
-  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Аудио'
-  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Документы'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Архивы'
-  return 'Другое'
-}
 
 const CATEGORIES = ['Изображения', 'Видео', 'Аудио', 'Документы', 'Архивы', 'Другое', 'Недавние'] as const
 const CAT_ICON: Record<string, React.ReactNode> = {
@@ -35,24 +26,6 @@ const CAT_ICON: Record<string, React.ReactNode> = {
 }
 const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
-}
-
-function fileDate(f: any): number {
-  return f.originalDate || f.uploadedAt || 0
-}
-
-function groupByDay(items: any[]) {
-  const years: Record<number, Record<number, Record<number, any[]>>> = {}
-  items.forEach(f => {
-    const d = new Date(fileDate(f) * 1000)
-    if (!isFinite(d.getTime())) return
-    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate()
-    if (!years[y]) years[y] = {}
-    if (!years[y][m]) years[y][m] = {}
-    if (!years[y][m][day]) years[y][m][day] = []
-    years[y][m][day].push(f)
-  })
-  return years
 }
 
 export default function MyFilesPage() {
@@ -102,10 +75,10 @@ export default function MyFilesPage() {
               setBotConfigured(true)
               setBotToken(r3.data)
             }
-          })
-        })
+          }).catch(() => {})
+        }).catch(() => {})
       }
-    })
+    }).catch(() => {})
   }, [])
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
@@ -119,7 +92,7 @@ export default function MyFilesPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [preview])
+  }, [preview, navPreview])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
@@ -177,13 +150,37 @@ export default function MyFilesPage() {
         }
       } catch {}
     }))
-    setThumbs(prev => ({ ...prev, ...map }))
+    setThumbs(prev => {
+      Object.keys(map).forEach(key => {
+        const oldUrl = prev[Number(key)]
+        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl)
+      })
+      return { ...prev, ...map }
+    })
   }, [])
 
+  useEffect(() => {
+    return () => {
+      setThumbs(prev => {
+        Object.values(prev).forEach(url => {
+          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+        })
+        return prev
+      })
+    }
+  }, [])
+
+  const [loadError, setLoadError] = useState<string | null>(null)
   const load = async () => {
     setLoading(true)
-    const r = await window.electronAPI.telegram.listFiles()
-    if (r.success) setFiles(r.data || [])
+    setLoadError(null)
+    try {
+      const r = await window.electronAPI.telegram.listFiles()
+      if (r.success) setFiles(r.data || [])
+      else setLoadError(r.error || 'Не удалось загрузить файлы')
+    } catch (e: any) {
+      setLoadError(e.message || 'Ошибка загрузки')
+    }
     setLoading(false)
   }
 
@@ -247,12 +244,22 @@ export default function MyFilesPage() {
   useEffect(() => { load(); loadFolders() }, [])
 
   useEffect(() => {
-    const interval = setInterval(() => loadFolders(), 3000)
-    return () => clearInterval(interval)
+    let interval: ReturnType<typeof setInterval>
+    const start = () => { interval = setInterval(() => loadFolders(), 30000) }
+    const onVisibility = () => {
+      if (document.hidden) clearInterval(interval)
+      else { loadFolders(); start() }
+    }
+    start()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
 
-  const now = Math.floor(Date.now() / 1000)
-  const SIX_HOURS = 21600
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   const filtered = useMemo(() => {
     let arr = [...files]
@@ -290,13 +297,24 @@ export default function MyFilesPage() {
     if (drillDown) {
       const ffset = new Set(Object.keys(fileFolders).map(Number))
       const ddFiles = filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
-      loadThumbs(ddFiles)
+      const loadBatch = async () => {
+        const BATCH = 20
+        for (let i = 0; i < ddFiles.length; i += BATCH) {
+          await loadThumbs(ddFiles.slice(i, i + BATCH))
+        }
+      }
+      loadBatch()
     } else {
       setThumbs({})
     }
   }, [drillDown, filtered, loadThumbs, fileFolders])
 
-  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const showToast = (s: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast(s)
+    toastTimerRef.current = setTimeout(() => setToast(''), 3000)
+  }
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -407,20 +425,9 @@ export default function MyFilesPage() {
     return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
   }, [ctxMenu])
 
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
-      if (!el) return
-      if ((e.target as HTMLElement).closest('button')) return
-      if ((e.target as HTMLElement).closest('.mf-ctx')) return
-      const mid = Number(el.dataset.mid)
-      toggleSelect(mid)
-    }
-    document.addEventListener('click', onClick)
-    return () => document.removeEventListener('click', onClick)
-  }, [files])
 
-  const navPreview = (dir: number) => {
+
+  const navPreview = useCallback((dir: number) => {
     if (!preview) return
     const all = preview.list.filter((f: any) => {
       const ft = typeOf(f.fileName); return ft === 'Изображения' || ft === 'Видео'
@@ -429,7 +436,7 @@ export default function MyFilesPage() {
     const curr = all.findIndex((x: any) => x === preview.list[preview.idx])
     const next = (curr + dir + all.length) % all.length
     setPreviewUrl(''); handlePreview(all[next], preview.list.indexOf(all[next]), preview.list)
-  }
+  }, [preview])
 
   const bulkDelete = async () => {
     if (selected.size === 0) return
@@ -650,69 +657,7 @@ export default function MyFilesPage() {
             border: '1px solid rgba(255,255,255,0.05)',
             animation: 'modalPop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards'
           }}>
-            <style>{`
-              @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-              @keyframes modalPop { 
-                0% { opacity: 0; transform: scale(0.96) translateY(8px); } 
-                100% { opacity: 1; transform: scale(1) translateY(0); } 
-              }
-              .btn-premium {
-                padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 13.5px;
-                cursor: pointer; transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-                display: inline-flex; align-items: center; justify-content: center;
-                white-space: nowrap; letter-spacing: 0.2px;
-              }
-              .btn-premium:hover { transform: translateY(-1px); }
-              .btn-premium:active { transform: translateY(1px); }
-              
-              .btn-premium.danger {
-                background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-                color: white; border: none;
-                box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3), inset 0 1px 1px rgba(255,255,255,0.25);
-              }
-              .btn-premium.danger:hover { box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4), inset 0 1px 1px rgba(255,255,255,0.3); filter: brightness(1.1); }
-              
-              .btn-premium.secondary {
-                background: rgba(255,255,255,0.06);
-                color: #f1f5f9; border: 1px solid rgba(255,255,255,0.12);
-                backdrop-filter: blur(12px);
-              }
-              .btn-premium.secondary:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
 
-              .btn-premium.ghost {
-                background: transparent; color: #94a3b8; border: 1px solid transparent;
-              }
-              .btn-premium.ghost:hover { color: #f8fafc; background: rgba(255,255,255,0.04); }
-
-              .file-chip {
-                background: linear-gradient(145deg, rgba(15, 23, 42, 0.5), rgba(15, 23, 42, 0.8));
-                border: 1px solid rgba(255, 255, 255, 0.06);
-                border-radius: 16px; padding: 14px 16px;
-                display: flex; align-items: center; gap: 14px;
-                box-shadow: inset 0 1px 1px rgba(255,255,255,0.04), 0 4px 16px rgba(0,0,0,0.25);
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
-              }
-              .file-chip:hover { transform: translateY(-2px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.06), 0 8px 24px rgba(0,0,0,0.3); border-color: rgba(255, 255, 255, 0.1); }
-              
-              .icon-glow-wrap {
-                position: relative; width: 52px; height: 52px;
-                display: flex; align-items: center; justify-content: center;
-              }
-              .icon-glow-bg {
-                position: absolute; inset: 0; border-radius: 50%;
-                background: linear-gradient(135deg, #f59e0b, #ea580c);
-                opacity: 0.15; filter: blur(10px);
-                animation: pulseGlow 3s ease-in-out infinite alternate;
-              }
-              .icon-glow-inner {
-                position: relative; width: 44px; height: 44px; border-radius: 50%;
-                background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(234, 88, 12, 0.05));
-                border: 1px solid rgba(245, 158, 11, 0.25);
-                display: flex; align-items: center; justify-content: center; color: #fbbf24;
-                box-shadow: inset 0 2px 4px rgba(255,255,255,0.05);
-              }
-              @keyframes pulseGlow { from { opacity: 0.1; transform: scale(0.9); } to { opacity: 0.25; transform: scale(1.1); } }
-            `}</style>
             
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 28 }}>
               <div className="icon-glow-wrap">
@@ -1137,14 +1082,12 @@ export default function MyFilesPage() {
         <div className="mf-modal" onClick={() => setMoveTarget(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 320, maxHeight: '80vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{moveTarget.length > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}</div>
-            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '4px 0', padding: '0 4px' }}>Категории</div>
-            {CATEGORIES.map(c => (
-              <button key={'cat-'+c} className="v3-btn" onClick={() => confirmMoveFile('cat:'+c)}
-                style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                {CAT_ICON[c]}
-                {c === 'Недавние' ? 'Недавние' : c}
-              </button>
-            ))}
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', margin: '4px 0', padding: '0 4px' }}>Действия</div>
+            <button className="v3-btn" onClick={() => confirmMoveFile('cat:root')}
+              style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ArrowLeft size={16} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+              Вынести из папки
+            </button>
             {folders.length > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
             {folders.map(f => (
               <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
@@ -1192,7 +1135,11 @@ export default function MyFilesPage() {
       )}
 
       {ctxMenu && createPortal(
-        <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+        <div className="mf-ctx" style={{
+          position: 'fixed',
+          left: Math.min(ctxMenu.x, window.innerWidth - 200),
+          top: Math.min(ctxMenu.y, window.innerHeight - 300),
+        }}>
           {ctxMenu.type === 'global' && (
             <button onClick={() => { createFolder(); closeCtx() }}>
               <FolderPlus size={14} /> Создать папку

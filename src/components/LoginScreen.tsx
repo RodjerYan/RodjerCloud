@@ -23,8 +23,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   const getFullPhone = () => {
     const d = phoneDigits.replace(/\D/g, '')
-    if (d.startsWith('7') || d.startsWith('8')) return '+7' + d.replace(/^[78]/, '')
-    if (d.startsWith('1')) return '+1' + d.slice(1)
+    if (!d) return ''
     return '+' + d
   }
 

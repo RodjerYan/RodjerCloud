@@ -25,6 +25,8 @@
     "input": "^1.0.1",
     "lucide-react": "^0.469.0",
     "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
     "react-window": "^1.8.10",
     "recharts": "^2.15.0",
@@ -40,11 +42,9 @@
     "@types/react-dom": "^18.3.5",
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^44.0.0-alpha.3",
+    "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
   }

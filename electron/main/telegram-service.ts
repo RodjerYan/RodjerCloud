@@ -1,5 +1,5 @@
 import { TelegramClient } from 'telegram'
-import { getFileHash, computeFileHash } from './storage-service'
+import { getFileHash } from './storage-service'
 import { vaultService } from './vault-service'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
@@ -17,8 +17,8 @@ function computeFileHash(filePath: string): Promise<string> {
   })
 }
 
-const API_ID = 35766547
-const API_HASH = '5e37a0cba3964d7ca0814147562452ce'
+const API_ID = parseInt(process.env.TELEGRAM_API_ID || '0', 10)
+const API_HASH = process.env.TELEGRAM_API_HASH || ''
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: any) => void }
 
@@ -47,6 +47,11 @@ async function splitFileLocal(filePath: string, chunkSize: number): Promise<stri
   let bytesWritten = 0
 
   return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      for (const p of parts) {
+        try { fs.unlinkSync(p) } catch {}
+      }
+    }
     readStream.on('data', (chunk: Buffer) => {
       if (bytesWritten + chunk.length > chunkSize) {
         const spaceLeft = chunkSize - bytesWritten
@@ -57,6 +62,7 @@ async function splitFileLocal(filePath: string, chunkSize: number): Promise<stri
         currentPartPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${currentPartIndex}`)
         parts.push(currentPartPath)
         writeStream = fs.createWriteStream(currentPartPath)
+        writeStream.on('error', (err) => { cleanup(); reject(err) })
         writeStream.write(chunk.slice(spaceLeft))
         bytesWritten = chunk.length - spaceLeft
       } else {
@@ -68,8 +74,8 @@ async function splitFileLocal(filePath: string, chunkSize: number): Promise<stri
       writeStream.end()
       resolve(parts)
     })
-    readStream.on('error', reject)
-    writeStream.on('error', reject)
+    readStream.on('error', (err) => { cleanup(); reject(err) })
+    writeStream.on('error', (err) => { cleanup(); reject(err) })
   })
 }
 
@@ -342,7 +348,7 @@ export class TelegramService {
 
     if (encrypt) {
       const encrypted = await vaultService.encryptFile(uploadPath)
-      if (isTemp) fs.unlinkSync(uploadPath).catch(() => {})
+      if (isTemp) { try { fs.unlinkSync(uploadPath) } catch {} }
       uploadPath = encrypted.tempPath
       ivHex = encrypted.ivHex
       isTemp = true
@@ -380,9 +386,18 @@ export class TelegramService {
       if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
         try {
           const tempDir = app.getPath('temp')
-          require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
           const baseName = path.basename(filePath)
           const pngPath = path.join(tempDir, baseName + '.png')
+          if (process.platform === 'darwin') {
+            require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
+          } else {
+            try {
+              require('child_process').execFileSync('ffmpeg', [
+                '-i', filePath, '-ss', '00:00:01', '-vframes', '1',
+                '-vf', 'scale=320:-1', pngPath
+              ], { timeout: 10000 })
+            } catch { /* ffmpeg не установлен — пропускаем */ }
+          }
           if (fs.existsSync(pngPath)) {
             const pngBuf = fs.readFileSync(pngPath)
             const img = nativeImage.createFromBuffer(pngBuf)
@@ -498,11 +513,24 @@ export class TelegramService {
   private async autoCleanTrash() {
     if (!this.client || !this.channelId) return
     try {
-      const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
+      const messages: any[] = []
+      let offsetId = 0
+      const BATCH = 200
+      while (true) {
+        const batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+        if (batch.length === 0) break
+        messages.push(...batch)
+        if (batch.length < BATCH) break
+        offsetId = this.msgId(batch[batch.length - 1])
+      }
       const now = Date.now()
       for (const m of messages) {
         const caption: string = m.message || ''
-        const match = caption.match(new RegExp(`${this.TRASH_MARKER}(\\d+)`))
+        const escapedMarker = this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const match = caption.match(new RegExp(`${escapedMarker}(\\d+)`))
         if (!match) continue
         const trashedAt = parseInt(match[1], 10)
         if (now - trashedAt > this.TRASH_DAYS * 24 * 3600 * 1000) {
@@ -530,7 +558,19 @@ export class TelegramService {
 
   async listFiles() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
+    const messages: any[] = []
+    let offsetId = 0
+    const BATCH = 200
+    while (true) {
+      const batch = await this.client.getMessages(this.channelId as any, {
+        limit: BATCH,
+        ...(offsetId ? { offsetId } : {}),
+      })
+      if (batch.length === 0) break
+      messages.push(...batch)
+      if (batch.length < BATCH) break
+      offsetId = this.msgId(batch[batch.length - 1])
+    }
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
@@ -561,7 +601,19 @@ export class TelegramService {
 
   async listTrash() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const messages = await this.client.getMessages(this.channelId as any, { limit: 200 })
+    const messages: any[] = []
+    let offsetId = 0
+    const BATCH = 200
+    while (true) {
+      const batch = await this.client.getMessages(this.channelId as any, {
+        limit: BATCH,
+        ...(offsetId ? { offsetId } : {}),
+      })
+      if (batch.length === 0) break
+      messages.push(...batch)
+      if (batch.length < BATCH) break
+      offsetId = this.msgId(batch[batch.length - 1])
+    }
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
@@ -705,7 +757,14 @@ export class TelegramService {
     const message: any = messages[0]
     if (!message.file) throw new Error('No file attached to message')
     const downloadsPath = app.getPath('downloads')
-    const downloadPath = path.join(downloadsPath, fileName)
+    let downloadPath = path.join(downloadsPath, fileName)
+    let suffix = 1
+    const ext = path.extname(fileName)
+    const base = path.basename(fileName, ext)
+    while (fs.existsSync(downloadPath)) {
+      downloadPath = path.join(downloadsPath, `${base} (${suffix})${ext}`)
+      suffix++
+    }
     await this.performDownload(message, downloadPath)
     return { filePath: downloadPath, fileName }
   }
@@ -768,12 +827,7 @@ export class TelegramService {
     return null
   }
 
-  async deleteFile(messageId: number) {
-    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    await this.client.invoke(
-      new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [messageId] })
-    )
-  }
+
 
   async logout() {
     if (this.client) {
@@ -949,7 +1003,7 @@ export class TelegramService {
 
   async forwardMessages(toPeer: bigint, messageIds: number[], fromPeer: bigint) {
     if (!this.client) throw new Error('Client not initialized')
-    const ids = messageIds.map((id) => id)
+    const ids = [...messageIds]
     await this.client.forwardMessages(fromPeer, { messages: ids, toPeer })
   }
 
@@ -1275,5 +1329,17 @@ export class TelegramService {
     }
 
     return null
+  }
+
+  async cleanThumbnailCache(maxAgeDays = 30) {
+    const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
+    if (!fs.existsSync(cacheDir)) return
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000
+    for (const file of fs.readdirSync(cacheDir)) {
+      try {
+        const fp = path.join(cacheDir, file)
+        if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
+      } catch {}
+    }
   }
 }

@@ -8,30 +8,7 @@ import { appConfirm, appAlert } from "../lib/dialogs"
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Окторябрь', 'Ноябрь', 'Декабрь']
 
-function fmtSize(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
-}
-
-function fileDate(f: any): number {
-  return f.originalDate || f.uploadedAt || 0
-}
-
-function groupByDay(items: any[]) {
-  const years: Record<number, Record<number, Record<number, any[]>>> = {}
-  items.forEach(f => {
-    const d = new Date(fileDate(f) * 1000)
-    if (!isFinite(d.getTime())) return
-    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate()
-    if (!years[y]) years[y] = {}
-    if (!years[y][m]) years[y][m] = {}
-    if (!years[y][m][day]) years[y][m][day] = []
-    years[y][m][day].push(f)
-  })
-  return years
-}
+import { fileDate, groupByDay } from '../lib/utils'
 
 export default function AlbumsPage() {
   const [allFiles, setAllFiles] = useState<any[]>([])
@@ -112,16 +89,21 @@ export default function AlbumsPage() {
     setHashing(false); setAlbums(v3store.getAlbums())
   }, [])
 
+  const hashGroups = useMemo(() => {
+    const metaMap = new Map<number, any>()
+    v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
+    const groups = new Map<string, any[]>()
+    allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
+      const m = metaMap.get(f.messageId)
+      if (m?.hash) { const g = groups.get(m.hash) || []; g.push(f); groups.set(m.hash, g) }
+    })
+    return groups
+  }, [allFiles])
+
   const albumFiles = useMemo(() => {
     if (!currentAlbum) return []
     const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
     if (isDuplicates) {
-      const metaMap = new Map<number, any>()
-      v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
-      const hashGroups = new Map<string, any[]>()
-      allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-        const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
-      })
       const dups: any[] = []
       hashGroups.forEach(group => { if (group.length > 1) dups.push(...group) })
       return dups
@@ -130,7 +112,7 @@ export default function AlbumsPage() {
     if (smart?.filter) return allFiles.filter(smart.filter)
     const ua = albums.find(a => a.id === currentAlbum.id)
     if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
-  }, [currentAlbum, allFiles, albums])
+  }, [currentAlbum, allFiles, albums, hashGroups])
 
   const grouped = useMemo(() => groupByDay(albumFiles), [albumFiles])
 
@@ -155,7 +137,7 @@ export default function AlbumsPage() {
 
   const createAlbum = () => {
     if (!newName.trim()) return
-    v3store.addAlbum({ id: Math.random().toString(36).slice(2), name: newName.trim(), messageIds: [], createdAt: Date.now() })
+    v3store.addAlbum({ id: crypto.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)), name: newName.trim(), messageIds: [], createdAt: Date.now() })
     setAlbums(v3store.getAlbums()); setNewName(''); setShowCreateModal(false)
   }
 
@@ -231,12 +213,6 @@ export default function AlbumsPage() {
           {isDuplicates && !hashing ? (
             <div className="mf-gallery-body">
               {(() => {
-                const metaMap = new Map<number, any>()
-                v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
-                const hashGroups = new Map<string, any[]>()
-                allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-                  const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
-                })
                 const groups: [string, any[]][] = []
                 hashGroups.forEach((group, hash) => { if (group.length > 1) groups.push([hash, group]) })
                 if (groups.length === 0) {
@@ -370,12 +346,6 @@ export default function AlbumsPage() {
           {SMART_ALBUMS.map(sa => {
             let count = 0
             if (sa.isDuplicates) {
-              const metaMap = new Map<number, any>()
-              v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
-              const hashGroups = new Map<string, any[]>()
-              allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-                const m = metaMap.get(f.messageId); if (m?.hash) { const g = hashGroups.get(m.hash) || []; g.push(f); hashGroups.set(m.hash, g) }
-              })
               hashGroups.forEach(group => { if (group.length > 1) count += group.length })
             } else if (sa.filter) count = allFiles.filter(sa.filter).length
             return (

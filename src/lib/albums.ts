@@ -1,4 +1,4 @@
-import React from 'react'
+
 
 export interface SmartAlbum { id: string; name: string; filter?: (f: any) => boolean; isDuplicates?: boolean }
 

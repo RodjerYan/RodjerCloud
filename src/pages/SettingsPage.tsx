@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock } from 'lucide-react'
 import iconUrl from '../assets/icon.png'
@@ -9,6 +9,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const [turboMode, setTurboMode] = useState(false)
   const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
+  const pwdInputRef = useRef<HTMLInputElement>(null)
   const [botConfigured, setBotConfigured] = useState(false)
   const [version, setVersion] = useState("")
   const [showPwdPrompt, setShowPwdPrompt] = useState(false)
@@ -233,7 +234,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
             {botConfigured ? <span style={{ color: 'var(--success)', fontWeight: 500, fontSize: 13, background: 'rgba(52,211,153,0.1)', padding: '4px 10px', borderRadius: 99 }}>✓ Настроен</span> : <span style={{ color: 'var(--danger)', fontWeight: 500, fontSize: 13, background: 'rgba(248,113,113,0.1)', padding: '4px 10px', borderRadius: 99 }}>Не настроен</span>}
           </div>
           <div style={{ display: 'flex', gap: 10, paddingBottom: 16 }}>
-            <input value={botToken} onChange={e => setBotToken(e.target.value)}
+            <input type={botConfigured ? "password" : "text"} value={botToken} onChange={e => setBotToken(e.target.value)}
               placeholder="Введите токен бота: 123456:ABCdef..."
               style={{ flex: 1, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono, monospace)' }} />
             <button className="v3-btn primary" onClick={async () => {
@@ -327,12 +328,13 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
                 ? 'Введите ваш текущий мастер-пароль для продолжения.'
                 : 'Внимание: Изменение пароля сделает старые зашифрованные файлы недоступными!'}
             </p>
-            <input type="password" id="vault-pwd" placeholder={checkingOldPwd ? 'Текущий мастер-пароль' : 'Новый мастер-пароль'} style={{ padding: '12px 16px', borderRadius: 8, border: `1px solid ${pwdError ? '#e74c3c' : 'var(--border)'}`, background: 'var(--bg-card)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', fontSize: 16 }} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') document.getElementById('vault-btn-ok')?.click() }} onChange={() => setPwdError('')} />
+            <input type="password" ref={pwdInputRef} placeholder={checkingOldPwd ? 'Текущий мастер-пароль' : 'Новый мастер-пароль'} style={{ padding: '12px 16px', borderRadius: 8, border: `1px solid ${pwdError ? '#e74c3c' : 'var(--border)'}`, background: 'var(--bg-card)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', fontSize: 16 }} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') document.getElementById('vault-btn-ok')?.click() }} onChange={() => setPwdError('')} />
             {pwdError && <div style={{ color: '#e74c3c', fontSize: 13, marginTop: -8 }}>{pwdError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="v3-btn ghost" onClick={() => setShowPwdPrompt(false)}>Отмена</button>
               <button id="vault-btn-ok" className="v3-btn primary" onClick={async () => {
-                const input = document.getElementById('vault-pwd') as HTMLInputElement
+                const input = pwdInputRef.current
+                if (!input) return
                 const pwd = input.value
                 if (!pwd) return
                 if (checkingOldPwd) {

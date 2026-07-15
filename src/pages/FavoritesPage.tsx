@@ -4,25 +4,14 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
 import { appConfirm, appAlert } from "../lib/dialogs"
 
-function fmtSize(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
-}
-
-function typeOf(name: string): string {
-  const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'video'
-  return 'other'
-}
+import { fmtSize, typeOf } from '../lib/utils'
 
 export default function FavoritesPage() {
   const [favs, setFavs] = useState(v3store.getFavs())
   const [allFiles, setAllFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [navAnim, setNavAnim] = useState<any>(null)
+  const [thumbs, setThumbs] = useState<Record<number, string>>({})
 
   useEffect(() => {
     setFavs(v3store.getFavs())
@@ -35,7 +24,42 @@ export default function FavoritesPage() {
     })
   }, [])
 
-  const favFiles = allFiles.filter((f: any) => v3store.isFav(f.messageId))
+  const favFiles = React.useMemo(() => allFiles.filter((f: any) => v3store.isFav(f.messageId)), [allFiles, favs])
+
+  const loadThumbs = React.useCallback(async (files: any[]) => {
+    const map: Record<number, string> = {}
+    await Promise.all(files.map(async (f) => {
+      try {
+        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
+        if (r.success && r.data) {
+          const d = await window.electronAPI.file.getLocalUrl(r.data)
+          if (d.success) map[f.messageId] = d.data
+        }
+      } catch {}
+    }))
+    setThumbs(prev => {
+      Object.keys(map).forEach(key => {
+        const oldUrl = prev[Number(key)]
+        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl)
+      })
+      return { ...prev, ...map }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (favFiles.length > 0) loadThumbs(favFiles)
+  }, [favFiles, loadThumbs])
+
+  useEffect(() => {
+    return () => {
+      setThumbs(prev => {
+        Object.values(prev).forEach(url => {
+          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+        })
+        return prev
+      })
+    }
+  }, [])
 
   const handleDownload = async (f: any) => {
     const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
@@ -81,7 +105,11 @@ export default function FavoritesPage() {
                 <div key={f.messageId} className="mf-card"
                   onDoubleClick={() => { if (isImg || isVid) handlePreview(f) }}>
                   <div className="mf-card-icon" data-type={f.mimeType?.startsWith('image') ? 'Изображения' : f.mimeType?.startsWith('video') ? 'Видео' : 'Другое'}>
-                    {(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                    {thumbs[f.messageId] ? (
+                      <img src={thumbs[f.messageId]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()
+                    )}
                   </div>
                   <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                   <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</div>

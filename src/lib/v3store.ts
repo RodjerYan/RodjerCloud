@@ -125,15 +125,10 @@ export const v3store = {
   pushRecent: (id: number) => { let a = v3store.getRecent().filter(x => x !== id); a.unshift(id); if (a.length > 20) a = a.slice(0, 20); set(K.recent, a); scheduleSync() },
   // audit log
   getAudit: () => get(K.audit, [] as Array<{ event: string; ts: number }>),
-  logAudit: (event: string) => { const a = v3store.getAudit(); a.unshift({ event, ts: Date.now() }); if (a.length > 1000) a.length = 1000; set(K.audit, a) },
+  logAudit: (event: string) => { const a = v3store.getAudit(); a.unshift({ event, ts: Date.now() }); if (a.length > 1000) a.length = 1000; set(K.audit, a); scheduleSync() },
 }
 
-export function fmtBytes(n: number): string {
-  if (!n || n < 0) return "0 B"
-  const u = ["B","KB","MB","GB","TB"]; let i = 0; let v = n
-  while (v >= 1024 && i < u.length-1) { v /= 1024; i++ }
-  return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + " " + u[i]
-}
+export { fmtSize as fmtBytes } from './utils'
 export function fmtTime(ms: number): string {
   if (!ms || !isFinite(ms) || ms < 0) return "--"
   const s = Math.round(ms/1000); if (s < 60) return s+"s"

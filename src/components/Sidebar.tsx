@@ -26,7 +26,7 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
     <aside className="v2-sidebar" data-testid="v3-sidebar">
       <div className="v2-sidebar-profile">
         {avatarSrc ? (userInfo?.isVideo ? (
-          <video className="v2-sidebar-avatar" src={avatarSrc} autoPlay loop muted playsInline />
+          <video className="v2-sidebar-avatar" src={avatarSrc} autoPlay={!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches} loop muted playsInline />
         ) : (
           <img className="v2-sidebar-avatar" src={avatarSrc} alt="" />
         )) : (

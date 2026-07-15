@@ -15,7 +15,12 @@ const notify = () => {
   listeners.forEach(l => l([...dialogs]));
 };
 
+const MAX_LISTENERS = 100;
 export const subscribeDialogs = (listener: (dialogs: DialogState[]) => void) => {
+  if (listeners.length >= MAX_LISTENERS) {
+    console.warn('dialogs: too many listeners, removing oldest');
+    listeners.shift();
+  }
   listeners.push(listener);
   listener([...dialogs]);
   return () => {

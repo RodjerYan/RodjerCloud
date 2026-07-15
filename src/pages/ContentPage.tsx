@@ -1,5 +1,7 @@
 import React, { useState } from "react"
 import { Search, Download, Film, FileText, Music, Image as ImgIcon, Globe, Check, Loader, X, Eye } from "lucide-react"
+import { appAlert } from "../lib/dialogs"
+import { fmtSize } from "../lib/utils"
 
 export default function ContentPage() {
   const [query, setQuery] = useState("")
@@ -48,10 +50,10 @@ export default function ContentPage() {
       if (res.success) {
         setSavedIds(prev => new Set(prev).add(r.messageId))
       } else {
-        alert("Ошибка при сохранении: " + res.error)
+        await appAlert("Ошибка при сохранении: " + res.error)
       }
     } catch (e: any) {
-      alert("Ошибка: " + e.message)
+      await appAlert("Ошибка: " + e.message)
     } finally {
       setSavingId(null)
     }
@@ -88,18 +90,11 @@ export default function ContentPage() {
   }
 
   const closePreview = () => {
+    if (previewUrl && previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl)
     setPreviewItem(null)
     setPreviewData(null)
     setPreviewUrl(null)
     setPreviewError(null)
-  }
-
-  const formatSize = (bytes: number) => {
-    if (!bytes || bytes === 0) return "0 B"
-    const k = 1024
-    const sizes = ["B", "KB", "MB", "GB", "TB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
   const getFileIcon = (mimeType: string) => {
@@ -189,7 +184,7 @@ export default function ContentPage() {
                         {r.fileName}
                       </div>
                       <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
-                        {formatSize(r.fileSize)}
+                        {fmtSize(r.fileSize)}
                       </div>
                     </div>
                   </div>
@@ -294,7 +289,7 @@ export default function ContentPage() {
             <div style={{ padding: '0 20px 20px' }}>
               <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{previewItem.fileName}</h2>
               <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>
-                <span>{formatSize(previewItem.fileSize)}</span>
+                <span>{fmtSize(previewItem.fileSize)}</span>
                 <span>{previewItem.mimeType}</span>
                 <span>от {previewItem.authorName}</span>
               </div>
