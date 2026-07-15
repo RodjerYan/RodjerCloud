@@ -182,31 +182,34 @@ export default function AutoSyncPage() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflow: 'auto' }}>
             {queue.map(item => (
+            {queue.map(item => (
               <div key={item.id} style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12,
-                background: 'rgba(255,255,255,0.02)', border: '1px solid var(--v3-border-soft)',
+                display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderRadius: 12,
+                background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                transition: 'all 0.2s'
               }}>
-                <span style={{ fontSize: 18, flexShrink: 0 }}>
+                <span style={{ fontSize: 20, flexShrink: 0, filter: item.status === 'uploading' ? 'drop-shadow(0 0 8px rgba(124, 200, 255, 0.5))' : 'none' }}>
                   {item.status === 'done' ? '✅' : item.status === 'failed' ? '❌' : item.status === 'uploading' ? '📤' : '⏳'}
                 </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.fileName}
+                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.fileName}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>
+                      {item.status === 'pending' && 'Ожидает'}
+                      {item.status === 'uploading' && <span style={{ color: '#7cc8ff', fontWeight: 600 }}>{item.percent}%</span>}
+                      {item.status === 'done' && <span style={{ color: '#34d399' }}>Готово</span>}
+                      {item.status === 'failed' && <span style={{ color: '#f87171' }}>Ошибка</span>}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--v3-text-dim)', marginTop: 2 }}>{fmtSize(item.fileSize)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>{fmtSize(item.fileSize)}</div>
                   {(item.status === 'uploading' || item.status === 'done') && (
-                    <div style={{ marginTop: 4, width: '100%', height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                      <div style={{ width: `${item.percent}%`, height: '100%', borderRadius: 99, background: item.status === 'done' ? '#34d399' : 'linear-gradient(90deg, #22d3ee, #a855f7)', transition: 'width 0.3s' }} />
+                    <div style={{ width: '100%', height: 2, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                      <div style={{ width: `${item.percent}%`, height: '100%', borderRadius: 99, background: item.status === 'done' ? '#34d399' : 'linear-gradient(90deg, #22d3ee, #a855f7)', transition: 'width 0.3s ease-out', boxShadow: '0 0 8px rgba(168,85,247,0.5)' }} />
                     </div>
                   )}
-                  {item.status === 'uploading' && <div style={{ fontSize: 10, color: '#7cc8ff', marginTop: 2 }}>{item.percent}%</div>}
-                  {item.status === 'failed' && item.error && <div style={{ fontSize: 10, color: '#f87171', marginTop: 2 }}>{item.error}</div>}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--v3-text-dim)', flexShrink: 0 }}>
-                  {item.status === 'pending' && 'Ожидает'}
-                  {item.status === 'uploading' && `${item.percent}%`}
-                  {item.status === 'done' && 'Готово'}
-                  {item.status === 'failed' && 'Ошибка'}
+                  {item.status === 'failed' && item.error && <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{item.error}</div>}
                 </div>
               </div>
             ))}
@@ -214,53 +217,78 @@ export default function AutoSyncPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Файлов в папках</div>
-          <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--text)' }}>{totalFileCount}</div>
-        </div>
-        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Загружено</div>
-          <div style={{ fontSize: 32, fontWeight: 700, color: '#34d399' }}>{status.uploadedCount}</div>
-        </div>
-        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Ошибок</div>
-          <div style={{ fontSize: 32, fontWeight: 700, color: '#f87171' }}>{status.failedCount}</div>
-        </div>
-        <div className="settings-card" style={{ padding: '16px 20px', marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: 'var(--text-dim)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Статус</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: config.enabled ? '#34d399' : '#f87171', boxShadow: config.enabled ? '0 0 12px rgba(52,211,153,0.5)' : 'none', animation: config.enabled ? 'v3-pulse 1.4s ease-in-out infinite' : 'none' }} />
-            <span style={{ fontSize: 15, fontWeight: 600, color: config.enabled ? '#34d399' : '#f87171' }}>
-              {config.enabled ? 'Активна' : 'Остановлена'}
+      {/* Visual Dashboard */}
+      <div className="settings-card" style={{ padding: '24px', marginBottom: 24, display: 'flex', gap: 40, alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ position: 'relative', width: 140, height: 140, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 0, transform: 'rotate(-90deg)', width: '100%', height: '100%', filter: 'drop-shadow(0 0 12px rgba(168, 85, 247, 0.5))' }}>
+            <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="6" />
+            <circle cx="50" cy="50" r="45" fill="none" stroke="url(#dash-gradient)" strokeWidth="6" strokeDasharray="283" strokeDashoffset={283 - (283 * (totalFileCount ? Math.min(status.uploadedCount / totalFileCount, 1) : 0))} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 1s ease-out' }} />
+            <defs>
+              <linearGradient id="dash-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#22d3ee" />
+                <stop offset="100%" stopColor="#a855f7" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <span style={{ fontSize: 32, fontWeight: 800, background: 'linear-gradient(135deg, #22d3ee, #a855f7)', WebkitBackgroundClip: 'text', color: 'transparent', lineHeight: 1 }}>
+              {Math.round(totalFileCount ? Math.min(status.uploadedCount / totalFileCount, 1) * 100 : 0)}%
             </span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginTop: 4, fontWeight: 600 }}>Загружено</span>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+          <div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>В папках</div>
+            <div style={{ fontSize: 36, fontWeight: 700, color: 'var(--text)' }}>{totalFileCount}</div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Синхрон.</div>
+            <div style={{ fontSize: 36, fontWeight: 700, color: '#34d399' }}>{status.uploadedCount}</div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Ошибок</div>
+            <div style={{ fontSize: 36, fontWeight: 700, color: '#f87171' }}>{status.failedCount}</div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Статус</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', flexShrink: 0, background: config.enabled ? '#34d399' : '#f87171', boxShadow: config.enabled ? '0 0 16px rgba(52,211,153,0.6)' : '0 0 12px rgba(248,113,113,0.3)', animation: config.enabled ? 'v3-pulse 1.4s ease-in-out infinite' : 'none' }} />
+              <span style={{ fontSize: 16, fontWeight: 600, color: config.enabled ? '#34d399' : '#f87171' }}>
+                {config.enabled ? 'Активна' : 'Остановлена'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="settings-card">
+      <div className="settings-card" style={{ background: 'url(https://www.transparenttextures.com/patterns/stardust.png) rgba(15,18,30,0.4)', backgroundBlendMode: 'overlay' }}>
         <div className="settings-header">
           <Clock size={18} className="settings-header-icon" />
-          <h2>Режим</h2>
+          <h2>Режим синхронизации</h2>
         </div>
-        <div className="settings-body" style={{ padding: '20px 24px' }}>
-          <div style={{ display: 'flex', gap: 14 }}>
-            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 20, borderRadius: 16, cursor: 'pointer', background: config.mode === 'default' ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'rgba(255,255,255,0.02)', border: `1px solid ${config.mode === 'default' ? 'var(--accent)' : 'var(--border)'}`, transition: 'all 0.2s' }}>
-              <div style={{ fontSize: 26, marginBottom: 12 }}>📁</div>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Стандартные</div>
-              <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 12 }}>Documents, Downloads, Pictures, Desktop</div>
+        <div className="settings-body" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', gap: 20 }}>
+            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'default' ? 'rgba(34, 211, 238, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'default' ? '#22d3ee' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'default' ? '0 0 30px rgba(34, 211, 238, 0.2), inset 0 0 20px rgba(34, 211, 238, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'default' ? 'scale(1.02)' : 'scale(1)' }}>
+              <div style={{ fontSize: 32, marginBottom: 16, filter: config.mode === 'default' ? 'drop-shadow(0 0 12px rgba(34, 211, 238, 0.6))' : 'none' }}>📁</div>
+              <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6, color: config.mode === 'default' ? '#fff' : 'var(--text)' }}>Стандартные</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 16, lineHeight: 1.4 }}>Автоматически собираем файлы из базовых папок системы: Documents, Downloads, Pictures, Desktop.</div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {DEFAULTS.map(d => (
-                  <span key={d} className="v3-chip">{d}</span>
+                  <span key={d} className="v3-chip" style={{ background: config.mode === 'default' ? 'rgba(34, 211, 238, 0.15)' : '', color: config.mode === 'default' ? '#22d3ee' : '', border: config.mode === 'default' ? '1px solid rgba(34, 211, 238, 0.3)' : '' }}>{d}</span>
                 ))}
               </div>
             </div>
-            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 20, borderRadius: 16, cursor: 'pointer', background: config.mode === 'custom' ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'rgba(255,255,255,0.02)', border: `1px solid ${config.mode === 'custom' ? 'var(--accent)' : 'var(--border)'}`, transition: 'all 0.2s' }}>
-              <div style={{ fontSize: 26, marginBottom: 12 }}>📂</div>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Свои папки</div>
-              <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Выберите конкретные папки вручную</div>
+            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'custom' ? 'rgba(168, 85, 247, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'custom' ? '#a855f7' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'custom' ? '0 0 30px rgba(168, 85, 247, 0.2), inset 0 0 20px rgba(168, 85, 247, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'custom' ? 'scale(1.02)' : 'scale(1)' }}>
+              <div style={{ fontSize: 32, marginBottom: 16, filter: config.mode === 'custom' ? 'drop-shadow(0 0 12px rgba(168, 85, 247, 0.6))' : 'none' }}>📂</div>
+              <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6, color: config.mode === 'custom' ? '#fff' : 'var(--text)' }}>Свои папки</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.4 }}>Выберите конкретные папки вручную. Мы будем следить только за ними и игнорировать остальные.</div>
               {config.mode === 'custom' && config.customPaths?.length > 0 && (
-                <div style={{ marginTop: 12, fontSize: 13, color: 'var(--accent)', fontWeight: 500 }}>{config.customPaths.length} папка(и)</div>
+                <div style={{ marginTop: 16, fontSize: 14, color: '#a855f7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#a855f7', boxShadow: '0 0 8px #a855f7' }} />
+                  Отслеживается {config.customPaths.length} папка(и)
+                </div>
               )}
             </div>
           </div>
