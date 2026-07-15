@@ -7,8 +7,18 @@ import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
-import { fmtSize, typeOf, fileDate, groupByDay } from '../lib/utils'
+import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
 import '../styles/duplicate-modal.css'
+
+function typeOf(name: string): string {
+  const t = _typeOf(name)
+  if (t === 'image') return 'Изображения'
+  if (t === 'video') return 'Видео'
+  if (t === 'audio') return 'Аудио'
+  if (t === 'document') return 'Документы'
+  if (t === 'archive') return 'Архивы'
+  return 'Другое'
+}
 
 const SIX_HOURS = 21600
 
