@@ -83,16 +83,7 @@ export default function MyFilesPage() {
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
-  useEffect(() => {
-    if (!preview) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPreview(null)
-      if (e.key === 'ArrowLeft') navPreview(-1)
-      if (e.key === 'ArrowRight') navPreview(1)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [preview, navPreview])
+
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
@@ -438,6 +429,16 @@ export default function MyFilesPage() {
     setPreviewUrl(''); handlePreview(all[next], preview.list.indexOf(all[next]), preview.list)
   }, [preview])
 
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null)
+      if (e.key === 'ArrowLeft') navPreview(-1)
+      if (e.key === 'ArrowRight') navPreview(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [preview, navPreview])
   const bulkDelete = async () => {
     if (selected.size === 0) return
     if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
