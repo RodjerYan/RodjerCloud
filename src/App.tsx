@@ -40,6 +40,7 @@ import "./styles/modal.css"
 import ErrorBoundary from "./components/ErrorBoundary"
 
 import GlobalDialogs from "./components/GlobalDialogs"
+import Titlebar from "./components/Titlebar"
 
 declare global { interface Window { electronAPI: any } }
 
@@ -149,7 +150,8 @@ function App() {
   return (
     <ErrorBoundary>
     <MemoryRouter initialEntries={["/"]}>
-      <div className="v2-shell">
+      <Titlebar />
+      <div className="v2-shell" style={{ paddingTop: navigator.userAgent.toLowerCase().includes('mac os') ? '0' : '32px' }}>
         <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
           <UploadQueueProvider>

@@ -2,10 +2,10 @@
 html, body, #root { height: 100%; margin: 0; }
 body {
   font-family: var(--font-sans);
-  background: var(--bg-0);
+  background: rgba(0, 0, 0, 0.4); /* translucent for Mica */
   background-image:
-    radial-gradient(1200px 600px at 0% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
-    radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.10), transparent 60%);
+    radial-gradient(1200px 600px at 0% -10%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, rgba(177,74,255,0.15), transparent 60%);
   color: var(--text);
   overflow: hidden;
 }

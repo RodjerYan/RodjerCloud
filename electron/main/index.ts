@@ -15,6 +15,7 @@ import { vaultService } from './vault-service'
 import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
+app.commandLine.appendSwitch('enable-transparent-visuals')
 
 // Logger
 const logFile = path.join(app.getPath('userData'), 'rodjercloud.log')
@@ -53,16 +54,18 @@ function createWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 640,
-    backgroundColor: '#0a0a14',
+    backgroundColor: '#00000000', // transparent for Mica to show through
     autoHideMenuBar: true,
+    transparent: true,
+    backgroundMaterial: 'mica',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
       preload: path.join(__dirname, '../preload/index.js')
     },
-    frame: true,
-    titleBarStyle: 'default'
+    frame: process.platform === 'darwin',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden'
   })
 
   if (process.env.NODE_ENV === 'development') {
@@ -161,6 +164,15 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 app.on('before-quit', () => { autoSyncService.stop() })
+
+// --- Window Controls ---
+ipcMain.handle('window:minimize', () => { if (mainWindow) mainWindow.minimize() })
+ipcMain.handle('window:maximize', () => {
+  if (!mainWindow) return
+  if (mainWindow.isMaximized()) mainWindow.unmaximize()
+  else mainWindow.maximize()
+})
+ipcMain.handle('window:close', () => { if (mainWindow) mainWindow.close() })
 
 // ===== V2 prefs file helpers =====
 let prefsLock: Promise<void> = Promise.resolve()

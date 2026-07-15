@@ -141,6 +141,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readDataUrl: (filePath: string) => ipcRenderer.invoke('file:read-data-url', filePath),
     getLocalUrl: (filePath: string) => ipcRenderer.invoke('file:get-local-url', filePath),
   },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    maximize: () => ipcRenderer.invoke('window:maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+  },
   bot: {
     getHashDb: () => ipcRenderer.invoke('bot:get-hash-db'),
     getDuplicateGroups: () => ipcRenderer.invoke('bot:get-duplicate-groups'),
