@@ -3,10 +3,11 @@ import { getFileHash } from './storage-service'
 import { vaultService } from './vault-service'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
-import * as fs from 'fs'
-import * as crypto from 'crypto'
-import * as path from 'path'
-import { app, nativeImage } from 'electron'
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import zlib from 'zlib'
+import { app, ipcMain, nativeImage } from 'electron'
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
@@ -1263,8 +1264,11 @@ export class TelegramService {
     if (!this.client || !this.channelId) throw new Error('Not initialized')
 
     const tmpDir = app.getPath('temp')
-    const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
-    fs.writeFileSync(tmpFile, jsonStr, 'utf8')
+    const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME + '.gz') // use .gz
+    
+    // GZIP compression to save space and network bandwidth
+    const compressed = zlib.gzipSync(Buffer.from(jsonStr, 'utf8'))
+    fs.writeFileSync(tmpFile, compressed)
 
     // Delete old sync file if known
     if (this.stateMsgId === null) this.stateMsgId = this.loadStateMsgId()
@@ -1303,7 +1307,16 @@ export class TelegramService {
           const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
           await this.client.downloadMedia(msgs[0] as any, { outputFile: tmpFile } as any)
           if (fs.existsSync(tmpFile)) {
-            const content = fs.readFileSync(tmpFile, 'utf8')
+            const buffer = fs.readFileSync(tmpFile)
+            let content = ''
+            
+            // Check for Gzip magic bytes (1F 8B)
+            if (buffer.length > 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+              content = zlib.gunzipSync(buffer).toString('utf8')
+            } else {
+              content = buffer.toString('utf8') // Fallback to raw text for old versions
+            }
+            
             fs.rmSync(tmpFile, { force: true })
             return content
           }

@@ -1,4 +1,6 @@
-// RodjerCloud — lightweight localStorage-backed stores
+// RodjerCloud — lightweight IndexedDB-backed stores with in-memory cache for fast sync reads
+import { db } from './db'
+
 export type TrashItem = { messageId: number; fileName: string; size: number; deletedAt: number }
 export type FavItem = { messageId: number; fileName: string; addedAt: number }
 export type SharedLink = { id: string; fileName: string; messageId: number; createdAt: number; expiresAt?: number; password?: string; useCount: number }
@@ -17,10 +19,41 @@ const K = {
   thumbs: "v3.thumbCache", audit: "v3.audit"
 }
 
-function get<T>(k: string, def: T): T {
-  try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : def } catch { return def }
+// In-memory cache for synchronous reads
+const cache: Record<string, any> = {}
+
+// Asynchronous initialization from IndexedDB (with fallback migration from localStorage)
+export async function initStore() {
+  const keys = Object.values(K)
+  for (const k of keys) {
+    const entry = await db.kv.get(k)
+    if (entry && entry.value) {
+      cache[k] = entry.value
+    } else {
+      // Migrate from localStorage if exists
+      try {
+        const lsValue = localStorage.getItem(k)
+        if (lsValue) {
+          const parsed = JSON.parse(lsValue)
+          cache[k] = parsed
+          await db.kv.put({ key: k, value: parsed })
+        }
+      } catch (e) {
+        console.error("Migration error for", k, e)
+      }
+    }
+  }
 }
-function set<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+
+function get<T>(k: string, def: T): T {
+  return cache[k] !== undefined ? cache[k] : def
+}
+
+function set<T>(k: string, v: T) {
+  cache[k] = v
+  // Async persist to IndexedDB without blocking UI thread
+  db.kv.put({ key: k, value: JSON.parse(JSON.stringify(v)) }).catch(e => console.error("DB Save Error:", e))
+}
 
 function stateJson(): string {
   return JSON.stringify({
@@ -62,6 +95,7 @@ export async function loadStateFromTelegram() {
 }
 
 export const v3store = {
+  init: initStore,
   // trash
   getTrash: (): TrashItem[] => get(K.trash, []),
   addTrash: (it: TrashItem) => { const a = v3store.getTrash(); a.unshift(it); set(K.trash, a); scheduleSync() },

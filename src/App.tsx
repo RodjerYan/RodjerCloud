@@ -67,14 +67,17 @@ function App() {
   const handleDuckDone = useCallback(() => setShowDuckSplash(false), [])
 
   useEffect(() => {
-    const t = setTimeout(() => setShowSplash(false), 1400)
-    checkSession()
-    const p = v3store.getPrefs()
-    document.documentElement.dataset.theme = p.theme
-    document.documentElement.dataset.density = p.density
-    document.documentElement.dataset.animations = p.animations
-    document.documentElement.style.setProperty("--v3-sans-active", p.font || "var(--v3-sans)")
-    return () => clearTimeout(t)
+    let t: any;
+    v3store.init().then(() => {
+      t = setTimeout(() => setShowSplash(false), 1400)
+      checkSession()
+      const p = v3store.getPrefs()
+      document.documentElement.dataset.theme = p.theme
+      document.documentElement.dataset.density = p.density
+      document.documentElement.dataset.animations = p.animations
+      document.documentElement.style.setProperty("--v3-sans-active", p.font || "var(--v3-sans)")
+    })
+    return () => { if (t) clearTimeout(t) }
   }, [])
 
   useEffect(() => {

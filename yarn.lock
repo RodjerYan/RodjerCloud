@@ -780,6 +780,11 @@
   dependencies:
     undici-types "~6.21.0"
 
+"@types/pako@^2.0.4":
+  version "2.0.4"
+  resolved "https://registry.npmjs.org/@types/pako/-/pako-2.0.4.tgz"
+  integrity sha512-VWDCbrLeVXJM9fihYodcLiIv0ku+AlOa/TQ1SvYOaBuyrSKgEcro95LJyIsJ4vSo6BXIxOKxiJAat04CmST9Fw==
+
 "@types/prop-types@*":
   version "15.7.15"
   resolved "https://registry.npmjs.org/@types/prop-types/-/prop-types-15.7.15.tgz"
@@ -1795,6 +1800,16 @@ detect-node@^2.0.4:
   version "2.1.0"
   resolved "https://registry.npmjs.org/detect-node/-/detect-node-2.1.0.tgz"
   integrity sha512-T0NIuQpnTvFDATNuHN5roPwSBG83rFsuO+MXXH9/3N1eFbn4wcPjttvjMLEPWJ0RGUYgQE7cGgS3tNxbqCGM7g==
+
+dexie-react-hooks@^4.4.0:
+  version "4.4.0"
+  resolved "https://registry.npmjs.org/dexie-react-hooks/-/dexie-react-hooks-4.4.0.tgz"
+  integrity sha512-ObLXBS5+4BJU8vtSvBx6b9fY6zZYgniAtwxzjCHsUQadgbqYN6935X2/1TWw4Rf2N1aZV1io5/ziox4vKuxABA==
+
+dexie@^4.4.4:
+  version "4.4.4"
+  resolved "https://registry.npmjs.org/dexie/-/dexie-4.4.4.tgz"
+  integrity sha512-jIwsYI8Os2hgnqc6O49YwFDKGc5v5QjGx0wPVp543ip1F53VFAKMLthV2pQosQcVTv3eAskTWYspOx195PM0FQ==
 
 dijkstrajs@^1.0.1:
   version "1.0.3"
@@ -3430,6 +3445,11 @@ pako@^2.0.3:
   version "2.2.0"
   resolved "https://registry.npmjs.org/pako/-/pako-2.2.0.tgz"
   integrity sha512-zJq6RP/5q+TO2OpFV3FHzlPnFjmkb7Nc99a5SNjJE+uu/PkpChs+NIZSSzbBoD+6kjiISXjfYdwj1ZRQ81dz/w==
+
+pako@^3.0.1:
+  version "3.0.1"
+  resolved "https://registry.npmjs.org/pako/-/pako-3.0.1.tgz"
+  integrity sha512-GupotUUI0mlhugKjUs4bjOwLt3nrehy9Ys2dxC0GtgVef5cnKggkDMmf2bq2poCCuVXopWPmqsc9VDT2iJUy+w==
 
 path-browserify@^1.0.1:
   version "1.0.1"
