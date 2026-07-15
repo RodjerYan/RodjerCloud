@@ -947,7 +947,7 @@ export default function MyFilesPage() {
                              }}
                              onClick={() => setFolderDrill(sf.id)}
                              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
-                          <div className="mf-card-icon" style={{ background: 'rgba(124,131,255,0.15)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div className="mf-card-icon" style={{ background: 'linear-gradient(180deg, rgba(60, 60, 160, 0.5), transparent)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <Folder size={32} />
                           </div>
                           <div className="mf-card-name" title={sf.name}>{sf.name}</div>

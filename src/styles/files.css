@@ -16,25 +16,36 @@
   padding: 6px 10px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: var(--text-xs); }
 .mf-bulkbar button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.mf-card { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
-  padding: 14px; backdrop-filter: blur(14px); transition: transform 0.15s, border-color 0.15s; }
-.mf-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.mf-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
+padding: 14px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); transition: all 0.2s ease-out; overflow: hidden; }
+.mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+
+/* Glass Reflection Sweep */
+.mf-card::after {
+  content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  transform: skewX(-20deg); transition: left 0s; z-index: 1; pointer-events: none;
+}
+.mf-card:hover::after {
+  left: 200%; transition: left 0.6s ease-in-out;
+}
+
 .mf-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .mf-card.deleting, .mf-gm-card.deleting, .mf-table tr.deleting {
-  opacity: 0; transform: scale(0.9); transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+opacity: 0; transform: scale(0.9); transition: opacity 0.25s, transform 0.25s; pointer-events: none;
 }
 .mf-check { position: absolute; top: 10px; left: 10px; cursor: pointer; }
 .mf-hide-checks .mf-check { display: none; }
 .mf-hide-checks .mf-table th:first-child,
 .mf-hide-checks .mf-table td:first-child { display: none; }
-.mf-card-icon { height: 78px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: var(--text-base); letter-spacing: 0.5px;
-  background: linear-gradient(135deg, #2a2a55, #1a1a3a); color: #b8bcdb; margin-bottom: 10px; }
-.mf-card-icon[data-type="Изображения"] { background: linear-gradient(135deg, #4a2a7c, #2c1850); color: #d4b5ff; }
-.mf-card-icon[data-type="Видео"] { background: linear-gradient(135deg, #7c2a4a, #50182c); color: #ffb5cc; }
-.mf-card-icon[data-type="Аудио"] { background: linear-gradient(135deg, #2a7c4a, #18502c); color: #b5ffcc; }
-.mf-card-icon[data-type="Документы"] { background: linear-gradient(135deg, #2a4a7c, #182c50); color: #b5ccff; }
-.mf-card-icon[data-type="Архивы"] { background: linear-gradient(135deg, #7c5a2a, #503818); color: #ffd4a5; }
+.mf-card-icon { height: 78px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+font-weight: 700; font-size: var(--text-base); letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.03);
+background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent); color: #b8bcdb; margin-bottom: 10px; }
+.mf-card-icon[data-type="Изображения"] { background: linear-gradient(180deg, rgba(74, 42, 124, 0.5), transparent); color: #d4b5ff; }
+.mf-card-icon[data-type="Видео"] { background: linear-gradient(180deg, rgba(124, 42, 74, 0.5), transparent); color: #ffb5cc; }
+.mf-card-icon[data-type="Аудио"] { background: linear-gradient(180deg, rgba(42, 124, 74, 0.5), transparent); color: #b5ffcc; }
+.mf-card-icon[data-type="Документы"] { background: linear-gradient(180deg, rgba(42, 74, 124, 0.5), transparent); color: #b5ccff; }
+.mf-card-icon[data-type="Архивы"] { background: linear-gradient(180deg, rgba(124, 90, 42, 0.5), transparent); color: #ffd4a5; }
 .mf-card-name { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mf-card-meta { font-size: var(--text-xs); color: var(--text-mute); margin-top: var(--space-xs); }
 .mf-card-actions { display: flex; gap: var(--space-xs); margin-top: 10px; }
