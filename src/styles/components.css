@@ -110,8 +110,8 @@
 
 
 
-/* Magnetic Effect Helper */
-.magnetic { transition: transform 0.1s linear; }
+/* Magnetic Effect Helper (JS driven, no CSS transition to prevent lag) */
+.magnetic { }
 
 /* Glowing Dropzone for Drag-and-Drop */
 .drag-over { position: relative; }
