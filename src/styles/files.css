@@ -16,11 +16,9 @@
   padding: 6px 10px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: var(--text-xs); }
 .mf-bulkbar button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.mf-card { position: relative; z-index: 0; border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
-padding: 14px; transition: border-color 0.2s, box-shadow 0.2s; overflow: hidden; }
-.mf-card::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+.mf-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
+padding: 14px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden; }
+.mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); transform: translateZ(0) translateY(-2px); }
 
 /* Glass Reflection Sweep */
 .mf-card::after {
@@ -139,13 +137,11 @@ body.compact .mf-card-icon { height: 60px; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
 }
 .mf-gm-card {
-  position: relative; z-index: 0; border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 20px; padding: 12px;
-  transition: border-color 0.2s, box-shadow 0.2s; overflow: hidden;
+  position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 20px; padding: 12px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden;
 }
-.mf-gm-card::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+.mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); transform: translateZ(0) translateY(-2px); }
 
 /* Glass Reflection Sweep */
 .mf-gm-card::after {

@@ -83,21 +83,30 @@ function App() {
   const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
   const unsubDlRef = useRef<(() => void) | null>(null)
 
-  // Global Magnetic Hover Effect
+  // Global Magnetic Hover Effect (Optimized)
   useEffect(() => {
+    let ticking = false;
     const handleMouseMove = (e: MouseEvent) => {
-      document.querySelectorAll('.magnetic:hover').forEach((el: any) => {
-        const rect = el.getBoundingClientRect();
-        const x = e.clientX - rect.left - rect.width / 2;
-        const y = e.clientY - rect.top - rect.height / 2;
-        const tx = Math.round(x * 0.15);
-        const ty = Math.round(y * 0.15);
-        el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(1.02)`;
-      });
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const el = (e.target as Element)?.closest('.magnetic') as HTMLElement;
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            const x = e.clientX - rect.left - rect.width / 2;
+            const y = e.clientY - rect.top - rect.height / 2;
+            const tx = x * 0.15;
+            const ty = y * 0.15;
+            el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(1.02)`;
+          }
+          ticking = false;
+        });
+        ticking = true;
+      }
     };
     const handleMouseLeave = (e: MouseEvent) => {
-      if ((e.target as Element)?.classList?.contains('magnetic')) {
-        (e.target as HTMLElement).style.transform = '';
+      const el = (e.target as Element)?.closest('.magnetic') as HTMLElement;
+      if (el) {
+        el.style.transform = '';
       }
     };
     document.addEventListener('mousemove', handleMouseMove);
