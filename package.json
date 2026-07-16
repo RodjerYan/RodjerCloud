@@ -1,6 +1,6 @@
 {
   "name": "rodjercloud",
-  "version": "1.0.90",
+  "version": "1.0.91",
   "description": "RodjerCloud - Telegram Cloud Storage Desktop App",
   "main": "out/main/index.js",
   "author": "RodjerCloud",
@@ -9,7 +9,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac --arm64",
+    "build:mac": "electron-vite build && electron-builder --mac",
     "build:mac:arm64": "electron-vite build && electron-builder --mac --arm64",
     "build:all": "electron-vite build && electron-builder --mac --arm64 --win"
   },
