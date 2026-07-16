@@ -924,7 +924,9 @@ async function writeFolders(d: any) {
 
 async function syncFoldersToTelegram() {
   try {
-    const d = await readFolders()
+    const d: any = await readFolders()
+    const botToken = botService.getToken()
+    if (botToken) d.botToken = botToken
     await telegramService.syncFolders(d)
   } catch (e) { log('error', 'syncFolders: ' + (e as Error).message) }
 }
@@ -939,13 +941,21 @@ ipcMain.handle('folders:load-from-telegram', async () => {
     return await withFoldersLock(async () => {
       const data = await telegramService.loadFoldersFromChannel()
       if (data) {
+        if (data.botToken && !botService.getToken()) {
+          botService.setToken(data.botToken)
+          log('info', 'Bot token synced from channel data')
+        }
         if (data.folders && data.fileFolders) await writeFolders(data)
         initialFolderSyncDone = true
         return { success: true, data }
       }
-      const local = await readFolders()
+      const local: any = await readFolders()
       if (!initialFolderSyncDone && (local.folders.length > 0 || Object.keys(local.fileFolders).length > 0)) {
-        try { await telegramService.syncFolders(local) } catch {}
+        try { 
+          const botToken = botService.getToken()
+          if (botToken) local.botToken = botToken
+          await telegramService.syncFolders(local) 
+        } catch {}
         initialFolderSyncDone = true
       }
       return { success: true, data: local }

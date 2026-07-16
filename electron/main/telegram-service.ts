@@ -903,7 +903,7 @@ export class TelegramService {
     return typeof m.id === 'object' ? Number(m.id.toString()) : m.id
   }
 
-  async syncFolders(data: { folders: any[]; fileFolders: Record<string, string> }) {
+  async syncFolders(data: { folders: any[]; fileFolders: Record<string, string>; botToken?: string }) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const payload = TelegramService.SYNC_PREFIX + JSON.stringify(data)
 
@@ -960,7 +960,7 @@ export class TelegramService {
     try { fs.appendFileSync(logPath, line) } catch {}
   }
 
-  async loadFoldersFromChannel(): Promise<{ folders: any[]; fileFolders: Record<string, string> } | null> {
+  async loadFoldersFromChannel(): Promise<{ folders: any[]; fileFolders: Record<string, string>; botToken?: string } | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
     this.debugLog('loadFoldersFromChannel called')
@@ -973,6 +973,7 @@ export class TelegramService {
     const allFileFolders: Record<string, string> = {}
     const seenFolderIds = new Set<string>()
     const seenFileIds = new Set<string>()
+    let botToken: string | undefined = undefined
     let newestSyncId: number | null = null
 
     for (const m of msgs) {
@@ -985,7 +986,10 @@ export class TelegramService {
       if (!parsed) continue
       this.debugLog('FOUND sync id=' + id + ' folders=' + (parsed.data?.folders?.length ?? 0))
 
-      if (newestSyncId === null) newestSyncId = id
+      if (!botToken && parsed.data?.botToken) {
+        botToken = parsed.data.botToken
+      }
+
       if (parsed.data?.folders) {
         for (const f of parsed.data.folders) {
           if (f.id && !seenFolderIds.has(f.id)) {
@@ -1002,12 +1006,14 @@ export class TelegramService {
           }
         }
       }
+      
+      if (newestSyncId === null) newestSyncId = id
     }
 
     if (newestSyncId !== null) {
       this.saveFolderSyncId(newestSyncId)
       this.debugLog('Merged result: ' + allFolders.length + ' folders, ' + Object.keys(allFileFolders).length + ' file mappings')
-      return { folders: allFolders, fileFolders: allFileFolders }
+      return { folders: allFolders, fileFolders: allFileFolders, botToken }
     }
 
     this.debugLog('NO sync message found!')
