@@ -99,6 +99,15 @@ export class TelegramService {
   getApiId(): number { return API_ID }
   getApiHash(): string { return API_HASH }
 
+  getClient() { return this.client }
+  getChannelId() { return this.channelId }
+
+  async getMessage(messageId: number) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized')
+    const msgs = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    return msgs && msgs.length > 0 ? msgs[0] : null
+  }
+
   async startAuth(phoneNumber: string) {
     this.phoneNumber = phoneNumber.trim()
     this.codeAttempts = 0
@@ -829,12 +838,6 @@ export class TelegramService {
           if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
         } catch {}
       }
-    } else if (ext === '.heic' || ext === '.heif') {
-      // No thumbnails available. For HEIC, we must download the full file to generate a thumbnail.
-      try {
-        await this.client.downloadMedia(message, { outputFile: cachePath } as any)
-        if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
-      } catch {}
     }
 
     return null

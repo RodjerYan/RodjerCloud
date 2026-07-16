@@ -767,39 +767,7 @@ export default function MyFilesPage() {
                     </div>
                   ))
                 ) : null}
-              </div>;
-                      const isHeader = item.type === 'header';
-                      return <div {...props} ref={ref} style={{ ...props.style, gridColumn: isHeader ? '1 / -1' : undefined, width: isHeader ? '100%' : undefined }} />;
-                    })
-                  }}
-                  itemContent={(index, item) => {
-                    if (item.type === 'header') {
-                      return <div style={{ gridColumn: '1 / -1', width: '100%' }} className="mf-gd-title">{item.label} <span className="mf-gm-count">{item.count}</span></div>
-                    }
-                    const f = item.file
-                    const isVideo = drillDown === 'Видео'
-                    return (
-                      <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                        onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                        draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
-                        onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
-                        <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                        <div className="mf-gm-icon" data-type={drillDown}>
-                          <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVideo} typeLabel={drillDown || ''} />
-                        </div>
-                        <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
-                        <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
-                        <div className="mf-gm-actions">
-                          <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
-                          {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
-                          <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
-                          <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
-                          <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
-                        </div>
-                      </div>
-                    )
-                  }}
-                />
+              </div>
             )}
             {galleryFiles.length === 0 && drillDown !== 'Аудио' && <div className="mf-empty">Нет файлов</div>}
           </div>

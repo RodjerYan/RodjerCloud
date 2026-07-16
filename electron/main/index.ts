@@ -1265,8 +1265,8 @@ document.addEventListener('mousemove', function() {
     const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
     const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
 
-    if (isVideo && !f.isEncrypted) {
-      // Skip download for unencrypted video, we will stream it
+    if (isVideo) {
+      // streaming
     } else {
       // start download in background - window.load IPC will wait for it
       if (!fs.existsSync(cachedPath)) {
@@ -1294,7 +1294,7 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     
     
     let src = ''
-    if (isVideo && !f.isEncrypted) {
+    if (isVideo) {
       src = `http://127.0.0.1:14300/stream/${f.messageId}`
     } else {
       // wait for the file to exist (poll up to 30s)
