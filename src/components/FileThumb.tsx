@@ -2,6 +2,33 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Play } from 'lucide-react'
 import { loadThumb } from '../lib/thumbLoader'
 
+let globalObserver: IntersectionObserver | null = null;
+const observerCallbacks = new Map<Element, () => void>();
+
+function observe(el: Element, cb: () => void) {
+  if (!globalObserver) {
+    globalObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const callback = observerCallbacks.get(entry.target);
+          if (callback) {
+            callback();
+            globalObserver?.unobserve(entry.target);
+            observerCallbacks.delete(entry.target);
+          }
+        }
+      });
+    }, { rootMargin: '400px' });
+  }
+  observerCallbacks.set(el, cb);
+  globalObserver.observe(el);
+}
+
+function unobserve(el: Element) {
+  if (globalObserver) globalObserver.unobserve(el);
+  observerCallbacks.delete(el);
+}
+
 interface FileThumbProps {
   messageId: number
   fileName: string
@@ -15,21 +42,13 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setIsVisible(true)
-          observer.disconnect()
-        }
-      },
-      { rootMargin: '200px' } // Load slightly before coming into view
-    )
-
-    if (containerRef.current) {
-      observer.observe(containerRef.current)
+    const el = containerRef.current
+    if (el) {
+      observe(el, () => setIsVisible(true))
     }
-
-    return () => observer.disconnect()
+    return () => {
+      if (el) unobserve(el)
+    }
   }, [])
 
   useEffect(() => {
@@ -57,3 +76,4 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
     </div>
   )
 }
+
