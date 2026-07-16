@@ -796,6 +796,7 @@ export default function MyFilesPage() {
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
                   {items.length > 0 && (
                     view === 'grid' ? (
+                      <div className="mf-grid">
                         <VirtuosoGrid
                         customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                         data={items}
@@ -821,6 +822,7 @@ export default function MyFilesPage() {
                           </div>
                         )}
                       />
+                      </div>
                     ) : (
                       <table className="mf-table">
                         <thead><tr>
@@ -910,8 +912,7 @@ export default function MyFilesPage() {
 
                 {(currentLevelFolders.length > 0 || currentFiles.length > 0) && (
                   view === 'grid' ? (
-                    <>
-                      {currentLevelFolders.length > 0 && <div className="mf-grid" style={{ marginBottom: 14 }}>
+                    <div className="mf-grid">
                       {currentLevelFolders.map(sf => (
                         <div key={sf.id} className="mf-card magnetic" style={{ cursor: 'pointer' }}
                              draggable={true}
@@ -940,7 +941,6 @@ export default function MyFilesPage() {
                           <div className="mf-card-meta">{countFilesRecursive(sf.id)} файл.</div>
                         </div>
                       ))}
-                      </div>}
                       <VirtuosoGrid
                   customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                   data={currentFiles}
@@ -964,7 +964,7 @@ export default function MyFilesPage() {
                     </div>
                   )}
                 />
-                    </>
+                    </div>
                   ) : (
                     <table className="mf-table">
                       <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
