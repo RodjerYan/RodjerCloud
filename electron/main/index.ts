@@ -298,6 +298,9 @@ ipcMain.handle('telegram:reconnect', async () => {
       } catch (e) {
         log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
       }
+    } else {
+      // Cleanup extra bots if any (keep the active one)
+      await telegramService.cleanupBots(botService.getToken())
     }
     await telegramService.createCloudFolder()
     return { success: true, data: result }

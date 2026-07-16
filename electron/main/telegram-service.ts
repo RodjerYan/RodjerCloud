@@ -1026,9 +1026,15 @@ export class TelegramService {
     return BigInt(me.id.toString())
   }
 
-  async findBotInChannel(): Promise<string | null> {
-    if (!this.client || !this.channelId) return null
+  async cleanupBots(activeBotToken?: string | null): Promise<void> {
+    if (!this.client || !this.channelId) return
     try {
+      let activeBotId: string | null = null
+      if (activeBotToken) {
+        const parts = activeBotToken.split(':')
+        if (parts.length > 1) activeBotId = parts[0]
+      }
+      
       const participants = await this.client.invoke(
         new Api.channels.GetParticipants({
           channel: this.channelId as any,
@@ -1038,20 +1044,52 @@ export class TelegramService {
           hash: 0,
         })
       ) as any
-      const bot = participants?.users?.find((u: any) => u.bot)
-      return bot ? (bot.username || null) : null
-    } catch {
-      return null
+      const bots = participants?.users?.filter((u: any) => u.bot) || []
+      
+      for (const bot of bots) {
+        if (activeBotId && bot.id.toString() === activeBotId) continue
+        
+        try {
+          await this.client.invoke(
+            new Api.channels.EditAdmin({
+              channel: this.channelId as any,
+              userId: bot.id,
+              adminRights: new Api.ChatAdminRights({
+                changeInfo: false, postMessages: false, editMessages: false,
+                deleteMessages: false, banUsers: false, inviteUsers: false,
+                pinMessages: false, addAdmins: false, anonymous: false,
+                manageCall: false, other: false, manageTopics: false
+              }),
+              rank: ''
+            })
+          )
+        } catch {}
+        
+        try {
+          await this.client.invoke(
+            new Api.channels.EditBanned({
+              channel: this.channelId as any,
+              participant: bot.id,
+              bannedRights: new Api.ChatBannedRights({
+                viewMessages: true,
+                untilDate: 0
+              })
+            })
+          )
+          console.log(`Kicked useless bot ${bot.username} from channel`)
+        } catch (e) {
+          console.warn(`Failed to kick bot ${bot.username}`, (e as Error).message)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to cleanup bots', (e as Error).message)
     }
   }
 
   async createBotAndAddToChannel(): Promise<{ token: string; username: string }> {
     if (!this.client || !this.channelId) throw new Error('Not initialized')
 
-    const existingBot = await this.findBotInChannel()
-    if (existingBot) {
-      throw new Error(`Bot @${existingBot} already exists in channel. Get its token from @BotFather → /mybots → ${existingBot} → API Token`)
-    }
+    await this.cleanupBots(null)
 
     const botFather = await this.client.getEntity('BotFather') as any
     if (!botFather) throw new Error('Cannot find BotFather')
