@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
@@ -42,7 +43,7 @@ const CAT_COLOR: Record<string, string> = {
 export default function MyFilesPage() {
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
-  const [displayCount, setDisplayCount] = useState(100)
+  
   const loaderRef = useRef<HTMLDivElement>(null)
 
   const [files, setFiles] = useState<any[]>([])
@@ -100,7 +101,7 @@ export default function MyFilesPage() {
   useEffect(() => {
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
-        setDisplayCount(prev => prev + 100)
+        
       }
     }, { rootMargin: '200px' })
     if (loaderRef.current) observer.observe(loaderRef.current)
@@ -108,7 +109,7 @@ export default function MyFilesPage() {
   }, [])
 
   useEffect(() => {
-    setDisplayCount(100)
+    
   }, [folderDrill, search, sort])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
@@ -275,7 +276,23 @@ export default function MyFilesPage() {
     return filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
   }, [drillDown, filtered, fileFolders])
 
-  const galleryByDay = useMemo(() => groupByDay(galleryFiles.slice(0, displayCount)), [galleryFiles, displayCount])
+  const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
+  const flattenedGallery = useMemo(() => {
+    const grouped = groupByDay(galleryFiles);
+    const flat: any[] = [];
+    Object.entries(grouped).sort(([a], [b]) => +b - +a).forEach(([year, months]) => {
+      Object.entries(months as any).sort(([a], [b]) => +b - +a).forEach(([month, days]) => {
+        Object.entries(days as any).sort(([a], [b]) => +b - +a).forEach(([day, files]) => {
+          const d = new Date(+year, +month, +day);
+          let label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+          if (+year !== new Date().getFullYear()) label += ' ' + year;
+          flat.push({ type: 'header', id: `h-${year}-${month}-${day}`, label, count: (files as any[]).length });
+          (files as any[]).forEach(f => flat.push({ type: 'file', id: f.messageId, file: f }));
+        });
+      });
+    });
+    return flat;
+  }, [galleryFiles]);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const showToast = (s: string) => {
@@ -692,7 +709,7 @@ export default function MyFilesPage() {
                   <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                 </tr></thead>
                 <tbody>
-                  {galleryFiles.slice(0, displayCount).map(f => (
+                  {galleryFiles.slice().map(f => (
                     <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                       draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
@@ -710,45 +727,48 @@ export default function MyFilesPage() {
                 </tbody>
               </table>
             ) : (
-              Object.entries(galleryByDay).sort(([a], [b]) => +b - +a).map(([year, months]) => (
-                <div key={year} className="mf-gy">
-                  <div className="mf-gy-title">{year}</div>
-                  {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
-                    <div key={year + '-' + month} className="mf-gm">
-                      <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
-                      {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
-                        <div key={`${year}-${month}-${day}`} className="mf-gd">
-                          <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
-                          <div className="mf-gm-items">
-                            {items.map((f: any) => {
-                              const isVideo = drillDown === 'Видео'
-                              return (
-                                <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-  onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                                  draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
-                                  onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
-                                <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                                <div className="mf-gm-icon" data-type={drillDown}>
-                                  <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVideo} typeLabel={drillDown || ''} />
-                                </div>
-                                <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
-                                <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
-                                <div className="mf-gm-actions">
-                                  <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
-                                  {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
-                                  <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
-                                  <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
-                                  <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
-                                </div>
-                              </div>
-                            )})}
-                          </div>
+              <VirtuosoGrid
+                  customScrollParent={document.querySelector('.v2-main') as HTMLElement}
+                  data={flattenedGallery}
+                  listClassName="mf-gm-items"
+                  itemClassName=""
+                  components={{
+                    Item: React.forwardRef((props, ref) => {
+                      const index = props['data-index'];
+                      const item = flattenedGallery[index];
+                      if (!item) return <div {...props} ref={ref} />;
+                      const isHeader = item.type === 'header';
+                      return <div {...props} ref={ref} style={{ ...props.style, gridColumn: isHeader ? '1 / -1' : undefined, width: isHeader ? '100%' : undefined }} />;
+                    })
+                  }}
+                  itemContent={(index, item) => {
+                    if (item.type === 'header') {
+                      return <div style={{ gridColumn: '1 / -1', width: '100%' }} className="mf-gd-title">{item.label} <span className="mf-gm-count">{item.count}</span></div>
+                    }
+                    const f = item.file
+                    const isVideo = drillDown === 'Видео'
+                    return (
+                      <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                        onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                        draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                        onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
+                        <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                        <div className="mf-gm-icon" data-type={drillDown}>
+                          <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVideo} typeLabel={drillDown || ''} />
                         </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ))
+                        <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
+                        <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+                        <div className="mf-gm-actions">
+                          <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                          {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
+                          <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
+                          <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
+                          <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                        </div>
+                      </div>
+                    )
+                  }}
+                />
             )}
             {galleryFiles.length === 0 && drillDown !== 'Аудио' && <div className="mf-empty">Нет файлов</div>}
           </div>
@@ -777,11 +797,16 @@ export default function MyFilesPage() {
                   {items.length > 0 && (
                     view === 'grid' ? (
                       <div className="mf-grid">
-                        {items.slice(0, displayCount).map(f => (
+                        <VirtuosoGrid
+                        customScrollParent={document.querySelector('.v2-main') as HTMLElement}
+                        data={items}
+                        itemClassName=""
+                        listClassName="mf-grid"
+                        itemContent={(index, f) => (
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-  onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
-                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
+                             onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                             draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                             onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                             <div className="mf-card-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
@@ -795,7 +820,8 @@ export default function MyFilesPage() {
                               <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
                             </div>
                           </div>
-                        ))}
+                        )}
+                      />
                       </div>
                     ) : (
                       <table className="mf-table">
@@ -804,7 +830,7 @@ export default function MyFilesPage() {
                           <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                         </tr></thead>
                         <tbody>
-                          {items.slice(0, displayCount).map(f => (
+                          {items.slice().map(f => (
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
@@ -915,23 +941,29 @@ export default function MyFilesPage() {
                           <div className="mf-card-meta">{countFilesRecursive(sf.id)} файл.</div>
                         </div>
                       ))}
-                      {currentFiles.slice(0, displayCount).map(f => (
-                        <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-  onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                           draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
-                           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
-                          <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
-                          <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                          <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                          <div className="mf-card-actions">
-                            <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                            <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                            <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                            <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
-                          </div>
-                        </div>
-                      ))}
+                      <VirtuosoGrid
+                  customScrollParent={document.querySelector('.v2-main') as HTMLElement}
+                  data={currentFiles}
+                  listClassName="mf-grid"
+                  itemClassName=""
+                  itemContent={(index, f) => (
+                    <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                      onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                      draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                      <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                      <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                      <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                      <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                      <div className="mf-card-actions">
+                        <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                        <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                        <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                        <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  )}
+                />
                     </div>
                   ) : (
                     <table className="mf-table">
@@ -965,7 +997,7 @@ export default function MyFilesPage() {
                             </td>
                           </tr>
                         ))}
-                        {currentFiles.slice(0, displayCount).map(f => (
+                        {currentFiles.slice().map(f => (
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
@@ -985,9 +1017,7 @@ export default function MyFilesPage() {
                   )
                 )}
 
-                {currentFiles.length > displayCount && (
-                  <div ref={loaderRef} style={{ height: 20, width: '100%', marginTop: 20 }} />
-                )}
+                
 
                 {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>

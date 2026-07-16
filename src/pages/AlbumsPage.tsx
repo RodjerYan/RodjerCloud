@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
+import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal } from 'react-dom'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
 import { fmtSize } from '../lib/utils'
@@ -27,13 +28,13 @@ export default function AlbumsPage() {
   const [showSub, setShowSub] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
-  const [displayCount, setDisplayCount] = useState(100)
+  
   const loaderRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
-        setDisplayCount(prev => prev + 100)
+        
       }
     }, { rootMargin: '200px' })
     if (loaderRef.current) observer.observe(loaderRef.current)
@@ -42,7 +43,7 @@ export default function AlbumsPage() {
 
   // Reset display count when album changes
   useEffect(() => {
-    setDisplayCount(100)
+    
   }, [openAlbum])
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
@@ -118,7 +119,7 @@ export default function AlbumsPage() {
     if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
   }, [currentAlbum, allFiles, albums, hashGroups])
 
-  const grouped = useMemo(() => groupByDay(albumFiles.slice(0, displayCount)), [albumFiles, displayCount])
+  const grouped = useMemo(() => groupByDay(albumFiles.slice()), [albumFiles])
 
   useEffect(() => {
     if (openAlbum) {
@@ -239,10 +240,10 @@ export default function AlbumsPage() {
                     </div>
                   )
                 }
-                return Array.from(groups.entries()).slice(0, displayCount).map(([hash, files]) => (
+                return Array.from(groups.entries()).slice().map(([hash, files]) => (
                   <div key={hash} className="mf-gy">
                     <div className="mf-gy-title">{files.length} дубликата</div>
-                    <div className="mf-gm-items">{files.slice(0, displayCount).map(f => renderCard(f, true, true))}</div>
+                    <div className="mf-gm-items">{files.slice().map(f => renderCard(f, true, true))}</div>
                   </div>
                 ))
               })()}
