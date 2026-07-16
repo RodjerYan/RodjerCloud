@@ -40,6 +40,13 @@ const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
 
+interface PendingUpload {
+  id: string;
+  fileName: string;
+  progress: number;
+  folderId?: string | null;
+}
+
 export default function MyFilesPage() {
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
@@ -174,8 +181,18 @@ export default function MyFilesPage() {
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
     setDropProgress({ current: 0, total: dropped.length, pct: 0 })
+    
+    const newPending = dropped.map(d => ({
+      id: Math.random().toString(36).substring(2),
+      fileName: d.fileName,
+      progress: 0,
+      folderId: targetFolderId || null
+    }))
+    setPendingUploads(prev => [...prev, ...newPending])
+
     for (let i = 0; i < dropped.length; i++) {
       const file = dropped[i]
+      const pendingId = newPending[i].id
       setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
 
       const currentFiles = targetFolderId ? files.filter((f: any) => fileFolders[f.messageId] === targetFolderId) : files.filter((f: any) => !fileFolders[f.messageId])
@@ -189,7 +206,10 @@ export default function MyFilesPage() {
         })
         setDuplicatePrompt(null)
 
-        if (choice === 'skip') continue
+        if (choice === 'skip') {
+          setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
+          continue
+        }
         if (choice === 'replace') {
           await window.electronAPI.telegram.deleteFile(existing.messageId)
         }
@@ -207,12 +227,14 @@ export default function MyFilesPage() {
         }
       }
 
-      await window.electronAPI.telegram.uploadFile(file.filePath, undefined, false, uploadCustomName).then(async (res: any) => {
+      await window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
         if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
         if (res.success && res.data?.messageId && targetFolderId) {
           await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
         }
       })
+      
+      setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
     }
     setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
     loadFolders()
@@ -262,9 +284,10 @@ export default function MyFilesPage() {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
-      if (ffset.has(f.messageId)) return
       const fd = f.uploadedAt || fileDate(f)
       if (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400) map['Недавние']?.push(f)
+      
+      if (ffset.has(f.messageId)) return
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
@@ -273,8 +296,14 @@ export default function MyFilesPage() {
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
     const ffset = new Set(Object.keys(fileFolders).map(Number))
-    return filtered.filter(f => typeOf(f.fileName) === drillDown && !ffset.has(f.messageId))
-  }, [drillDown, filtered, fileFolders])
+    if (drillDown === 'Недавние') {
+      return filtered.filter(f => {
+        const fd = f.uploadedAt || fileDate(f)
+        return (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400)
+      })
+    }
+    return filtered.filter(f => !ffset.has(f.messageId) && typeOf(f.fileName) === drillDown)
+  }, [drillDown, filtered, now, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
@@ -493,6 +522,7 @@ export default function MyFilesPage() {
 
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number } | null>(null)
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
   const dropDoneRef = useRef<NodeJS.Timeout>()
   const dragCounter = useRef(0)
 
@@ -500,6 +530,13 @@ export default function MyFilesPage() {
     const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
       if (!d.id) return
       setDropProgress(prev => prev ? { ...prev, pct: d.percent } : null)
+      setPendingUploads(prev => {
+        const idx = prev.findIndex(p => p.id === d.id)
+        if (idx === -1) return prev
+        const next = [...prev]
+        next[idx] = { ...next[idx], progress: d.percent }
+        return next
+      })
     })
     return () => { off(); clearTimeout(dropDoneRef.current) }
   }, [])
@@ -907,7 +944,7 @@ export default function MyFilesPage() {
                   </div>
                 )}
 
-                {(currentLevelFolders.length > 0 || currentFiles.length > 0) && (
+                {(currentLevelFolders.length > 0 || currentFiles.length > 0 || pendingUploads.filter(p => p.folderId === folderDrill).length > 0) && (
                   view === 'grid' ? (
                     <>
                       {currentLevelFolders.length > 0 && <div className="mf-grid" style={{ marginBottom: 14 }}>
@@ -942,26 +979,43 @@ export default function MyFilesPage() {
                       </div>}
                       <VirtuosoGrid
                   customScrollParent={document.querySelector('.v2-main') as HTMLElement}
-                  data={currentFiles}
+                  data={[...currentFiles, ...pendingUploads.filter(p => p.folderId === folderDrill)]}
                   listClassName="mf-grid"
                   itemClassName=""
-                  itemContent={(index, f) => (
+                  itemContent={(index, f: any) => {
+                    if (f.id && !f.messageId) {
+                      return (
+                        <div key={f.id} className="mf-card magnetic" style={{ opacity: 0.7, cursor: 'wait' }}>
+                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                          <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                          <div className="mf-card-meta">Загрузка... {f.progress}%</div>
+                        </div>
+                      )
+                    }
+                    const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                    const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
+                    return (
                     <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                       onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                       draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                       <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                      <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                      
+                      <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                        {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                      </div>
+                      
                       <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                       <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                       <div className="mf-card-actions">
                         <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                         <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                        {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
                         <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                         <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
                       </div>
                     </div>
-                  )}
+                  )}}
                 />
                     </>
                   ) : (
@@ -996,7 +1050,10 @@ export default function MyFilesPage() {
                             </td>
                           </tr>
                         ))}
-                        {currentFiles.slice().map(f => (
+                        {currentFiles.slice().map(f => {
+                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
+                          return (
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
@@ -1006,9 +1063,19 @@ export default function MyFilesPage() {
                             <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                             <td>
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
                             </td>
+                          </tr>
+                        )})}
+                        
+                        {pendingUploads.filter(p => p.folderId === folderDrill).map(p => (
+                          <tr key={p.id} style={{ opacity: 0.7, cursor: 'wait' }}>
+                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{p.fileName}</span></td>
+                            <td>Загрузка... {p.progress}%</td>
+                            <td>—</td>
+                            <td></td>
                           </tr>
                         ))}
                       </tbody>
@@ -1018,7 +1085,7 @@ export default function MyFilesPage() {
 
                 
 
-                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && (
+                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => p.folderId === folderDrill).length === 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
                     {duckAnim ? (
                       <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />

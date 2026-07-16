@@ -182,7 +182,7 @@ function App() {
     <ErrorBoundary>
     <MemoryRouter initialEntries={["/"]}>
       <Titlebar />
-      <div className="v2-shell" style={{ paddingTop: navigator.userAgent.toLowerCase().includes('mac os') ? '0' : '32px' }}>
+      <div className="v2-shell" style={{ paddingTop: '32px' }}>
         <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
         <AudioPlayerProvider>
           <UploadQueueProvider>
