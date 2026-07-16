@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Play, Download, Trash2, Music } from 'lucide-react'
+import { Play, Download, Trash2, Music, Clock, Calendar } from 'lucide-react'
 import { useAudioPlayer } from '../lib/AudioPlayerContext'
 import { appConfirm } from '../lib/dialogs'
 
@@ -8,6 +8,25 @@ function fmtSize(n: number) {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
+}
+
+function parseAudioInfo(filename: string) {
+  const name = filename.replace(/\.[^/.]+$/, "")
+  if (name.includes(' - ')) {
+    const parts = name.split(' - ')
+    return { artist: parts[0].trim(), title: parts.slice(1).join(' - ').trim() }
+  }
+  return { artist: 'Неизвестный исполнитель', title: name }
+}
+
+function getGradientForName(name: string) {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  const c1 = `hsl(${Math.abs(hash) % 360}, 70%, 50%)`
+  const c2 = `hsl(${(Math.abs(hash) + 40) % 360}, 80%, 30%)`
+  return `linear-gradient(135deg, ${c1}, ${c2})`
 }
 
 export default function AudioPlayerPage() {
@@ -40,49 +59,111 @@ export default function AudioPlayerPage() {
     window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
   }
 
-  if (loading) return <div className="v3-page"><div className="mf-empty">Загрузка…</div></div>
+  if (loading) return <div className="ap-container"><div className="mf-empty">Загрузка…</div></div>
+
+  const totalSize = files.reduce((acc, f) => acc + (f.fileSize || 0), 0)
 
   return (
-    <div className="v3-page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)', paddingBottom: 100 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-        <Music size={22} />
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Аудиоплеер</h2>
-        <span style={{ fontSize: 13, color: 'var(--v3-text-dim)' }}>{files.length} треков</span>
+    <div className="ap-container">
+      <div className="ap-header">
+        <div className="ap-header-cover">
+          <Music size={80} opacity={0.8} />
+        </div>
+        <div className="ap-header-info">
+          <div className="ap-type">Плейлист</div>
+          <h1 className="ap-title">Моя музыка</h1>
+          <div className="ap-stats">
+            <span>RodjerCloud</span>
+            <span>•</span>
+            <span>{files.length} треков</span>
+            <span>•</span>
+            <span>{fmtSize(totalSize)}</span>
+          </div>
+        </div>
+      </div>
+      
+      <div className="ap-actions">
+        <button 
+          className="ap-play-btn" 
+          onClick={() => files.length > 0 && play(files[0], files)}
+          title="Слушать всё"
+        >
+          <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />
+        </button>
       </div>
 
-      {files.length === 0 ? (
-        <div className="mf-empty">Нет аудиофайлов</div>
-      ) : (
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          <table className="mf-table" style={{ borderRadius: 12, overflow: 'hidden' }}>
-            <thead><tr>
-              <th style={{ width: 40 }}>#</th>
-              <th>Название</th>
-              <th style={{ width: 100 }}>Размер</th>
-              <th style={{ width: 100 }}>Дата</th>
-              <th style={{ width: 140 }}>Действия</th>
-            </tr></thead>
-            <tbody>
-              {files.map((f, i) => (
-                <tr key={f.messageId} style={{ cursor: 'pointer', background: currentTrack?.messageId === f.messageId ? 'rgba(52,211,153,0.08)' : undefined }}
-                    onDoubleClick={() => play(f, files)}>
-                  <td style={{ textAlign: 'center', color: currentTrack?.messageId === f.messageId ? '#34d399' : undefined }}>
-                    {currentTrack?.messageId === f.messageId && playing ? <Music size={14} /> : i + 1}
-                  </td>
-                  <td className="ellip" title={f.fileName}>{f.fileName}</td>
-                  <td>{fmtSize(f.fileSize)}</td>
-                  <td>{new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</td>
-                  <td>
-                    <button title="Воспроизвести" onClick={() => play(f, files)}><Play size={14} /></button>
-                    <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                    <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="ap-tracklist">
+        {files.length === 0 ? (
+          <div className="mf-empty" style={{ marginTop: 40 }}>Нет аудиофайлов</div>
+        ) : (
+          <>
+            <div className="ap-track-row header">
+              <div className="ap-track-num">#</div>
+              <div>Название</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Calendar size={14}/> Добавлен</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={14}/> Размер</div>
+            </div>
+            
+            {files.map((f, i) => {
+              const isActive = currentTrack?.messageId === f.messageId
+              const info = parseAudioInfo(f.fileName)
+              
+              return (
+                <div 
+                  key={f.messageId} 
+                  className={`ap-track-row ${isActive ? 'active' : ''}`}
+                  onDoubleClick={() => play(f, files)}
+                >
+                  <div className="ap-track-num">
+                    {isActive && playing ? (
+                      <div className="ap-eq">
+                        <div className="ap-eq-bar"></div>
+                        <div className="ap-eq-bar"></div>
+                        <div className="ap-eq-bar"></div>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="ap-track-num-txt" style={{ color: isActive ? 'var(--accent)' : undefined }}>
+                          {i + 1}
+                        </span>
+                        <div className="ap-track-play" onClick={(e) => { e.stopPropagation(); play(f, files) }}>
+                          <Play size={14} fill="currentColor" />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  
+                  <div className="ap-track-info">
+                    <div className="ap-track-cover" style={{ background: getGradientForName(f.fileName) }}>
+                      <Music size={18} />
+                    </div>
+                    <div className="ap-track-text">
+                      <span className="ap-track-title" title={info.title}>{info.title}</span>
+                      <span className="ap-track-artist" title={info.artist}>{info.artist}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="ap-track-date">
+                    {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}
+                  </div>
+                  
+                  <div className="ap-track-size" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{fmtSize(f.fileSize)}</span>
+                    <div className="ap-track-actions">
+                      <button title="Скачать" onClick={(e) => { e.stopPropagation(); handleDownload(f) }}>
+                        <Download size={16} />
+                      </button>
+                      <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); handleDelete(f) }}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        )}
+      </div>
     </div>
   )
 }
