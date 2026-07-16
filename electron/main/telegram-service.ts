@@ -1032,6 +1032,82 @@ export class TelegramService {
     return BigInt(me.id.toString())
   }
 
+
+  private async fetchExistingBotToken(botUsername: string): Promise<string | null> {
+    const botFather = await this.client!.getEntity('BotFather') as any
+    await this.client!.sendMessage(botFather, { message: '/mybots', silent: true } as any)
+    
+    let mybotsMsg: any = null;
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
+      const m = msgs.find(x => x.message?.includes('Choose a bot from the list below') || x.message?.includes('You have no bots'))
+      if (m) { mybotsMsg = m; break; }
+    }
+    if (!mybotsMsg || !mybotsMsg.replyMarkup) return null
+
+    let botData: Buffer | null = null;
+    for (const row of mybotsMsg.replyMarkup.rows) {
+      for (const btn of row.buttons) {
+        if (btn.text === '@' + botUsername && btn.data) { botData = Buffer.from(btn.data); break; }
+      }
+    }
+    if (!botData) return null;
+
+    await this.client!.invoke(new Api.messages.GetBotCallbackAnswer({ peer: botFather, msgId: mybotsMsg.id, data: botData }))
+
+    let detailsMsg: any = null;
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
+      const m = msgs.find(x => x.message?.includes('Choose what to do with the bot'))
+      if (m) { detailsMsg = m; break; }
+    }
+    if (!detailsMsg || !detailsMsg.replyMarkup) return null
+
+    let tokenData: Buffer | null = null;
+    for (const row of detailsMsg.replyMarkup.rows) {
+      for (const btn of row.buttons) {
+        if (btn.text.includes('API Token') && btn.data) { tokenData = Buffer.from(btn.data); break; }
+      }
+    }
+    if (!tokenData) return null;
+
+    await this.client!.invoke(new Api.messages.GetBotCallbackAnswer({ peer: botFather, msgId: detailsMsg.id, data: tokenData }))
+
+    let tokenMsg: any = null;
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
+      const m = msgs.find(x => x.message?.includes('Use this token to access the HTTP API'))
+      if (m) { tokenMsg = m; break; }
+    }
+    if (!tokenMsg) return null;
+
+    const match = tokenMsg.message.match(/[0-9]{8,10}:[a-zA-Z0-9_-]{35,}/)
+    return match ? match[0] : null
+  }
+
+
+  async findBotInChannel(): Promise<string | null> {
+    if (!this.client || !this.channelId) return null
+    try {
+      const participants = await this.client.invoke(
+        new Api.channels.GetParticipants({
+          channel: this.channelId as any,
+          filter: new Api.ChannelParticipantsBots(),
+          offset: 0,
+          limit: 10,
+          hash: 0,
+        })
+      ) as any
+      const bot = participants?.users?.find((u: any) => u.bot)
+      return bot ? (bot.username || null) : null
+    } catch {
+      return null
+    }
+  }
+
   async cleanupBots(activeBotToken?: string | null): Promise<void> {
     if (!this.client || !this.channelId) return
     try {
@@ -1095,7 +1171,14 @@ export class TelegramService {
   async createBotAndAddToChannel(): Promise<{ token: string; username: string }> {
     if (!this.client || !this.channelId) throw new Error('Not initialized')
 
-    await this.cleanupBots(null)
+    const existingBot = await this.findBotInChannel()
+    if (existingBot) {
+      const existingToken = await this.fetchExistingBotToken(existingBot)
+      if (existingToken) {
+        return { token: existingToken, username: existingBot }
+      }
+      throw new Error(`Не удалось автоматически получить токен бота @${existingBot}. Пожалуйста, удалите его из канала перед созданием нового.`)
+    }
 
     const botFather = await this.client.getEntity('BotFather') as any
     if (!botFather) throw new Error('Cannot find BotFather')
