@@ -727,16 +727,47 @@ export default function MyFilesPage() {
                 </tbody>
               </table>
             ) : (
-              <VirtuosoGrid
-                  customScrollParent={document.querySelector('.v2-main') as HTMLElement}
-                  data={flattenedGallery}
-                  listClassName="mf-gm-items"
-                  itemClassName=""
-                  components={{
-                    Item: React.forwardRef((props, ref) => {
-                      const index = props['data-index'];
-                      const item = flattenedGallery[index];
-                      if (!item) return <div {...props} ref={ref} />;
+              <div className="mf-gallery-body">
+                {galleryFiles.length > 0 ? (
+                  Object.entries(groupByDay(galleryFiles)).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+                    <div key={year} className="mf-gy">
+                      <div className="mf-gy-title">{year}</div>
+                      {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
+                        <div key={year + '-' + month} className="mf-gm">
+                          <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
+                          {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
+                            <div key={year + '-' + month + '-' + day} className="mf-gd">
+                              <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                              <div className="mf-gm-items">
+                                {items.map(f => (
+                                  <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                    onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                    draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                                    onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
+                                    <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                                    <div className="mf-gm-icon" data-type={drillDown}>
+                                      <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={drillDown === 'Видео'} typeLabel={drillDown || ''} />
+                                    </div>
+                                    <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
+                                    <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
+                                    <div className="mf-gm-actions">
+                                      <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                                      {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
+                                      <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
+                                      <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
+                                      <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                ) : null}
+              </div>;
                       const isHeader = item.type === 'header';
                       return <div {...props} ref={ref} style={{ ...props.style, gridColumn: isHeader ? '1 / -1' : undefined, width: isHeader ? '100%' : undefined }} />;
                     })
