@@ -1,0 +1,262 @@
+/* Audio Player Spotify-like Redesign */
+
+.ap-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  padding-bottom: 90px; /* Space for the global player */
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.ap-header {
+  padding: 40px var(--space-lg) 24px;
+  background: linear-gradient(to bottom, rgba(124, 131, 255, 0.15), transparent);
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ap-header-cover {
+  width: 192px;
+  height: 192px;
+  border-radius: var(--radius-md);
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.ap-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ap-type {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.ap-title {
+  font-size: 64px;
+  font-weight: 900;
+  line-height: 1.1;
+  margin: 0;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+}
+
+.ap-stats {
+  font-size: 14px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-actions {
+  padding: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.ap-play-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+  box-shadow: 0 8px 24px rgba(124, 131, 255, 0.4);
+}
+
+.ap-play-btn:hover {
+  transform: scale(1.05);
+  background: var(--accent-hover);
+}
+
+.ap-tracklist {
+  flex: 1;
+  padding: 0 var(--space-lg);
+  overflow-y: auto;
+}
+
+.ap-track-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 140px 100px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  gap: 16px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.ap-track-row.header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  cursor: default;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.ap-track-row.header:hover {
+  background: transparent;
+}
+
+.ap-track-row:hover:not(.header) {
+  background: rgba(255,255,255,0.05);
+}
+
+.ap-track-row.active {
+  color: var(--accent);
+}
+
+.ap-track-row.active .ap-track-title {
+  color: var(--accent);
+}
+
+.ap-track-num {
+  text-align: right;
+  width: 20px;
+  display: flex;
+  justify-content: flex-end;
+  position: relative;
+}
+
+.ap-track-num-txt {
+  display: block;
+}
+
+.ap-track-row:hover:not(.header) .ap-track-num-txt {
+  display: none;
+}
+
+.ap-track-play {
+  display: none;
+  color: #fff;
+}
+
+.ap-track-row:hover:not(.header) .ap-track-play {
+  display: block;
+}
+
+.ap-track-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ap-track-cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.ap-track-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ap-track-title {
+  color: #fff;
+  font-weight: 500;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-track-artist {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-track-date, .ap-track-size {
+  white-space: nowrap;
+}
+
+.ap-track-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  justify-content: flex-end;
+}
+
+.ap-track-row:hover .ap-track-actions {
+  opacity: 1;
+}
+
+.ap-track-actions button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.ap-track-actions button:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+}
+
+.ap-track-actions button.danger:hover {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* EQ Animation for active track */
+.ap-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.ap-eq-bar {
+  width: 3px;
+  background: var(--accent);
+  animation: ap-eq-anim 1s infinite alternate ease-in-out;
+}
+.ap-eq-bar:nth-child(1) { animation-delay: 0.1s; }
+.ap-eq-bar:nth-child(2) { animation-delay: 0.4s; }
+.ap-eq-bar:nth-child(3) { animation-delay: 0.2s; }
+
+@keyframes ap-eq-anim {
+  0% { height: 4px; }
+  100% { height: 14px; }
+}
