@@ -17,18 +17,9 @@
 .mf-bulkbar button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .mf-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
-padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s; overflow: hidden; }
-.mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden; }
+.mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translateY(-4px); }
 
-/* Glass Reflection Sweep */
-.mf-card::after {
-  content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
-  transform: skewX(-20deg); transition: left 0s; z-index: 1; pointer-events: none;
-}
-.mf-card:hover::after {
-  left: 200%; transition: left 0.6s ease-in-out;
-}
 
 .mf-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .mf-card.deleting, .mf-gm-card.deleting, .mf-table tr.deleting {
@@ -136,22 +127,12 @@ body.compact .mf-card-icon { height: 60px; }
 .mf-gm-items {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
 }
-.mf-gm-card {
-  position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 20px; padding: 12px;
-  transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s; overflow: hidden;
+.mf-gm-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);
+border-radius: 20px; padding: 12px;
+transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden;
 }
-.mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+.mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translateY(-4px); }
 
-/* Glass Reflection Sweep */
-.mf-gm-card::after {
-  content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
-  transform: skewX(-20deg); transition: left 0s; z-index: 1; pointer-events: none;
-}
-.mf-gm-card:hover::after {
-  left: 200%; transition: left 0.6s ease-in-out;
-}
 
 .mf-gm-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .mf-gm-card .mf-check { top: 6px; left: 6px; }

@@ -83,42 +83,7 @@ function App() {
   const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
   const unsubDlRef = useRef<(() => void) | null>(null)
 
-  // Global Magnetic Hover Effect (Optimized)
-  useEffect(() => {
-    let ticking = false;
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          const el = (e.target as Element)?.closest('.magnetic') as HTMLElement;
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            const x = e.clientX - rect.left - rect.width / 2;
-            const y = e.clientY - rect.top - rect.height / 2;
-            const tx = x * 0.15;
-            const ty = y * 0.15;
-            el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(1.02)`;
-          }
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-    const handleMouseLeave = (e: MouseEvent) => {
-      const el = (e.target as Element)?.closest('.magnetic') as HTMLElement;
-      if (el) {
-        const related = e.relatedTarget as Node;
-        if (!el.contains(related)) {
-          el.style.transform = '';
-        }
-      }
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseout', handleMouseLeave);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseout', handleMouseLeave);
-    };
-  }, []);
+  // Magnetic Hover Effect removed per user request
 
   const fetchUserInfo = useCallback(async () => {
     try {
