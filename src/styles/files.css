@@ -17,7 +17,7 @@
 .mf-bulkbar button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .mf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .mf-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
-padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden; }
+padding: 14px; transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
 .mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translateY(-4px); }
 
 
@@ -129,7 +129,7 @@ body.compact .mf-card-icon { height: 60px; }
 }
 .mf-gm-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);
 border-radius: 20px; padding: 12px;
-transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; overflow: hidden;
+transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
 .mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translateY(-4px); }
 
