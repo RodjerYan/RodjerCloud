@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net } from 'electron'
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as https from 'https'
@@ -874,6 +874,22 @@ ipcMain.handle('app:install-update', async (_, filePath: string) => {
     if (result) {
       return { success: false, error: result }
     }
+
+    if (process.platform === 'darwin') {
+      const script = `
+        for i in {1..120}; do
+          xattr -cr "/Applications/RodjerCloud.app" 2>/dev/null
+          xattr -cr "$HOME/Applications/RodjerCloud.app" 2>/dev/null
+          sleep 1
+        done
+      `
+      const child = spawn('bash', ['-c', script], {
+        detached: true,
+        stdio: 'ignore'
+      })
+      child.unref()
+    }
+
     app.quit()
     return { success: true }
   } catch (error) {
