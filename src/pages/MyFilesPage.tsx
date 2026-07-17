@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, forwardRef } from 'react'
-import { useAutoAnimate } from '@formkit/auto-animate/react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -59,21 +58,6 @@ const matchVirtualFolder = (fileName: string, folderId: string) => {
 }
 
 export default function MyFilesPage() {
-  const [animateRef] = useAutoAnimate()
-  
-  const gridComponents = useMemo(() => ({
-    List: forwardRef((props: any, ref: any) => (
-      <div 
-        {...props} 
-        ref={node => {
-          animateRef(node)
-          if (typeof ref === 'function') ref(node)
-          else if (ref) ref.current = node
-        }} 
-      />
-    ))
-  }), [animateRef])
-
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
   
@@ -891,7 +875,6 @@ export default function MyFilesPage() {
                   {items.length > 0 && (
                     view === 'grid' ? (
                         <VirtuosoGrid
-                        components={gridComponents as any}
                         customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                         data={items}
                         itemClassName=""
@@ -1040,7 +1023,6 @@ export default function MyFilesPage() {
                       ))}
                       </div>}
                       <VirtuosoGrid
-                  components={gridComponents as any}
                   customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                   data={[...currentFiles, ...pendingUploads.filter(p => {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
