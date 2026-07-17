@@ -483,11 +483,13 @@ export class TelegramService {
             require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
           } else {
             try {
-              require('child_process').execFileSync('ffmpeg', [
+              let ffmpegPath = require('ffmpeg-static')
+              if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
+              require('child_process').execFileSync(ffmpegPath, [
                 '-i', filePath, '-ss', '00:00:01', '-vframes', '1',
-                '-vf', 'scale=320:-1', pngPath
-              ], { timeout: 10000 })
-            } catch { /* ffmpeg не установлен — пропускаем */ }
+                '-vf', 'scale=320:-1', '-y', pngPath
+              ], { timeout: 10000, stdio: 'ignore' })
+            } catch (err) { console.error('ffmpeg thumb error:', err) }
           }
           if (fs.existsSync(pngPath)) {
             const pngBuf = fs.readFileSync(pngPath)
