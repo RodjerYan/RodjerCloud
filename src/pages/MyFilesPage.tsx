@@ -45,6 +45,16 @@ interface PendingUpload {
   fileName: string;
   progress: number;
   folderId?: string | null;
+  objectUrl?: string;
+}
+
+const matchVirtualFolder = (fileName: string, folderId: string) => {
+  if (folderId === '__type_Изображения') return !!fileName.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg)$/i)
+  if (folderId === '__type_Видео') return !!fileName.match(/\.(mp4|mov|avi|mkv|webm)$/i)
+  if (folderId === '__type_Аудио') return !!fileName.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)
+  if (folderId === '__type_Документы') return !!fileName.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|djvu|epub|fb2)$/i)
+  if (folderId === '__type_Архивы') return !!fileName.match(/\.(zip|rar|7z|tar|gz)$/i)
+  return false
 }
 
 export default function MyFilesPage() {
@@ -178,22 +188,26 @@ export default function MyFilesPage() {
     setLoading(false)
   }
 
-  const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string }[], targetFolderId?: string | null) => {
+  const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
-    setDropProgress({ current: 0, total: dropped.length, pct: 0 })
+    setDropProgress(prev => {
+      const total = (prev?.total || 0) + dropped.length
+      const completed = prev?.completed || 0
+      return { current: 0, total, pct: total > 0 ? Math.floor(completed / total * 100) : 0, completed }
+    })
     
     const newPending = dropped.map(d => ({
       id: Math.random().toString(36).substring(2),
       fileName: d.fileName,
       progress: 0,
-      folderId: targetFolderId || null
+      folderId: targetFolderId || null,
+      objectUrl: d.objectUrl
     }))
     setPendingUploads(prev => [...prev, ...newPending])
 
     for (let i = 0; i < dropped.length; i++) {
       const file = dropped[i]
       const pendingId = newPending[i].id
-      setDropProgress(prev => prev ? { ...prev, current: i, pct: 0 } : null)
 
       const currentFiles = targetFolderId ? files.filter((f: any) => fileFolders[f.messageId] === targetFolderId) : files.filter((f: any) => !fileFolders[f.messageId])
       const existing = currentFiles.find((f: any) => f.fileName === file.fileName)
@@ -208,6 +222,7 @@ export default function MyFilesPage() {
 
         if (choice === 'skip') {
           setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
+          setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
           continue
         }
         if (choice === 'replace') {
@@ -227,19 +242,34 @@ export default function MyFilesPage() {
         }
       }
 
-      await window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
+      window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
         if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
         if (res.success && res.data?.messageId && targetFolderId) {
           await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
         }
+        setPendingUploads(prev => {
+          const next = prev.filter(p => p.id !== pendingId)
+          if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
+          return next
+        })
+        setDropProgress(dp => {
+          if (!dp) return null
+          const completed = dp.completed + 1
+          const pct = Math.floor((completed / dp.total) * 100)
+          if (completed >= dp.total) {
+            clearTimeout(dropDoneRef.current)
+            dropDoneRef.current = setTimeout(() => setDropProgress(null), 2000)
+          }
+          return { ...dp, completed, pct }
+        })
+        loadFolders()
+        load()
+      }).catch((err: any) => {
+        console.error('Upload failed:', err)
+        setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
+        setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
       })
-      
-      setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
     }
-    setDropProgress({ current: dropped.length, total: dropped.length, pct: 100 })
-    loadFolders()
-    load()
-    dropDoneRef.current = setTimeout(() => setDropProgress(null), 1200)
   }
 
   const uploadToFolder = async (folderId: string) => {
@@ -492,7 +522,7 @@ export default function MyFilesPage() {
     if (files.length === 0) return
     setArchiveProgress({ percent: 0, phase: 'downloading' })
     setArchiveDonePhases(new Set())
-    const off = window.electronAPI.folders.onArchiveProgress((d) => {
+    const off = window.electronAPI.folders.onArchiveProgress((d: any) => {
       setArchiveProgress({ percent: d.percent, phase: d.phase })
       setArchiveDonePhases(prev => new Set(prev).add(d.phase))
     })
@@ -518,7 +548,7 @@ export default function MyFilesPage() {
   const hasFiles = Object.values(grouped).some(g => g.length > 0)
 
   const [isDragOver, setIsDragOver] = useState(false)
-  const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number } | null>(null)
+  const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number; completed: number } | null>(null)
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
   const dropDoneRef = useRef<NodeJS.Timeout>()
   const dragCounter = useRef(0)
@@ -526,12 +556,19 @@ export default function MyFilesPage() {
   useEffect(() => {
     const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
       if (!d.id) return
-      setDropProgress(prev => prev ? { ...prev, pct: d.percent } : null)
       setPendingUploads(prev => {
         const idx = prev.findIndex(p => p.id === d.id)
         if (idx === -1) return prev
         const next = [...prev]
         next[idx] = { ...next[idx], progress: d.percent }
+        
+        setDropProgress(dp => {
+          if (!dp) return null
+          const activeProgresses = next.reduce((sum, p) => sum + p.progress, 0)
+          const totalProgressPct = dp.total > 0 ? Math.floor(((dp.completed * 100) + activeProgresses) / dp.total) : 0
+          return { ...dp, pct: Math.min(100, totalProgressPct) }
+        })
+        
         return next
       })
     })
@@ -539,10 +576,14 @@ export default function MyFilesPage() {
   }, [])
 
   const extractDroppedFiles = (e: React.DragEvent) => {
-    const dropped: { filePath: string; fileName: string }[] = []
+    const dropped: { filePath: string; fileName: string; objectUrl?: string }[] = []
     for (const file of Array.from(e.dataTransfer.files)) {
       const p = window.electronAPI.getPathForFile(file)
-      if (p) dropped.push({ filePath: p, fileName: file.name })
+      let objectUrl: string | undefined
+      if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.name.match(/\.(heic|heif)$/i)) {
+        try { objectUrl = URL.createObjectURL(file) } catch {}
+      }
+      if (p) dropped.push({ filePath: p, fileName: file.name, objectUrl })
     }
     return dropped
   }
@@ -650,9 +691,9 @@ export default function MyFilesPage() {
                   : '0 0 6px rgba(124,131,255,0.4)',
               }} />
             </div>
-            {dropProgress && dropProgress.pct >= 100
+            {dropProgress && dropProgress.completed >= dropProgress.total && dropProgress.total > 0
               ? 'Загрузка завершена'
-              : `Загрузка... ${dropProgress?.pct ?? 0}%`}
+              : `Загружено: ${dropProgress?.completed ?? 0} из ${dropProgress?.total ?? 0} • Осталось: ${(dropProgress?.total ?? 0) - (dropProgress?.completed ?? 0)} • ${dropProgress?.pct ?? 0}%`}
           </div>
         </div>
       </div>
@@ -941,7 +982,10 @@ export default function MyFilesPage() {
                   </div>
                 )}
 
-                {(currentLevelFolders.length > 0 || currentFiles.length > 0 || pendingUploads.filter(p => p.folderId === folderDrill).length > 0) && (
+                {(currentLevelFolders.length > 0 || currentFiles.length > 0 || pendingUploads.filter(p => {
+      if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
+      return p.folderId === folderDrill
+    }).length > 0) && (
                   view === 'grid' ? (
                     <>
                       {currentLevelFolders.length > 0 && <div className="mf-grid" style={{ marginBottom: 14 }}>
@@ -976,14 +1020,19 @@ export default function MyFilesPage() {
                       </div>}
                       <VirtuosoGrid
                   customScrollParent={document.querySelector('.v2-main') as HTMLElement}
-                  data={[...currentFiles, ...pendingUploads.filter(p => p.folderId === folderDrill)]}
+                  data={[...currentFiles, ...pendingUploads.filter(p => {
+      if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
+      return p.folderId === folderDrill
+    })]}
                   listClassName="mf-grid"
                   itemClassName=""
                   itemContent={(index, f: any) => {
                     if (f.id && !f.messageId) {
                       return (
-                        <div key={f.id} className="mf-card magnetic" style={{ opacity: 0.7, cursor: 'wait' }}>
-                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                        <div key={f.id} className="mf-card magnetic" style={{ opacity: 0.5, cursor: 'wait' }}>
+                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                            {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                          </div>
                           <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                           <div className="mf-card-meta">Загрузка... {f.progress}%</div>
                         </div>
@@ -1069,9 +1118,15 @@ export default function MyFilesPage() {
                           </tr>
                         )})}
                         
-                        {pendingUploads.filter(p => p.folderId === folderDrill).map(p => (
-                          <tr key={p.id} style={{ opacity: 0.7, cursor: 'wait' }}>
-                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{p.fileName}</span></td>
+                        {pendingUploads.filter(p => {
+      if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
+      return p.folderId === folderDrill
+    }).map(p => (
+                          <tr key={p.id} style={{ opacity: 0.5, cursor: 'wait' }}>
+                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {p.objectUrl ? <img src={p.objectUrl} style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }} /> : <FileText size={16} />}
+                              {p.fileName}
+                            </span></td>
                             <td>Загрузка... {p.progress}%</td>
                             <td>—</td>
                             <td></td>
@@ -1084,7 +1139,10 @@ export default function MyFilesPage() {
 
                 
 
-                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => p.folderId === folderDrill).length === 0 && (
+                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
+      if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
+      return p.folderId === folderDrill
+    }).length === 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
                     {duckAnim ? (
                       <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
