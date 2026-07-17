@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { VirtuosoGrid } from 'react-virtuoso'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
   Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle } from 'lucide-react'
@@ -381,8 +381,17 @@ export default function MyFilesPage() {
     if (r.success) {
       showToast('Перемещено в корзину')
       setTimeout(() => {
-        setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
-        setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+        if ('startViewTransition' in document) {
+          (document as any).startViewTransition(() => {
+            flushSync(() => {
+              setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+              setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+            })
+          })
+        } else {
+          setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+          setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+        }
       }, 500)
     } else {
       setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
@@ -790,6 +799,7 @@ export default function MyFilesPage() {
                 <tbody>
                   {galleryFiles.slice().map(f => (
                     <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                        style={{ viewTransitionName: `card_${f.messageId}` }}
                       draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                       <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
@@ -881,6 +891,7 @@ export default function MyFilesPage() {
                         listClassName="mf-grid"
                         itemContent={(index, f) => (
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                             style={{ viewTransitionName: `card_${f.messageId}` }}
                              onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
@@ -908,6 +919,7 @@ export default function MyFilesPage() {
                         <tbody>
                           {items.slice().map(f => (
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
@@ -1053,6 +1065,7 @@ export default function MyFilesPage() {
                     const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
                     return (
                     <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                         style={{ viewTransitionName: `card_${f.messageId}` }}
                       onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                       onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
                       draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
@@ -1113,6 +1126,7 @@ export default function MyFilesPage() {
                           const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
                           return (
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                              style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
                               draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
