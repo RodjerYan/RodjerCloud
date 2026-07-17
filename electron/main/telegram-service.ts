@@ -478,27 +478,36 @@ export class TelegramService {
         try {
           const tempDir = app.getPath('temp')
           const baseName = path.basename(filePath)
-          const pngPath = path.join(tempDir, baseName + '.png')
           if (process.platform === 'darwin') {
+            const pngPath = path.join(tempDir, baseName + '.png')
             require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
+            if (fs.existsSync(pngPath)) {
+              const pngBuf = fs.readFileSync(pngPath)
+              const img = nativeImage.createFromBuffer(pngBuf)
+              if (!img.isEmpty()) {
+                thumbBuffer = img.toJPEG(80)
+                ;(thumbBuffer as any).name = 'thumb.jpg'
+              }
+              try { fs.unlinkSync(pngPath) } catch {}
+            }
           } else {
+            const jpgPath = path.join(tempDir, baseName + '_thumb.jpg')
             try {
               let ffmpegPath = require('ffmpeg-static')
               if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
               require('child_process').execFileSync(ffmpegPath, [
+                '-ss', '00:00:00.000',
                 '-i', filePath, '-vframes', '1',
-                '-vf', 'scale=320:320:force_original_aspect_ratio=decrease', '-y', pngPath
+                '-vf', 'scale=320:320:force_original_aspect_ratio=decrease,format=yuv420p',
+                '-q:v', '5', '-y', jpgPath
               ], { timeout: 10000, stdio: 'ignore' })
             } catch (err) { console.error('ffmpeg thumb error:', err) }
-          }
-          if (fs.existsSync(pngPath)) {
-            const pngBuf = fs.readFileSync(pngPath)
-            const img = nativeImage.createFromBuffer(pngBuf)
-            if (!img.isEmpty()) {
-              thumbBuffer = img.toJPEG(80)
+            
+            if (fs.existsSync(jpgPath)) {
+              thumbBuffer = fs.readFileSync(jpgPath)
               ;(thumbBuffer as any).name = 'thumb.jpg'
+              try { fs.unlinkSync(jpgPath) } catch {}
             }
-            fs.unlinkSync(pngPath)
           }
         } catch (e) {
           console.error('qlmanage thumb failed:', e)
