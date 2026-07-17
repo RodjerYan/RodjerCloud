@@ -953,9 +953,9 @@ export default function MyFilesPage() {
             )
           })}
 
-          {(folders.length > 0 || folderDrill || files.filter(f => !fileFolders[f.messageId]).length > 0 || pendingUploads.length > 0) && (() => {
+          {(folders.length > 0 || folderDrill || pendingUploads.length > 0) && (() => {
             const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
-            const currentFiles = files.filter((f: any) => (fileFolders[f.messageId] || null) === (folderDrill || null));
+            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : [];
 
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
