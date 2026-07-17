@@ -94,6 +94,69 @@ export default function MyFilesPage() {
   const [renameInput, setRenameInput] = useState('')
   const [showSub, setShowSub] = useState<string | null>(null)
 
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
+  const isSelecting = useRef(false)
+  const selectionStart = useRef<{ x: number, y: number } | null>(null)
+  const selectedRef = useRef(selected)
+  const initialSelectedOnDrag = useRef<Set<number>>(new Set())
+
+  useEffect(() => { selectedRef.current = selected }, [selected])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isSelecting.current || !selectionStart.current) return
+      
+      const newBox = {
+        startX: selectionStart.current.x,
+        startY: selectionStart.current.y,
+        endX: e.clientX,
+        endY: e.clientY
+      }
+      setSelectionBox(newBox)
+      
+      const left = Math.min(newBox.startX, newBox.endX)
+      const right = Math.max(newBox.startX, newBox.endX)
+      const top = Math.min(newBox.startY, newBox.endY)
+      const bottom = Math.max(newBox.startY, newBox.endY)
+      
+      const elements = document.querySelectorAll('[data-mid]')
+      const nextSelected = new Set(initialSelectedOnDrag.current)
+      
+      elements.forEach(el => {
+        const rect = el.getBoundingClientRect()
+        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+          const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
+          if (mid) nextSelected.add(mid)
+        }
+      })
+      
+      setSelected(nextSelected)
+    }
+    const handleMouseUp = () => {
+      if (isSelecting.current) {
+        isSelecting.current = false
+        selectionStart.current = null
+        setSelectionBox(null)
+      }
+    }
+    
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  const handleContainerMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.mf-card, .mf-folder-card, .mf-table, .v3-btn, button, input, .mf-gm-card')) return
+    if (e.button !== 0) return 
+    selectionStart.current = { x: e.clientX, y: e.clientY }
+    isSelecting.current = true
+    initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
+    setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
+  }
+
   useEffect(() => {
     window.electronAPI.share.getBotToken().then((r: any) => {
       if (r.success && r.data) {
@@ -630,6 +693,7 @@ export default function MyFilesPage() {
 
   return (
     <div className={"mf-root mf-hide-checks" + (isDragOver ? " drag-over" : "")}
+         onMouseDown={handleContainerMouseDown}
          onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsDragOver(true) }}
          onDragOver={(e) => { e.preventDefault() }}
          onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsDragOver(false) } }}
@@ -1300,6 +1364,20 @@ export default function MyFilesPage() {
           </div>
         </div>
       )}
+
+      {selectionBox && createPortal(
+        <div style={{
+          position: 'fixed',
+          zIndex: 9999,
+          pointerEvents: 'none',
+          background: 'rgba(124, 131, 255, 0.2)',
+          border: '1px solid rgba(124, 131, 255, 0.5)',
+          left: Math.min(selectionBox.startX, selectionBox.endX),
+          top: Math.min(selectionBox.startY, selectionBox.endY),
+          width: Math.abs(selectionBox.endX - selectionBox.startX),
+          height: Math.abs(selectionBox.endY - selectionBox.startY),
+        }} />
+      , document.body)}
 
       {renameTarget && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }} onClick={() => setRenameTarget(null)}>
