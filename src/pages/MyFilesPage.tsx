@@ -1278,7 +1278,10 @@ export default function MyFilesPage() {
           )}
           {ctxMenu.folder && (
             <>
-              <button onClick={() => { uploadToFolder(ctxMenu.folder.id); closeCtx() }}>\n            <Upload size={14} /> Загрузить файлы\n          </button>\n          <button onClick={() => { setRenameId(ctxMenu.folder.id); setRenameVal(ctxMenu.folder.name); closeCtx() }}>
+              <button onClick={() => { uploadToFolder(ctxMenu.folder.id); closeCtx() }}>
+                <Upload size={14} /> Загрузить файлы
+              </button>
+              <button onClick={() => { setRenameId(ctxMenu.folder.id); setRenameVal(ctxMenu.folder.name); closeCtx() }}>
                 <Pencil size={14} /> Переименовать
               </button>
               <div className="mf-ctx-divider" />

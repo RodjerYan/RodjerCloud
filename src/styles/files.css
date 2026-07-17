@@ -82,8 +82,7 @@ body.compact .mf-card-icon { height: 60px; }
   max-height: 0; overflow: hidden; transition: max-height 0.3s;
   position: relative;
 }
-.mf-section-body.open { max-height: 20000px; }
-.mf-section-body.open > * { padding-left: 22px; }
+.mf-section-body.open { max-height: 20000px; padding-left: 22px; }
 .mf-section-body.open::before {
   content: ''; position: absolute; left: 8px; top: 0; bottom: 0;
   width: 1.5px; border-radius: 2px;
