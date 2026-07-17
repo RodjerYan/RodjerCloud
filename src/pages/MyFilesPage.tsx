@@ -158,8 +158,22 @@ export default function MyFilesPage() {
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
   }
 
-  const moveFileToFolder = (messageId: number) => { setMoveTarget([messageId]) }
+  const moveFileToFolder = (messageId: number) => {
+    if (selected.has(messageId) && selected.size > 1) {
+      setMoveTarget(Array.from(selected))
+    } else {
+      setMoveTarget([messageId])
+    }
+  }
   const bulkMoveToFolder = () => { if (selected.size > 0) setMoveTarget(Array.from(selected)) }
+  const handleFileDragStart = (e: React.DragEvent, f: any) => {
+    e.stopPropagation()
+    let payload: any = { type: 'file', id: f.messageId }
+    if (selected.has(f.messageId) && selected.size > 1) {
+      payload = { type: 'files', ids: Array.from(selected) }
+    }
+    e.dataTransfer.setData('text/plain', JSON.stringify(payload))
+  }
   const confirmMoveFile = async (target: string) => {
     if (!moveTarget || moveTarget.length === 0) return
     for (const id of moveTarget) {
@@ -800,7 +814,7 @@ export default function MyFilesPage() {
                   {galleryFiles.slice().map(f => (
                     <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                         style={{ viewTransitionName: `card_${f.messageId}` }}
-                      draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}>
+                      draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}>
                       <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                       <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
                       <td>{fmtSize(f.fileSize)}</td>
@@ -831,7 +845,7 @@ export default function MyFilesPage() {
                                 {items.map(f => (
                                   <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                                     onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                                    draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                                    draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                                     onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                                     <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                     <div className="mf-gm-icon" data-type={drillDown}>
@@ -893,7 +907,7 @@ export default function MyFilesPage() {
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                              style={{ viewTransitionName: `card_${f.messageId}` }}
                              onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                             draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                             draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
@@ -921,7 +935,7 @@ export default function MyFilesPage() {
                             <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                                 style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                              draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                                   <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.isEncrypted && '🔒 '}{f.fileName}</span></td>
@@ -1020,7 +1034,14 @@ export default function MyFilesPage() {
                                }
                                try {
                                  const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
-                                 if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
+                                 if (data.type === 'files' && data.ids) {
+                                   for (const did of data.ids) {
+                                     await window.electronAPI.folders.moveFile(did, sf.id);
+                                   }
+                                   clearSelection();
+                                   loadFolders();
+                                 }
+                                 else if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
                                  else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
                                } catch {}
                              }}
@@ -1068,7 +1089,7 @@ export default function MyFilesPage() {
                          style={{ viewTransitionName: `card_${f.messageId}` }}
                       onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                       onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
-                      draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                      draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                       <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                       
@@ -1129,7 +1150,7 @@ export default function MyFilesPage() {
                               style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
-                              draggable={true} onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'file', id: f.messageId })) }}
+                              draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                             <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
                             <td>{fmtSize(f.fileSize)}</td>
@@ -1336,7 +1357,14 @@ export default function MyFilesPage() {
               <button onClick={() => { handleCopyLink(ctxMenu.file); closeCtx() }}>
                 <Share2 size={14} /> Поделиться
               </button>
-              <button onClick={() => { handleDownload(ctxMenu.file); closeCtx() }}>
+              <button onClick={() => { 
+                if (selected.has(ctxMenu.file.messageId) && selected.size > 1) {
+                  bulkDownload()
+                } else {
+                  handleDownload(ctxMenu.file)
+                }
+                closeCtx() 
+              }}>
                 <Download size={14} /> Скачать
               </button>
               <button onClick={() => { moveFileToFolder(ctxMenu.file.messageId); closeCtx() }}>
@@ -1373,7 +1401,14 @@ export default function MyFilesPage() {
                 <Pencil size={14} /> Переименовать
               </button>
               <div className="mf-ctx-divider" />
-              <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}>
+              <button className="danger" onClick={() => { 
+                if (selected.has(ctxMenu.file.messageId) && selected.size > 1) {
+                  bulkDelete()
+                } else {
+                  handleDelete(ctxMenu.file)
+                }
+                closeCtx() 
+              }}>
                 <Trash2 size={14} /> Удалить
               </button>
             </>
