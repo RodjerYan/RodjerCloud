@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback, forwardRef } from 'react'
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -58,6 +59,21 @@ const matchVirtualFolder = (fileName: string, folderId: string) => {
 }
 
 export default function MyFilesPage() {
+  const [animateRef] = useAutoAnimate()
+  
+  const gridComponents = useMemo(() => ({
+    List: forwardRef((props: any, ref: any) => (
+      <div 
+        {...props} 
+        ref={node => {
+          animateRef(node)
+          if (typeof ref === 'function') ref(node)
+          else if (ref) ref.current = node
+        }} 
+      />
+    ))
+  }), [animateRef])
+
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
   
@@ -247,6 +263,10 @@ export default function MyFilesPage() {
         if (res.success && res.data?.messageId && targetFolderId) {
           await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
         }
+        
+        setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: 100 } : p))
+        await new Promise(r => setTimeout(r, 500))
+
         setPendingUploads(prev => {
           const next = prev.filter(p => p.id !== pendingId)
           if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
@@ -871,6 +891,7 @@ export default function MyFilesPage() {
                   {items.length > 0 && (
                     view === 'grid' ? (
                         <VirtuosoGrid
+                        components={gridComponents as any}
                         customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                         data={items}
                         itemClassName=""
@@ -937,9 +958,9 @@ export default function MyFilesPage() {
             )
           })}
 
-          {(folders.length > 0 || folderDrill) && (() => {
+          {(folders.length > 0 || folderDrill || files.filter(f => !fileFolders[f.messageId]).length > 0 || pendingUploads.length > 0) && (() => {
             const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
-            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : [];
+            const currentFiles = files.filter((f: any) => (fileFolders[f.messageId] || null) === (folderDrill || null));
 
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
@@ -1019,6 +1040,7 @@ export default function MyFilesPage() {
                       ))}
                       </div>}
                       <VirtuosoGrid
+                  components={gridComponents as any}
                   customScrollParent={document.querySelector('.v2-main') as HTMLElement}
                   data={[...currentFiles, ...pendingUploads.filter(p => {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
@@ -1029,12 +1051,19 @@ export default function MyFilesPage() {
                   itemContent={(index, f: any) => {
                     if (f.id && !f.messageId) {
                       return (
-                        <div key={f.id} className="mf-card magnetic" style={{ opacity: 0.5, cursor: 'wait' }}>
-                          <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
-                            {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                        <div key={f.id} className="mf-card magnetic pending-upload" style={{ cursor: 'wait' }}>
+                          <div className="mf-card-icon" data-type={typeOf(f.fileName)} style={{ position: 'relative', overflow: 'hidden' }}>
+                            {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                            
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                              <svg width="40" height="40" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+                                <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
+                                <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (f.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
+                              </svg>
+                            </div>
                           </div>
                           <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                          <div className="mf-card-meta">Загрузка... {f.progress}%</div>
+                          <div className="mf-card-meta">{f.progress < 100 ? `Загрузка ${f.progress}%` : 'Обработка...'}</div>
                         </div>
                       )
                     }
@@ -1122,12 +1151,20 @@ export default function MyFilesPage() {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
       return p.folderId === folderDrill
     }).map(p => (
-                          <tr key={p.id} style={{ opacity: 0.5, cursor: 'wait' }}>
-                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {p.objectUrl ? <img src={p.objectUrl} style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }} /> : <FileText size={16} />}
+                          <tr key={p.id} className="pending-upload" style={{ cursor: 'wait' }}>
+                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: 0.8 }}>
+                              <div style={{ position: 'relative', width: 24, height: 24, borderRadius: 4, overflow: 'hidden' }}>
+                                 {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <FileText size={16} />}
+                                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                                    <svg width="16" height="16" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+                                      <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="12" />
+                                      <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (p.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
+                                    </svg>
+                                 </div>
+                              </div>
                               {p.fileName}
                             </span></td>
-                            <td>Загрузка... {p.progress}%</td>
+                            <td>{p.progress < 100 ? `Загрузка ${p.progress}%` : 'Обработка...'}</td>
                             <td>—</td>
                             <td></td>
                           </tr>

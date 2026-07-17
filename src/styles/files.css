@@ -22,8 +22,16 @@ padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shad
 
 
 .mf-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+@keyframes disintegrate {
+  0% { opacity: 1; transform: scale(1); filter: blur(0); }
+  20% { opacity: 0.8; transform: scale(0.95) skewX(2deg); filter: blur(2px) contrast(1.2); }
+  50% { opacity: 0.5; transform: scale(0.8) skewX(-2deg) translateY(-5px); filter: blur(6px) contrast(1.5); }
+  100% { opacity: 0; transform: scale(0.5) translateY(-20px); filter: blur(12px); }
+}
+
 .mf-card.deleting, .mf-gm-card.deleting, .mf-table tr.deleting {
-opacity: 0; transform: scale(0.9); transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+  animation: disintegrate 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  pointer-events: none;
 }
 .mf-check { position: absolute; top: 10px; left: 10px; cursor: pointer; }
 .mf-hide-checks .mf-check { display: none; }

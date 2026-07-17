@@ -1,6 +1,6 @@
 {
   "name": "rodjercloud",
-  "version": "1.0.112",
+  "version": "1.0.114",
   "description": "RodjerCloud - Telegram Cloud Storage Desktop App",
   "main": "out/main/index.js",
   "author": "RodjerCloud",
@@ -14,6 +14,7 @@
     "build:all": "electron-vite build && electron-builder --mac --arm64 --win"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.10.0",
     "@lottiefiles/react-lottie-player": "^3.6.0",
     "archiver": "^8.0.0",
     "big-integer": "^1.6.52",
