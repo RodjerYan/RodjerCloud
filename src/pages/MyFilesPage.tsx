@@ -280,14 +280,12 @@ export default function MyFilesPage() {
   }, [files, search, sort])
 
   const grouped = useMemo(() => {
-    const ffset = new Set(Object.keys(fileFolders).map(Number))
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
     filtered.forEach(f => {
       const fd = f.uploadedAt || fileDate(f)
       if (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400) map['Недавние']?.push(f)
       
-      if (ffset.has(f.messageId)) return
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
@@ -295,14 +293,13 @@ export default function MyFilesPage() {
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
-    const ffset = new Set(Object.keys(fileFolders).map(Number))
     if (drillDown === 'Недавние') {
       return filtered.filter(f => {
         const fd = f.uploadedAt || fileDate(f)
         return (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400)
       })
     }
-    return filtered.filter(f => !ffset.has(f.messageId) && typeOf(f.fileName) === drillDown)
+    return filtered.filter(f => typeOf(f.fileName) === drillDown)
   }, [drillDown, filtered, now, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);

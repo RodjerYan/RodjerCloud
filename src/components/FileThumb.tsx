@@ -61,6 +61,17 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
     return () => { active = false }
   }, [messageId, fileName, isVisible])
 
+  useEffect(() => {
+    if (!window.electronAPI.telegram.onThumbnailReady) return
+    const unsub = window.electronAPI.telegram.onThumbnailReady(async (data) => {
+      if (data.messageId === messageId) {
+        const d = await window.electronAPI.file.getLocalUrl(data.path)
+        if (d.success) setUrl(d.data)
+      }
+    })
+    return () => unsub()
+  }, [messageId])
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       {url ? (

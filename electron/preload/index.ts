@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
     downloadThumbnail: (messageId: number, fileName?: string) =>
       ipcRenderer.invoke('telegram:download-thumbnail', messageId, fileName),
+    onThumbnailReady: (cb: (data: { messageId: number; path: string }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('thumbnail-ready', listener)
+      return () => ipcRenderer.removeListener('thumbnail-ready', listener)
+    },
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
     listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
     restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),

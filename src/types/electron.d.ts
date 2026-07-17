@@ -15,6 +15,7 @@ declare global {
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
         downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
+        onThumbnailReady: (cb: (data: { messageId: number; path: string }) => void) => () => void
         deleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         listTrash: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>

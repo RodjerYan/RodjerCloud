@@ -85,6 +85,75 @@ export class TelegramService {
   private phoneNumber: string = ''
   private channelId: bigint | null = null
 
+  private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
+  private processingHeavyQueue = false
+
+  private async processHeavyThumbQueue() {
+    if (this.processingHeavyQueue) return
+    this.processingHeavyQueue = true
+    while (this.heavyThumbQueue.length > 0) {
+      const task = this.heavyThumbQueue.shift()!
+      try {
+        const tmpPath = task.cachePath + '.tmp.heic'
+        if (fs.existsSync(tmpPath)) fs.rmSync(tmpPath, { force: true })
+        
+        await this.performDownload(task.message, tmpPath)
+        
+        if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
+          let outputBuffer = fs.readFileSync(tmpPath)
+          
+          if (process.platform === 'darwin') {
+            const { execFileSync } = require('child_process')
+            const sipsTmp = tmpPath + '.jpg'
+            try {
+              execFileSync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
+              outputBuffer = fs.readFileSync(sipsTmp)
+              try { fs.unlinkSync(sipsTmp) } catch {}
+            } catch (e: any) {
+              console.error('sips convert error:', e)
+            }
+          } else {
+            const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+            const { Worker } = require('worker_threads')
+            const outBuf = await new Promise<Buffer>((resolve, reject) => {
+              const worker = new Worker(`
+                const heicConvert = require('${heicPath}');
+                const { parentPort, workerData } = require('worker_threads');
+                async function run() {
+                  try {
+                    const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                    parentPort.postMessage({ success: true, buffer: out });
+                  } catch (e) {
+                    parentPort.postMessage({ success: false, error: e.message });
+                  }
+                }
+                run();
+              `, { eval: true, workerData: outputBuffer })
+              worker.on('message', msg => {
+                if (msg.success) resolve(Buffer.from(msg.buffer))
+                else reject(new Error(msg.error))
+              })
+              worker.on('error', reject)
+              worker.on('exit', code => {
+                if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+              })
+            })
+            const img = nativeImage.createFromBuffer(outBuf)
+            outputBuffer = img.resize({ width: 320 }).toJPEG(80)
+          }
+          
+          fs.writeFileSync(task.cachePath, outputBuffer)
+          try { fs.unlinkSync(tmpPath) } catch {}
+          
+          const { BrowserWindow } = require('electron')
+          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }))
+        }
+      } catch (e) {
+        console.error('Heavy thumb queue error:', e)
+      }
+    }
+    this.processingHeavyQueue = false
+  }
 
   private startPromise: Promise<void> | null = null
   private phoneCodeDef: Deferred<string> | null = null
@@ -431,6 +500,51 @@ export class TelegramService {
           }
         } catch (e) {
           console.error('qlmanage thumb failed:', e)
+        }
+      } else if (ext === '.heic' || ext === '.heif') {
+        try {
+          const inputBuffer = fs.readFileSync(filePath)
+          let outputBuffer = inputBuffer
+          if (process.platform === 'darwin') {
+            const { execFileSync } = require('child_process')
+            const tempDir = app.getPath('temp')
+            const sipsTmp = path.join(tempDir, path.basename(filePath) + '.jpg')
+            execFileSync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', filePath, '--out', sipsTmp], { timeout: 15000 })
+            outputBuffer = fs.readFileSync(sipsTmp)
+            try { fs.unlinkSync(sipsTmp) } catch {}
+          } else {
+            const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+            const { Worker } = require('worker_threads')
+            const outBuf = await new Promise<Buffer>((resolve, reject) => {
+              const worker = new Worker(`
+                const heicConvert = require('${heicPath}');
+                const { parentPort, workerData } = require('worker_threads');
+                async function run() {
+                  try {
+                    const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                    parentPort.postMessage({ success: true, buffer: out });
+                  } catch (e) {
+                    parentPort.postMessage({ success: false, error: e.message });
+                  }
+                }
+                run();
+              `, { eval: true, workerData: inputBuffer })
+              worker.on('message', msg => {
+                if (msg.success) resolve(Buffer.from(msg.buffer))
+                else reject(new Error(msg.error))
+              })
+              worker.on('error', reject)
+              worker.on('exit', code => {
+                if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+              })
+            })
+            const img = nativeImage.createFromBuffer(outBuf)
+            outputBuffer = img.resize({ width: 320 }).toJPEG(80)
+          }
+          thumbBuffer = outputBuffer
+          ;(thumbBuffer as any).name = 'thumb.jpg'
+        } catch (e) {
+          console.error('heic thumb failed on upload:', e)
         }
       }
     }
@@ -836,6 +950,14 @@ export class TelegramService {
           await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
           if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
         } catch {}
+      }
+    } else {
+      const ext = fileName ? path.extname(fileName).toLowerCase() : ''
+      if (ext === '.heic' || ext === '.heif') {
+        if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
+          this.heavyThumbQueue.push({ messageId, message, cachePath })
+          this.processHeavyThumbQueue()
+        }
       }
     }
 

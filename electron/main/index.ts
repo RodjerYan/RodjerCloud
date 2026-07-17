@@ -1268,12 +1268,8 @@ document.addEventListener('mousemove', function() {
     if (isVideo) {
       // streaming
     } else {
-      // start download in background - window.load IPC will wait for it
-      if (!fs.existsSync(cachedPath)) {
-        telegramService.downloadMediaToPath(f.messageId, cachedPath).then(() => {
-          ensurePreviewCache(cachedPath)
-        }).catch(e => console.error('download failed', e))
-      } else {
+      // preview:load will handle the download synchronously (await)
+      if (fs.existsSync(cachedPath)) {
         ensurePreviewCache(cachedPath)
       }
     }
@@ -1292,27 +1288,19 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
     const cachedPath = path.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
     
-    
     let src = ''
     if (isVideo) {
       src = `http://127.0.0.1:14300/stream/${f.messageId}`
     } else {
-      // wait for the file to exist (poll up to 30s)
-      for (let i = 0; i < 60; i++) {
-        if (fs.existsSync(cachedPath)) break
-        await new Promise(r => setTimeout(r, 500))
+      if (!fs.existsSync(cachedPath)) {
+        try {
+          await (telegramService as any).downloadMediaToPath(f.messageId, cachedPath)
+          ensurePreviewCache(cachedPath)
+        } catch(e) { console.error('preview:load download failed', e) }
       }
-      const exists = fs.existsSync(cachedPath)
       
-      if (exists) {
-        const ext2 = path.extname(cachedPath).toLowerCase()
-        const isVid = ['mp4','mov','mkv','avi','webm'].includes(ext2)
-        if (isVid) {
-          src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
-        } else {
-          const buf = fs.readFileSync(cachedPath)
-          src = `data:image/jpeg;base64,${buf.toString('base64')}`
-        }
+      if (fs.existsSync(cachedPath)) {
+        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
       }
     }
     return { success: true, data: { files: s.files, idx: s.idx, src } }
@@ -1408,13 +1396,32 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
             if (process.platform === 'darwin') {
               require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', filePath, '--out', jpgPath], { timeout: 15000 })
             } else {
-              const heicConvert = require('heic-convert')
-              const outputBuffer = await heicConvert({
-                buffer: inputBuffer,
-                format: 'JPEG',
-                quality: 0.8
+              const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+              const { Worker } = require('worker_threads')
+              const outputBuffer = await new Promise<Buffer>((resolve, reject) => {
+                const worker = new Worker(`
+                  const heicConvert = require('${heicPath}');
+                  const { parentPort, workerData } = require('worker_threads');
+                  async function run() {
+                    try {
+                      const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                      parentPort.postMessage({ success: true, buffer: out });
+                    } catch (e) {
+                      parentPort.postMessage({ success: false, error: e.message });
+                    }
+                  }
+                  run();
+                `, { eval: true, workerData: inputBuffer })
+                worker.on('message', msg => {
+                  if (msg.success) resolve(Buffer.from(msg.buffer))
+                  else reject(new Error(msg.error))
+                })
+                worker.on('error', reject)
+                worker.on('exit', code => {
+                  if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                })
               })
-              fs.writeFileSync(jpgPath, Buffer.from(outputBuffer))
+              fs.writeFileSync(jpgPath, outputBuffer)
             }
           }
         } catch (e: any) {
