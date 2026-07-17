@@ -486,8 +486,8 @@ export class TelegramService {
               let ffmpegPath = require('ffmpeg-static')
               if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
               require('child_process').execFileSync(ffmpegPath, [
-                '-i', filePath, '-ss', '00:00:01', '-vframes', '1',
-                '-vf', 'scale=320:-1', '-y', pngPath
+                '-i', filePath, '-vframes', '1',
+                '-vf', 'scale=320:320:force_original_aspect_ratio=decrease', '-y', pngPath
               ], { timeout: 10000, stdio: 'ignore' })
             } catch (err) { console.error('ffmpeg thumb error:', err) }
           }
