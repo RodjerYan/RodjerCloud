@@ -820,10 +820,9 @@ export class TelegramService {
     const message: any = messages[0]
     if (!message.file) return null
 
-    const ext = fileName ? path.extname(fileName).toLowerCase() : '.jpg'
     const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-    const cachePath = path.join(cacheDir, `${messageId}${ext}`)
+    const cachePath = path.join(cacheDir, `${messageId}.jpg`)
     if (fs.existsSync(cachePath)) return cachePath
 
     const media = message.document || message.photo
