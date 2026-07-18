@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import confetti from 'canvas-confetti'
 import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal, flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -207,8 +208,37 @@ export default function MyFilesPage() {
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}); showToast('Папка создана') }
   }
 
-  const deleteFolder = async (id: string) => {
+  const deleteFolder = async (id: string, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.'))) return
+
+    if (e) {
+      const rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      if (rect) {
+        const x = (rect.left + rect.width / 2) / window.innerWidth
+        const y = (rect.top + rect.height / 2) / window.innerHeight
+        confetti({
+          particleCount: 50,
+          spread: 80,
+          origin: { x, y },
+          colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+          disableForReducedMotion: true,
+          zIndex: 9999
+        })
+      }
+    }
+
+    const applyRemove = () => {
+      flushSync(() => {
+        setFolders(prev => prev.filter(x => x.id !== id))
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
+
     const r = await window.electronAPI.folders.delete(id)
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
     if (folderDrill === id) setFolderDrill(null)
@@ -452,28 +482,45 @@ export default function MyFilesPage() {
     const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
     showToast(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
   }
-  const handleDelete = async (f: any) => {
+  const handleDelete = async (f: any, e?: React.MouseEvent) => {
     if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
+    
+    if (e) {
+      const rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      if (rect) {
+        const x = (rect.left + rect.width / 2) / window.innerWidth
+        const y = (rect.top + rect.height / 2) / window.innerHeight
+        confetti({
+          particleCount: 50,
+          spread: 80,
+          origin: { x, y },
+          colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+          disableForReducedMotion: true,
+          zIndex: 9999
+        })
+      }
+    }
+
     setDeletingIds(prev => new Set(prev).add(f.messageId))
     showToast('Перемещение в корзину…')
+    
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+        setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
+
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
       showToast('Перемещено в корзину')
-      setTimeout(() => {
-        if ('startViewTransition' in document) {
-          (document as any).startViewTransition(() => {
-            flushSync(() => {
-              setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
-              setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
-            })
-          })
-        } else {
-          setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
-          setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
-        }
-      }, 500)
     } else {
-      setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
       showToast('Ошибка удаления')
     }
   }
@@ -889,7 +936,7 @@ export default function MyFilesPage() {
                         <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                         <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                         <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                        <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                        <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                       </td>
                     </tr>
                   ))}
@@ -924,7 +971,7 @@ export default function MyFilesPage() {
                                       {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
                                       <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
                                       <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
-                                      <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button>
+                                      <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button>
                                     </div>
                                   </div>
                                 ))}
@@ -985,7 +1032,7 @@ export default function MyFilesPage() {
                               {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                               <button title="Переместить в папку" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                              <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
                           </div>
                         )}
@@ -1012,7 +1059,7 @@ export default function MyFilesPage() {
                                 {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                                 <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                                 <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                                <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                                <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                               </td>
                             </tr>
                           ))}
@@ -1085,7 +1132,7 @@ export default function MyFilesPage() {
                     <>
                       {currentLevelFolders.length > 0 && <div className="mf-grid" style={{ marginBottom: 14 }}>
                       {currentLevelFolders.map(sf => (
-                        <div key={sf.id} className="mf-card magnetic" style={{ cursor: 'pointer' }}
+                        <div key={sf.id} className="mf-card magnetic" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
                              draggable={true}
                              onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
                              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
@@ -1169,7 +1216,7 @@ export default function MyFilesPage() {
                         <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                         {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
                         <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                        <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                        <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                       </div>
                     </div>
                   )}}
@@ -1180,7 +1227,7 @@ export default function MyFilesPage() {
                       <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
                       <tbody>
                         {currentLevelFolders.map(sf => (
-                          <tr key={sf.id} className="mf-folder-row" style={{ cursor: 'pointer' }}
+                          <tr key={sf.id} className="mf-folder-row" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
                               draggable={true}
                               onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
                               onDragOver={(e) => e.preventDefault()}
@@ -1203,7 +1250,7 @@ export default function MyFilesPage() {
                             <td>{sf.createdAt ? new Date(sf.createdAt * 1000).toLocaleDateString() : '—'}</td>
                             <td>
                               <button title="Переименовать" onClick={(e) => { e.stopPropagation(); setRenameId(sf.id); setRenameVal(sf.name) }}><Pencil size={14} /></button>
-                              <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); deleteFolder(sf.id) }}><Trash2 size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); deleteFolder(sf.id, e) }}><Trash2 size={14} /></button>
                             </td>
                           </tr>
                         ))}
@@ -1224,7 +1271,7 @@ export default function MyFilesPage() {
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                               {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                              <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </td>
                           </tr>
                         )})}
@@ -1286,7 +1333,7 @@ export default function MyFilesPage() {
         const currIdx = all.findIndex((x: any) => x === preview.list[preview.idx])
         const currFile = all[currIdx]
         return (
-        <div className="mf-modal" style={{ cursor: 'pointer' }} onClick={() => setPreview(null)}>
+        <div className="mf-modal" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }} onClick={() => setPreview(null)}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(180deg,rgba(0,0,0,0.5),transparent)', zIndex: 10, userSelect: 'none' }}>
             <span style={{ color: '#fff', fontSize: 13, opacity: 0.9 }}>{currFile?.fileName || ''}</span>
             <span style={{ color: '#fff', fontSize: 12, opacity: 0.6 }}>{currIdx + 1} / {all.length}</span>
