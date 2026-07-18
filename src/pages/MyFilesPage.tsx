@@ -1090,12 +1090,8 @@ export default function MyFilesPage() {
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
                   {items.length > 0 && (
                     view === 'grid' ? (
-                        <VirtuosoGrid
-                        customScrollParent={document.querySelector('.v2-main') as HTMLElement}
-                        data={items}
-                        itemClassName=""
-                        listClassName="mf-grid"
-                        itemContent={(index, f) => (
+                      <div className="mf-grid">
+                        {items.map((f) => (
                           <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                              style={{ viewTransitionName: `card_${f.messageId}` }}
                              onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
@@ -1114,8 +1110,8 @@ export default function MyFilesPage() {
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
                           </div>
-                        )}
-                      />
+                        ))}
+                      </div>
                     ) : (
                       <table className="mf-table">
                         <thead><tr>

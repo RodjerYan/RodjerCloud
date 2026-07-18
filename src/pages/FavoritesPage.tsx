@@ -123,8 +123,15 @@ export default function FavoritesPage() {
   }
 
   const toggleFav = (f: any) => {
-    v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
-    setFavs(v3store.getFavs())
+    const applyToggle = () => flushSync(() => {
+      v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
+      setFavs(v3store.getFavs())
+    })
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyToggle)
+    } else {
+      applyToggle()
+    }
   }
 
   const handlePreview = (f: any) => {
