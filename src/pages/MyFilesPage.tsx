@@ -1544,7 +1544,7 @@ export default function MyFilesPage() {
                 <Pencil size={14} /> Переименовать
               </button>
               <div className="mf-ctx-divider" />
-              <button className="danger" onClick={() => { deleteFolder(ctxMenu.folder.id); closeCtx() }}>
+              <button className="danger" onClick={(e) => { deleteFolder(ctxMenu.folder.id, e); closeCtx() }}>
                 <Trash2 size={14} /> Удалить
               </button>
             </>
@@ -1606,11 +1606,11 @@ export default function MyFilesPage() {
                 <Pencil size={14} /> Переименовать
               </button>
               <div className="mf-ctx-divider" />
-              <button className="danger" onClick={() => { 
+              <button className="danger" onClick={(e) => { 
                 if (selected.has(ctxMenu.file.messageId) && selected.size > 1) {
-                  bulkDelete()
+                  bulkDelete(e)
                 } else {
-                  handleDelete(ctxMenu.file)
+                  handleDelete(ctxMenu.file, e)
                 }
                 closeCtx() 
               }}>
