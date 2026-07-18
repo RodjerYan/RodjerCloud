@@ -181,6 +181,16 @@ export default function TrashPage() {
       showToast(`Восстановлено ${ids.length} файлов`)
     } else {
       showToast('Ошибка восстановления некоторых файлов')
+      const revert = () => {
+        flushSync(() => {
+          setFiles(prev => {
+            const currentIds = new Set(prev.map(p => p.messageId))
+            const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
+            return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
+          })
+        })
+      }
+      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
   }
 
@@ -192,6 +202,7 @@ export default function TrashPage() {
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
     const ids = Array.from(selected)
+    const filesToRestore = files.filter(f => ids.includes(f.messageId))
     const applyRemove = () => {
       flushSync(() => {
         setFiles(prev => prev.filter(f => !ids.includes(f.messageId)))
@@ -209,6 +220,16 @@ export default function TrashPage() {
       showToast(`Удалено навсегда ${ids.length} файлов`)
     } else {
       showToast('Ошибка удаления некоторых файлов')
+      const revert = () => {
+        flushSync(() => {
+          setFiles(prev => {
+            const currentIds = new Set(prev.map(p => p.messageId))
+            const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
+            return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
+          })
+        })
+      }
+      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
   }
 
