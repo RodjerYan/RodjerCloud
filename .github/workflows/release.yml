@@ -12,7 +12,6 @@ jobs:
         include:
           - os: windows-latest
           - os: macos-latest
-          - os: macos-13
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -53,12 +52,4 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Build and Publish (Mac x64)
-        if: matrix.os == 'macos-13'
-        run: npm run build:mac -- --x64 -p always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+
