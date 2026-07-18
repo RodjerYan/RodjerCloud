@@ -1062,50 +1062,90 @@ export class TelegramService {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const payload = TelegramService.SYNC_PREFIX + JSON.stringify(data)
 
-    // Try cached ID first — edit it, but still search+cleanup duplicates
-    let editedViaCache = false
-    if (!this.folderSyncId) this.folderSyncId = this.loadFolderSyncId()
-    if (this.folderSyncId) {
-      try {
-        await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: payload, formattingEntities: [] } as any)
-        editedViaCache = true
-      } catch {
+    // Split payload into chunks of 4000 chars to respect Telegram's limit
+    const chunks: string[] = []
+    for (let i = 0; i < payload.length; i += 4000) {
+      chunks.push(payload.slice(i, i + 4000))
+    }
+
+    if (chunks.length === 1) {
+      // Try cached ID first — edit it, but still search+cleanup duplicates
+      let editedViaCache = false
+      if (!this.folderSyncId) this.folderSyncId = this.loadFolderSyncId()
+      if (this.folderSyncId) {
+        try {
+          await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: chunks[0], formattingEntities: [] } as any)
+          editedViaCache = true
+        } catch {
+          this.folderSyncId = null
+        }
+      }
+
+      // Search for existing sync messages
+      const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+      const syncMsgs: any[] = []
+      for (const m of msgs) {
+        if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+      }
+
+      if (syncMsgs.length > 0) {
+        // Use the first (newest) sync message as primary
+        const primary = syncMsgs[0]
+        this.saveFolderSyncId(this.msgId(primary))
+        if (!editedViaCache || this.folderSyncId !== this.msgId(primary)) {
+          // Если кеш не совпадает с новейшим — редактируем новейший
+          await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: chunks[0], formattingEntities: [] } as any)
+        }
+
+        // Clean up duplicate sync messages
+        if (syncMsgs.length > 1) {
+          const dupeIds = syncMsgs.slice(1).map((m: any) => this.msgId(m))
+          try {
+            await this.client.invoke(
+              new Api.channels.DeleteMessages({ channel: this.channelId as any, id: dupeIds })
+            )
+          } catch {}
+        }
+        return
+      }
+
+      // No sync message exists — create one
+      if (!editedViaCache) {
+        const sent: any = await this.client.sendMessage(this.channelId as any, { message: chunks[0], formattingEntities: [] } as any)
+        this.saveFolderSyncId(this.msgId(sent))
+      }
+    } else {
+      // Payload is too large, send as multiple new messages. We do NOT use editMessage for chunks.
+      // Delete old sync messages first
+      if (!this.folderSyncId) this.folderSyncId = this.loadFolderSyncId()
+      if (this.folderSyncId) {
+        try {
+          await this.client.invoke(new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [this.folderSyncId] }))
+        } catch {}
         this.folderSyncId = null
       }
-    }
-
-    // Search for existing sync messages
-    const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
-    const syncMsgs: any[] = []
-    for (const m of msgs) {
-      if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
-    }
-
-    if (syncMsgs.length > 0) {
-      // Use the first (newest) sync message as primary
-      const primary = syncMsgs[0]
-      this.saveFolderSyncId(this.msgId(primary))
-      if (!editedViaCache || this.folderSyncId !== this.msgId(primary)) {
-        // Если кеш не совпадает с новейшим — редактируем новейший
-        await this.client.editMessage(this.channelId as any, { message: this.folderSyncId, text: payload, formattingEntities: [] } as any)
+      
+      const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+      const syncMsgs: any[] = []
+      for (const m of msgs) {
+        if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
       }
-
-      // Clean up duplicate sync messages
-      if (syncMsgs.length > 1) {
-        const dupeIds = syncMsgs.slice(1).map((m: any) => this.msgId(m))
+      if (syncMsgs.length > 0) {
+        const dupeIds = syncMsgs.map((m: any) => this.msgId(m))
         try {
-          await this.client.invoke(
-            new Api.channels.DeleteMessages({ channel: this.channelId as any, id: dupeIds })
-          )
+          await this.client.invoke(new Api.channels.DeleteMessages({ channel: this.channelId as any, id: dupeIds }))
         } catch {}
       }
-      return
-    }
 
-    // No sync message exists — create one
-    if (!editedViaCache) {
-      const sent: any = await this.client.sendMessage(this.channelId as any, { message: payload, formattingEntities: [] } as any)
-      this.saveFolderSyncId(this.msgId(sent))
+      // Send the chunks sequentially
+      let firstMsgId: number | null = null
+      for (const chunk of chunks) {
+        const sent: any = await this.client.sendMessage(this.channelId as any, { message: chunk, formattingEntities: [] } as any)
+        if (!firstMsgId) firstMsgId = this.msgId(sent)
+      }
+      if (firstMsgId) {
+        this.saveFolderSyncId(firstMsgId)
+      }
     }
   }
 
