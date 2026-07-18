@@ -938,13 +938,20 @@ async function writeFolders(d: any) {
   await fs.promises.writeFile(foldersPath(), JSON.stringify(d, null, 2))
 }
 
+let syncPending = false
+
 async function syncFoldersToTelegram() {
   try {
+    syncPending = true
     const d: any = await readFolders()
     const botToken = botService.getToken()
     if (botToken) d.botToken = botToken
     await telegramService.syncFolders(d)
-  } catch (e) { log('error', 'syncFolders: ' + (e as Error).message) }
+    syncPending = false
+  } catch (e) { 
+    log('error', 'syncFolders: ' + (e as Error).message) 
+    // syncPending remains true so we retry next time instead of overwriting
+  }
 }
 
 ipcMain.handle('folders:list', async () => {
@@ -961,6 +968,16 @@ ipcMain.handle('folders:load-from-telegram', async () => {
           botService.setToken(data.botToken)
           log('info', 'Bot token synced from channel data')
         }
+        
+        // Data loss prevention: If we have pending local changes that failed to upload, 
+        // DO NOT overwrite them with older cloud data! Instead, try uploading again.
+        if (syncPending) {
+          log('warn', 'Pending local folder changes exist. Retrying upload instead of overwriting from cloud.')
+          syncFoldersToTelegram().catch(() => {})
+          const local = await readFolders()
+          return { success: true, data: local }
+        }
+
         if (data.folders && data.fileFolders) await writeFolders(data)
         initialFolderSyncDone = true
         return { success: true, data }
@@ -970,8 +987,12 @@ ipcMain.handle('folders:load-from-telegram', async () => {
         try { 
           const botToken = botService.getToken()
           if (botToken) local.botToken = botToken
-          await telegramService.syncFolders(local) 
-        } catch {}
+          syncPending = true
+          await telegramService.syncFolders(local)
+          syncPending = false 
+        } catch {
+          // syncPending remains true
+        }
         initialFolderSyncDone = true
       }
       return { success: true, data: local }

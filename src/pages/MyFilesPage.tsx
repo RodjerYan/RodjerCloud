@@ -252,8 +252,8 @@ export default function MyFilesPage() {
   }
 
   const [loadError, setLoadError] = useState<string | null>(null)
-  const load = async () => {
-    setLoading(true)
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true)
     setLoadError(null)
     try {
       const r = await window.electronAPI.telegram.listFiles()
@@ -262,7 +262,7 @@ export default function MyFilesPage() {
     } catch (e: any) {
       setLoadError(e.message || 'Ошибка загрузки')
     }
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
 
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
@@ -339,12 +339,14 @@ export default function MyFilesPage() {
           const pct = Math.floor((completed / dp.total) * 100)
           if (completed >= dp.total) {
             clearTimeout(dropDoneRef.current)
-            dropDoneRef.current = setTimeout(() => setDropProgress(null), 2000)
+            dropDoneRef.current = setTimeout(() => {
+              setDropProgress(null)
+              loadFolders()
+              load(true)
+            }, 2000)
           }
           return { ...dp, completed, pct }
         })
-        loadFolders()
-        load()
       }).catch((err: any) => {
         console.error('Upload failed:', err)
         setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
