@@ -8,6 +8,7 @@ on:
 jobs:
   release:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -46,7 +47,12 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           npm run build:mac -- --arm64 -p always > build_log.txt 2>&1 || (
-            gh issue create --title "Build Failed on Mac" --body "$(tail -n 150 build_log.txt)"
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git switch -C debug-log
+            git add build_log.txt
+            git commit -m "Add build log"
+            git push -f origin debug-log
             exit 1
           )
         env:
