@@ -56,9 +56,9 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         run: bash scripts/generate-icons.sh
 
-      - name: Build and Publish (Mac arm64)
+      - name: Build and Publish (Mac)
         if: matrix.os == 'macos-latest'
-        run: npm run build:mac -- --arm64 -p always
+        run: npm run build:mac -- --arm64 --x64 -p always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
