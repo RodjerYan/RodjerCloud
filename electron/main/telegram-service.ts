@@ -1120,10 +1120,36 @@ export class TelegramService {
 
     this.debugLog('loadFoldersFromChannel called')
 
-    // Full search by prefix — collect ALL sync messages and merge
-    const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
-    this.debugLog('Full search, total messages: ' + msgs.length)
+    // Search backwards until we find the latest sync message
+    let offsetId = 0
+    let foundSyncMsg: any = null
+    const BATCH = 100
 
+    while (true) {
+      const batch = await this.client.getMessages(this.channelId as any, {
+        limit: BATCH,
+        ...(offsetId ? { offsetId } : {}),
+      })
+      if (batch.length === 0) break
+
+      for (const m of batch) {
+        if (m.message && (m.message.startsWith('rf') || m.message.startsWith('RFSYNC:'))) {
+          foundSyncMsg = m
+          break
+        }
+      }
+      if (foundSyncMsg) break
+
+      offsetId = this.msgId(batch[batch.length - 1])
+    }
+
+    if (!foundSyncMsg) {
+      this.debugLog('NO sync message found!')
+      return null
+    }
+
+    const msgs = [foundSyncMsg] // We only need the latest one since it contains the full state
+    this.debugLog('Found sync message id=' + this.msgId(foundSyncMsg))
     const allFolders: any[] = []
     const allFileFolders: Record<string, string> = {}
     const seenFolderIds = new Set<string>()
@@ -1132,11 +1158,7 @@ export class TelegramService {
     let newestSyncId: number | null = null
 
     for (const m of msgs) {
-      if (!m.message) continue
-      if (!m.message.startsWith('rf') && !m.message.startsWith('RFSYNC:')) continue
       const id = this.msgId(m)
-      this.debugLog(`msg id=${id} hasFile=${!!m.file} text[0..80]="${m.message.substring(0, 80)}"`)
-
       const parsed = this.parseSyncMessage(m.message)
       if (!parsed) continue
       this.debugLog('FOUND sync id=' + id + ' folders=' + (parsed.data?.folders?.length ?? 0))
