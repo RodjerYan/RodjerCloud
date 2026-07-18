@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { VirtuosoGrid } from 'react-virtuoso'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
+import confetti from 'canvas-confetti'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
 import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
@@ -151,9 +152,41 @@ export default function AlbumsPage() {
     if (openAlbum === id) setOpenAlbum(null)
   }
 
-  const removeFile = (messageId: number) => {
+  const removeFile = (messageId: number, e?: React.MouseEvent) => {
     if (!currentAlbum || SMART_ALBUMS.find(a => a.id === currentAlbum.id)) return
-    v3store.removeFromAlbum(currentAlbum.id, messageId); setAlbums(v3store.getAlbums())
+
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-gm-card')?.getBoundingClientRect()
+      if (rect) {
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
+      }
+    }
+    confetti({
+      particleCount: 40,
+      spread: 70,
+      origin: { x, y },
+      colors: ['#a1a1aa', '#ff4b4b'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
+    const applyRemove = () => {
+      flushSync(() => {
+        v3store.removeFromAlbum(currentAlbum.id, messageId)
+        setAlbums(v3store.getAlbums())
+      })
+    }
+    
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
   }
 
   const handleDownload = async (f: any) => {
@@ -161,10 +194,54 @@ export default function AlbumsPage() {
     if (!r.success) await appAlert(r.error || 'Ошибка')
   }
 
-  const handleDelete = async (f: any) => {
+  const handleDelete = async (f: any, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
+
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-gm-card')?.getBoundingClientRect()
+      if (rect) {
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
+      }
+    }
+    confetti({
+      particleCount: 50,
+      spread: 80,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
+    const applyRemove = () => {
+      flushSync(() => {
+        setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
+
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
-    if (r.success) setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+    if (!r.success) {
+      const revert = () => {
+        flushSync(() => {
+          setAllFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
+    }
   }
 
   const handlePreview = (f: any) => {
@@ -183,7 +260,7 @@ export default function AlbumsPage() {
   const renderCard = (f: any, isSmart: boolean, isDup?: boolean) => {
     const isVid = f.mimeType?.startsWith('video/')
     return (
-      <div key={f.messageId} className="mf-gm-card magnetic" onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
+      <div key={f.messageId} className="mf-gm-card magnetic" style={{ viewTransitionName: `card_${f.messageId}` }} onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
         <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
           <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} />
         </div>
@@ -192,7 +269,7 @@ export default function AlbumsPage() {
         <div className="mf-gm-actions">
           <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
           <button title="Просмотр" onClick={() => handlePreview(f)}><Eye size={13} /></button>
-          {isSmart ? <button title="Удалить из Telegram" className="danger" onClick={() => handleDelete(f)}><Trash2 size={13} /></button> : <button title="Удалить из альбома" className="danger" onClick={() => removeFile(f.messageId)}><X size={13} /></button>}
+          {isSmart ? <button title="Удалить из Telegram" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button> : <button title="Удалить из альбома" className="danger" onClick={(e) => removeFile(f.messageId, e)}><X size={13} /></button>}
         </div>
       </div>
     )
@@ -331,7 +408,7 @@ export default function AlbumsPage() {
             )}
             <button onClick={() => { const f = ctxMenu.file; setRenameInput(f.fileName); setRenameTarget(f); closeCtx() }}><Pencil size={14} /> Переименовать</button>
             <div className="mf-ctx-divider" />
-            <button className="danger" onClick={() => { handleDelete(ctxMenu.file); closeCtx() }}><Trash2 size={14} /> Удалить</button>
+            <button className="danger" onClick={(e) => { handleDelete(ctxMenu.file, e); closeCtx() }}><Trash2 size={14} /> Удалить</button>
           </div>, document.body
         )}
       </div>

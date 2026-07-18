@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
+import confetti from 'canvas-confetti'
+import { flushSync } from 'react-dom'
 import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2, Trash2 as DeleteIcon, Circle } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
@@ -93,53 +95,121 @@ export default function TrashPage() {
   }
   const clearSelection = () => setSelected(new Set())
 
-  const handleRestore = async (id: number) => {
+  const handleRestore = async (id: number, e?: React.MouseEvent) => {
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      if (rect) {
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
+      }
+    }
+    confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+
+    const f = files.find(x => x.messageId === id)
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(f => f.messageId !== id))
+        setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
+      })
+    }
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+
     const r = await window.electronAPI.telegram.restoreFile(id)
     if (r.success) {
-      setFiles(prev => prev.filter(f => f.messageId !== id))
-      setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
       showToast('Файл восстановлен')
     } else {
       showToast('Ошибка восстановления')
+      const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
+      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
   }
 
-  const handlePurge = async (id: number) => {
+  const handlePurge = async (id: number, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить файл навсегда?'))) return
-    setDeletingIds(prev => new Set(prev).add(id))
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      if (rect) { x = (rect.left + rect.width / 2) / window.innerWidth; y = (rect.top + rect.height / 2) / window.innerHeight } else { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
+    }
+    confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+
+    const f = files.find(x => x.messageId === id)
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(f => f.messageId !== id))
+        setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
+      })
+    }
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+
     const r = await window.electronAPI.telegram.permDeleteFile(id)
     if (r.success) {
-      setFiles(prev => prev.filter(f => f.messageId !== id))
-      setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s })
       showToast('Файл удалён навсегда')
     } else {
-      setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s })
       showToast('Ошибка удаления')
+      const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
+      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
   }
 
-  const handleBulkRestore = async () => {
+  const handleBulkRestore = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    for (const id of selected) {
-      await window.electronAPI.telegram.restoreFile(id)
+    let x = 0.5, y = 0.5
+    if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
+    confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+
+    const ids = Array.from(selected)
+    const filesToRestore = files.filter(f => ids.includes(f.messageId))
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(f => !ids.includes(f.messageId)))
+        clearSelection()
+      })
     }
-    setFiles(prev => prev.filter(f => !selected.has(f.messageId)))
-    showToast(`Восстановлено ${selected.size} файлов`)
-    clearSelection()
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+
+    let allSuccess = true
+    for (const id of ids) {
+      const r = await window.electronAPI.telegram.restoreFile(id)
+      if (!r.success) allSuccess = false
+    }
+    if (allSuccess) {
+      showToast(`Восстановлено ${ids.length} файлов`)
+    } else {
+      showToast('Ошибка восстановления некоторых файлов')
+    }
   }
 
-  const handleBulkPurge = async () => {
+  const handleBulkPurge = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
     if (!(await appConfirm(`Удалить навсегда ${selected.size} файлов?`))) return
+    let x = 0.5, y = 0.5
+    if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
+    confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+
     const ids = Array.from(selected)
-    setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
-    for (const id of ids) {
-      await window.electronAPI.telegram.permDeleteFile(id)
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(f => !ids.includes(f.messageId)))
+        clearSelection()
+      })
     }
-    setFiles(prev => prev.filter(f => !selected.has(f.messageId)))
-    setDeletingIds(new Set())
-    showToast(`Удалено ${ids.length} файлов`)
-    clearSelection()
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+
+    let allSuccess = true
+    for (const id of ids) {
+      const r = await window.electronAPI.telegram.permDeleteFile(id)
+      if (!r.success) allSuccess = false
+    }
+    if (allSuccess) {
+      showToast(`Удалено навсегда ${ids.length} файлов`)
+    } else {
+      showToast('Ошибка удаления некоторых файлов')
+    }
   }
 
   const handleBulkDownload = async () => {
@@ -176,9 +246,9 @@ export default function TrashPage() {
 
       <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
         <span>Выбрано: {selected.size}</span>
-        <button onClick={handleBulkRestore}><RotateCcw size={14} /> Восстановить</button>
+        <button onClick={(e) => handleBulkRestore(e)}><RotateCcw size={14} /> Восстановить</button>
         <button onClick={handleBulkDownload}><Download size={14} /> Скачать</button>
-        <button className="danger" onClick={handleBulkPurge}><X size={14} /> Удалить навсегда</button>
+        <button className="danger" onClick={(e) => handleBulkPurge(e)}><X size={14} /> Удалить навсегда</button>
         <button onClick={clearSelection}>Снять</button>
       </div>
 
@@ -196,15 +266,15 @@ export default function TrashPage() {
           {filtered.map(f => {
             const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
             return (
-              <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+              <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                 <div className="mf-card-icon" data-type="trash">{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                 <div className="mf-card-meta">{fmtSize(f.fileSize)} · {daysLeft > 0 ? `удал. через ${daysLeft} дн.` : 'сегодня'}</div>
                 <div className="mf-card-actions">
-                  <button title="Восстановить" onClick={() => handleRestore(f.messageId)}><RotateCcw size={14} /></button>
+                  <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                   <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
-                  <button title="Удалить навсегда" className="danger" onClick={() => handlePurge(f.messageId)}><X size={14} /></button>
+                  <button title="Удалить навсегда" className="danger" onClick={(e) => handlePurge(f.messageId, e)}><X size={14} /></button>
                 </div>
               </div>
             )
@@ -220,15 +290,15 @@ export default function TrashPage() {
             {filtered.map(f => {
               const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
               return (
-                <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}>
+                <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                   <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                   <td>{fmtSize(f.fileSize)}</td>
                   <td>{daysLeft > 0 ? `через ${daysLeft} дн.` : 'сегодня'}</td>
                   <td>
-                    <button title="Восстановить" onClick={() => handleRestore(f.messageId)}><RotateCcw size={14} /></button>
+                    <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                     <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
-                    <button title="Удалить навсегда" className="danger" onClick={() => handlePurge(f.messageId)}><X size={14} /></button>
+                    <button title="Удалить навсегда" className="danger" onClick={(e) => handlePurge(f.messageId, e)}><X size={14} /></button>
                   </td>
                 </tr>
               )
@@ -249,11 +319,11 @@ export default function TrashPage() {
             </svg>
             Выбрать
           </button>
-          <button onClick={() => { handleRestore(ctxMenu.file.messageId); closeCtx() }}>
+          <button onClick={(e) => { handleRestore(ctxMenu.file.messageId, e); closeCtx() }}>
             <RotateCcw size={14} /> Восстановить
           </button>
           <div className="mf-ctx-divider" />
-          <button className="danger" onClick={() => { handlePurge(ctxMenu.file.messageId); closeCtx() }}>
+          <button className="danger" onClick={(e) => { handlePurge(ctxMenu.file.messageId, e); closeCtx() }}>
             <X size={14} /> Удалить навсегда
           </button>
         </div>,

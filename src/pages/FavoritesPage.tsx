@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react"
+import confetti from 'canvas-confetti'
+import { flushSync } from 'react-dom'
 import { Star, Download, Trash2, Eye } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
@@ -66,13 +68,57 @@ export default function FavoritesPage() {
     if (!r.success) await appAlert(r.error || 'Ошибка скачивания')
   }
 
-  const handleDelete = async (f: any) => {
+  const handleDelete = async (f: any, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
+
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-card')?.getBoundingClientRect()
+      if (rect) {
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
+      }
+    }
+    confetti({
+      particleCount: 50,
+      spread: 80,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
+    const applyRemove = () => {
+      flushSync(() => {
+        setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+        v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
+        setFavs(v3store.getFavs())
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
+
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
-    if (r.success) {
-      setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
-      v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
-      setFavs(v3store.getFavs())
+    if (!r.success) {
+      const revert = () => {
+        flushSync(() => {
+          setAllFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
+          v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
+          setFavs(v3store.getFavs())
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
     }
   }
 
@@ -103,6 +149,7 @@ export default function FavoritesPage() {
               const isVid = typeOf(f.fileName) === 'video'
               return (
                 <div key={f.messageId} className="mf-card"
+                  style={{ viewTransitionName: `card_${f.messageId}` }}
                   onDoubleClick={() => { if (isImg || isVid) handlePreview(f) }}>
                   <div className="mf-card-icon" data-type={f.mimeType?.startsWith('image') ? 'Изображения' : f.mimeType?.startsWith('video') ? 'Видео' : 'Другое'}>
                     {thumbs[f.messageId] ? (
@@ -117,7 +164,7 @@ export default function FavoritesPage() {
                     <button title="Убрать из избранного" onClick={() => toggleFav(f)}><Star size={14} fill="#fbbf24" stroke="#fbbf24" /></button>
                     <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                     {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f)}><Eye size={14} /></button>}
-                    <button title="Удалить" className="danger" onClick={() => handleDelete(f)}><Trash2 size={14} /></button>
+                    <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                   </div>
                 </div>
               )

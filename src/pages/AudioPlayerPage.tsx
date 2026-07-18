@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react'
+import confetti from 'canvas-confetti'
+import { flushSync } from 'react-dom'
 import { Play, Download, Trash2, Music, Clock, Calendar } from 'lucide-react'
 import { useAudioPlayer } from '../lib/AudioPlayerContext'
 import { appConfirm } from '../lib/dialogs'
@@ -47,11 +49,53 @@ export default function AudioPlayerPage() {
     })
   }, [])
 
-  const handleDelete = async (f: any) => {
+  const handleDelete = async (f: any, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
+
+    let x = 0.5, y = 0.5
+    if (e) {
+      let rect = (e.currentTarget as HTMLElement).closest('.ap-track-row')?.getBoundingClientRect()
+      if (rect) {
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
+      }
+    }
+    confetti({
+      particleCount: 50,
+      spread: 80,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
+    const applyRemove = () => {
+      flushSync(() => {
+        setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
+    } else {
+      applyRemove()
+    }
+
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
-    if (r.success) {
-      setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+    if (!r.success) {
+      const revert = () => {
+        flushSync(() => {
+          setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
     }
   }
 
@@ -112,6 +156,7 @@ export default function AudioPlayerPage() {
                 <div 
                   key={f.messageId} 
                   className={`ap-track-row ${isActive ? 'active' : ''}`}
+                  style={{ viewTransitionName: `card_${f.messageId}` }}
                   onDoubleClick={() => play(f, files)}
                 >
                   <div className="ap-track-num">
@@ -153,7 +198,7 @@ export default function AudioPlayerPage() {
                       <button title="Скачать" onClick={(e) => { e.stopPropagation(); handleDownload(f) }}>
                         <Download size={16} />
                       </button>
-                      <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); handleDelete(f) }}>
+                      <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); handleDelete(f, e) }}>
                         <Trash2 size={16} />
                       </button>
                     </div>
