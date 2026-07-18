@@ -211,21 +211,27 @@ export default function MyFilesPage() {
   const deleteFolder = async (id: string, e?: React.MouseEvent) => {
     if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.'))) return
 
+    let x = 0.5, y = 0.5
     if (e) {
-      const rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
       if (rect) {
-        const x = (rect.left + rect.width / 2) / window.innerWidth
-        const y = (rect.top + rect.height / 2) / window.innerHeight
-        confetti({
-          particleCount: 50,
-          spread: 80,
-          origin: { x, y },
-          colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
-          disableForReducedMotion: true,
-          zIndex: 9999
-        })
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
       }
     }
+    confetti({
+      particleCount: 50,
+      spread: 80,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
+    const folderToRestore = folders.find(x => x.id === id)
 
     const applyRemove = () => {
       flushSync(() => {
@@ -240,8 +246,23 @@ export default function MyFilesPage() {
     }
 
     const r = await window.electronAPI.folders.delete(id)
-    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
-    if (folderDrill === id) setFolderDrill(null)
+    if (r.success) { 
+      setFolders(r.data.folders || [])
+      setFileFolders(r.data.fileFolders || {})
+      if (folderDrill === id) setFolderDrill(null)
+    } else {
+      showToast('Ошибка удаления папки')
+      const revert = () => {
+        flushSync(() => {
+          if (folderToRestore) setFolders(prev => [...prev, folderToRestore])
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
+    }
   }
 
   const renameFolder = async (id: string) => {
@@ -485,21 +506,25 @@ export default function MyFilesPage() {
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
     if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
     
+    let x = 0.5, y = 0.5
     if (e) {
-      const rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
+      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
       if (rect) {
-        const x = (rect.left + rect.width / 2) / window.innerWidth
-        const y = (rect.top + rect.height / 2) / window.innerHeight
-        confetti({
-          particleCount: 50,
-          spread: 80,
-          origin: { x, y },
-          colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
-          disableForReducedMotion: true,
-          zIndex: 9999
-        })
+        x = (rect.left + rect.width / 2) / window.innerWidth
+        y = (rect.top + rect.height / 2) / window.innerHeight
+      } else {
+        x = e.clientX / window.innerWidth
+        y = e.clientY / window.innerHeight
       }
     }
+    confetti({
+      particleCount: 50,
+      spread: 80,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
 
     setDeletingIds(prev => new Set(prev).add(f.messageId))
     showToast('Перемещение в корзину…')
@@ -521,7 +546,20 @@ export default function MyFilesPage() {
     if (r.success) {
       showToast('Перемещено в корзину')
     } else {
-      showToast('Ошибка удаления')
+      showToast('Ошибка удаления, отмена операции')
+      const revert = () => {
+        flushSync(() => {
+          setFiles(prev => {
+            if (prev.find(x => x.messageId === f.messageId)) return prev
+            return [...prev, f].sort((a, b) => (b.messageId - a.messageId))
+          })
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
     }
   }
   const handleCopyLink = async (f: any) => {
@@ -628,22 +666,63 @@ export default function MyFilesPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [preview, navPreview])
-  const bulkDelete = async () => {
+  const bulkDelete = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
     if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
     const ids = Array.from(selected)
+    
+    let x = 0.5, y = 0.5
+    if (e) {
+      x = e.clientX / window.innerWidth
+      y = e.clientY / window.innerHeight
+    }
+    confetti({
+      particleCount: 150,
+      spread: 120,
+      origin: { x, y },
+      colors: ['#7c83ff', '#ff4b4b', '#a1a1aa'],
+      disableForReducedMotion: true,
+      zIndex: 9999
+    })
+
     setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
     showToast('Перемещение в корзину…')
-    const r = await window.electronAPI.telegram.bulkDelete(ids)
-    if (r.success) {
-      setTimeout(() => {
+    
+    const filesToRestore = files.filter(f => ids.includes(f.messageId))
+    
+    const applyRemove = () => {
+      flushSync(() => {
         setFiles(prev => prev.filter(x => !ids.includes(x.messageId)))
         setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
         clearSelection()
-      }, 300)
+      })
+    }
+
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(applyRemove)
     } else {
-      setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
-      showToast('Ошибка удаления')
+      applyRemove()
+    }
+
+    const r = await window.electronAPI.telegram.bulkDelete(ids)
+    if (r.success) {
+      showToast('Успешно удалено')
+    } else {
+      showToast('Ошибка массового удаления, отмена')
+      const revert = () => {
+        flushSync(() => {
+          setFiles(prev => {
+            const currentIds = new Set(prev.map(p => p.messageId))
+            const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
+            return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
+          })
+        })
+      }
+      if ('startViewTransition' in document) {
+        (document as any).startViewTransition(revert)
+      } else {
+        revert()
+      }
     }
   }
   const bulkDownload = async () => {
