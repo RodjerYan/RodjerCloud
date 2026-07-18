@@ -10,6 +10,7 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
 import { FileThumb } from '../components/FileThumb'
+import { MassUploadWidget, PendingUpload } from '../components/MassUploadWidget'
 import '../styles/duplicate-modal.css'
 
 function typeOf(name: string): string {
@@ -38,14 +39,6 @@ const CAT_ICON: Record<string, React.ReactNode> = {
 }
 const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
-}
-
-interface PendingUpload {
-  id: string;
-  fileName: string;
-  progress: number;
-  folderId?: string | null;
-  objectUrl?: string;
 }
 
 const matchVirtualFolder = (fileName: string, folderId: string) => {
@@ -265,31 +258,33 @@ export default function MyFilesPage() {
     if (!silent) setLoading(false)
   }
 
-  const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
+  const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string, fileSize?: number }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
-    setDropProgress(prev => {
-      const total = (prev?.total || 0) + dropped.length
-      const completed = prev?.completed || 0
-      return { current: 0, total, pct: total > 0 ? Math.floor(completed / total * 100) : 0, completed }
-    })
     
     const newPending = dropped.map(d => ({
       id: Math.random().toString(36).substring(2),
       fileName: d.fileName,
       progress: 0,
       folderId: targetFolderId || null,
-      objectUrl: d.objectUrl
+      objectUrl: d.objectUrl,
+      status: 'waiting' as 'waiting',
+      filePath: d.filePath
     }))
     setPendingUploads(prev => [...prev, ...newPending])
 
-    for (let i = 0; i < dropped.length; i++) {
+    const CONCURRENCY_LIMIT = 3
+    let currentIndex = 0
+
+    const processNext = async () => {
+      if (currentIndex >= dropped.length) return
+      const i = currentIndex++
       const file = dropped[i]
       const pendingId = newPending[i].id
 
       const currentFiles = targetFolderId ? files.filter((f: any) => fileFolders[f.messageId] === targetFolderId) : files.filter((f: any) => !fileFolders[f.messageId])
       const existing = currentFiles.find((f: any) => f.fileName === file.fileName)
       
-      let uploadCustomName: string | undefined = undefined
+      let uploadCustomName = file.fileName
 
       if (existing) {
         const choice = await new Promise<'replace' | 'copy' | 'skip'>(resolve => {
@@ -299,8 +294,8 @@ export default function MyFilesPage() {
 
         if (choice === 'skip') {
           setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
-          setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
-          continue
+          processNext()
+          return
         }
         if (choice === 'replace') {
           await window.electronAPI.telegram.deleteFile(existing.messageId)
@@ -319,39 +314,59 @@ export default function MyFilesPage() {
         }
       }
 
-      window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
+      setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, status: 'uploading' } : p))
+
+      try {
+        const res: any = await window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName)
         if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
         if (res.success && res.data?.messageId && targetFolderId) {
           await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
         }
         
-        setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: 100 } : p))
-        await new Promise(r => setTimeout(r, 500))
+        if (res.success && res.data?.messageId) {
+          setFiles(prev => {
+            const extMatch = uploadCustomName.lastIndexOf('.')
+            const ext = extMatch !== -1 ? uploadCustomName.slice(extMatch) : ''
+            let mimeType = 'application/octet-stream'
+            if (ext.match(/\.(jpg|jpeg|png|webp|gif)$/i)) mimeType = 'image/jpeg'
+            if (ext.match(/\.(mp4|mov|mkv)$/i)) mimeType = 'video/mp4'
+            
+            const newFileObj = {
+              messageId: res.data.messageId,
+              fileName: uploadCustomName,
+              fileSize: file.fileSize || 0,
+              mimeType,
+              uploadedAt: Math.floor(Date.now() / 1000),
+              originalDate: Math.floor(Date.now() / 1000),
+              caption: '',
+              chatId: '',
+              isEncrypted: false,
+              isMultipart: false,
+              multipartIds: []
+            }
+            return [newFileObj, ...prev]
+          })
+        }
+        
+        setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: 100, status: 'done' } : p))
+        await new Promise(r => setTimeout(r, 1000))
 
         setPendingUploads(prev => {
           const next = prev.filter(p => p.id !== pendingId)
           if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
           return next
         })
-        setDropProgress(dp => {
-          if (!dp) return null
-          const completed = dp.completed + 1
-          const pct = Math.floor((completed / dp.total) * 100)
-          if (completed >= dp.total) {
-            clearTimeout(dropDoneRef.current)
-            dropDoneRef.current = setTimeout(() => {
-              setDropProgress(null)
-              loadFolders()
-              load(true)
-            }, 2000)
-          }
-          return { ...dp, completed, pct }
-        })
-      }).catch((err: any) => {
+      } catch (err: any) {
         console.error('Upload failed:', err)
-        setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
-        setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
-      })
+        setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: -1, status: 'error', error: err.message || 'Ошибка' } : p))
+        showToast('Ошибка загрузки файла')
+      } finally {
+        processNext()
+      }
+    }
+
+    for (let i = 0; i < Math.min(CONCURRENCY_LIMIT, dropped.length); i++) {
+      processNext()
     }
   }
 
@@ -549,7 +564,7 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     if (!ctxMenu) return
-    const close = (e: MouseEvent) => {
+    const close = (e: any) => {
       if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
       setCtxMenu(null)
     }
@@ -640,9 +655,7 @@ export default function MyFilesPage() {
   const hasFiles = Object.values(grouped).some(g => g.length > 0)
 
   const [isDragOver, setIsDragOver] = useState(false)
-  const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number; completed: number } | null>(null)
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
-  const dropDoneRef = useRef<NodeJS.Timeout>()
   const dragCounter = useRef(0)
 
   useEffect(() => {
@@ -654,28 +667,21 @@ export default function MyFilesPage() {
         const next = [...prev]
         next[idx] = { ...next[idx], progress: d.percent }
         
-        setDropProgress(dp => {
-          if (!dp) return null
-          const activeProgresses = next.reduce((sum, p) => sum + p.progress, 0)
-          const totalProgressPct = dp.total > 0 ? Math.floor(((dp.completed * 100) + activeProgresses) / dp.total) : 0
-          return { ...dp, pct: Math.min(100, totalProgressPct) }
-        })
-        
         return next
       })
     })
-    return () => { off(); clearTimeout(dropDoneRef.current) }
+    return () => { off() }
   }, [])
 
   const extractDroppedFiles = (e: React.DragEvent) => {
-    const dropped: { filePath: string; fileName: string; objectUrl?: string }[] = []
+    const dropped: { filePath: string; fileName: string; objectUrl?: string; fileSize: number }[] = []
     for (const file of Array.from(e.dataTransfer.files)) {
       const p = window.electronAPI.getPathForFile(file)
       let objectUrl: string | undefined
       if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.name.match(/\.(heic|heif)$/i)) {
         try { objectUrl = URL.createObjectURL(file) } catch {}
       }
-      if (p) dropped.push({ filePath: p, fileName: file.name, objectUrl })
+      if (p) dropped.push({ filePath: p, fileName: file.name, objectUrl, fileSize: file.size || 0 })
     }
     return dropped
   }
@@ -741,52 +747,6 @@ export default function MyFilesPage() {
               }} />
             </div>
             {shareProgress === 'generating' ? 'Генерация ссылки…' : 'Ссылка скопирована в буфер обмена'}
-          </div>
-        </div>
-      </div>
-
-      <div style={{
-        maxHeight: dropProgress ? 48 : 0,
-        opacity: dropProgress ? 1 : 0,
-        overflow: 'hidden',
-        transition: 'max-height 0.35s ease, opacity 0.3s ease',
-        width: '100%',
-      }}>
-        <div style={{
-          width: '100%',
-          background: dropProgress && dropProgress.pct >= 100
-            ? 'rgba(52,211,153,0.08)'
-            : 'rgba(124,131,255,0.08)',
-          borderBottom: '1px solid ' + (dropProgress && dropProgress.pct >= 100
-            ? 'rgba(52,211,153,0.2)'
-            : 'rgba(124,131,255,0.15)'),
-        }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-            padding: '8px 16px',
-            fontSize: 13, color: dropProgress && dropProgress.pct >= 100 ? '#6ee7b7' : '#bcc0ff',
-            fontWeight: 500,
-          }}>
-            <div style={{
-              width: 80, height: 4,
-              background: 'rgba(255,255,255,0.08)',
-              borderRadius: 2, overflow: 'hidden', flexShrink: 0,
-            }}>
-              <div style={{
-                height: '100%', width: (dropProgress?.pct ?? 0) + '%',
-                background: dropProgress && dropProgress.pct >= 100
-                  ? 'linear-gradient(90deg, #34d399, #6ee7b7)'
-                  : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
-                borderRadius: 2,
-                transition: 'width 0.25s ease',
-                boxShadow: dropProgress && dropProgress.pct >= 100
-                  ? '0 0 6px rgba(52,211,153,0.4)'
-                  : '0 0 6px rgba(124,131,255,0.4)',
-              }} />
-            </div>
-            {dropProgress && dropProgress.completed >= dropProgress.total && dropProgress.total > 0
-              ? 'Загрузка завершена'
-              : `Загружено: ${dropProgress?.completed ?? 0} из ${dropProgress?.total ?? 0} • Осталось: ${(dropProgress?.total ?? 0) - (dropProgress?.completed ?? 0)} • ${dropProgress?.pct ?? 0}%`}
           </div>
         </div>
       </div>
@@ -908,7 +868,7 @@ export default function MyFilesPage() {
                             <div key={year + '-' + month + '-' + day} className="mf-gd">
                               <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
                               <div className="mf-gm-items">
-                                {items.map(f => (
+                                {items.map((f: any) => (
                                   <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                                     onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                                     draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
@@ -1032,7 +992,7 @@ export default function MyFilesPage() {
               </div>
             )
           })}
-          {(folders.length > 0 || folderDrill || pendingUploads.length > 0) && (() => {
+          {(() => {
             const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
             const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId]);
 
@@ -1258,7 +1218,7 @@ export default function MyFilesPage() {
 
                 
 
-                {folderDrill && currentFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
+                {currentFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
       return p.folderId === folderDrill
     }).length === 0 && (

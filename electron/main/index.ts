@@ -43,6 +43,11 @@ const botService = new BotService()
 botService.loadToken()
 let initialFolderSyncDone = false
 
+import { EventSyncService } from './event-sync'
+import { db, getLegacyFolders, insertFolder, updateFolder, deleteFolder, addFileToFolder, removeFileFromFolder, setSyncState, getSyncState, getAllFolders, getPendingUploadJobs } from './db'
+const eventSyncService = new EventSyncService(telegramService)
+eventSyncService.startPolling()
+
 autoSyncService.setEventCallback((event) => {
   if (mainWindow) {
     mainWindow.webContents.send('autosync:status', event)
@@ -127,6 +132,20 @@ app.whenReady().then(async () => {
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
   telegramService.cleanThumbnailCache()
+  
+  // Resume pending uploads from Two-Phase Commit log
+  const pendingJobs = getPendingUploadJobs()
+  for (const pJob of pendingJobs) {
+    log('info', `Resuming pending upload job: ${pJob.id}`)
+    uploadQueue.push({
+      id: pJob.id,
+      filePath: pJob.filePath,
+      customFileName: pJob.fileName,
+      encrypt: pJob.encrypt === 1
+    })
+  }
+  if (pendingJobs.length > 0) processQueue()
+  
   try {
     const previewCache = path.join(app.getPath('userData'), 'preview-cache')
     if (fs.existsSync(previewCache)) {
@@ -315,7 +334,10 @@ ipcMain.handle('telegram:get-user-info', async () => {
 })
 
 // ===== Upload queue =====
-type UploadJob = { id: string; filePath: string; encrypt?: boolean; customFileName?: string; event: { sender: { send: (c: string, d: any) => void } } }
+interface UploadJob {
+  id: string; filePath: string; encrypt?: boolean; customFileName?: string;
+  event?: { sender: { send: (channel: string, data: any) => void } }
+}
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
 async function getConcurrency(): Promise<number> {
@@ -331,6 +353,8 @@ async function processQueue() {
     runUpload(job).finally(() => { activeUploads--; processQueue() })
   }
 }
+import { createUploadJob, updateUploadJobStatus } from './db'
+
 async function runUpload(job: UploadJob): Promise<void> {
   try {
     let lastPct = -1
@@ -339,23 +363,32 @@ async function runUpload(job: UploadJob): Promise<void> {
       if (pct <= lastPct) return
       lastPct = pct
       try {
-        job.event.sender.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct })
+        job.event?.sender.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct })
       } catch {}
     }
+    
+    updateUploadJobStatus(job.id, 'uploading')
     sendProgress(0, 1)
+    
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
       sendProgress(sent, total)
     }, job.encrypt, job.customFileName)
     sendProgress(result.fileSize, result.fileSize)
-    job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
+    
+    updateUploadJobStatus(job.id, 'completed', result.messageId)
+    if (job.event) job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
-    job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
+    updateUploadJobStatus(job.id, 'error', undefined, (error as Error).message)
+    if (job.event) job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
   }
 }
 
 ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => {
   try {
     const jobId = id || Math.random().toString(36).slice(2)
+    const fileName = customFileName || path.basename(filePath)
+    createUploadJob({ id: jobId, filePath, fileName, encrypt })
+    
     return await new Promise((resolve) => {
       uploadQueue.push({ id: jobId, filePath, encrypt, customFileName, event: {
         sender: {
@@ -915,171 +948,121 @@ ipcMain.handle('storage:clear-sync-history', async () => {
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-let foldersLock: Promise<void> = Promise.resolve()
-async function withFoldersLock<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = foldersLock
-  let resolve: () => void
-  foldersLock = new Promise(r => { resolve = r })
-  await prev
-  try { return await fn() } finally { resolve!() }
-}
-
 function foldersPath(): string {
   return path.join(app.getPath('userData'), 'rodjercloud-folders.json')
 }
-async function readFolders(): Promise<any> {
+async function readFoldersLegacy(): Promise<any> {
   try {
     if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {} }
     const data = await fs.promises.readFile(foldersPath(), 'utf8')
     return JSON.parse(data)
   } catch { return { folders: [], fileFolders: {} } }
 }
-async function writeFolders(d: any) {
-  await fs.promises.writeFile(foldersPath(), JSON.stringify(d, null, 2))
-}
-
-let syncPending = false
-
-async function syncFoldersToTelegram() {
-  try {
-    syncPending = true
-    const d: any = await readFolders()
-    const botToken = botService.getToken()
-    if (botToken) d.botToken = botToken
-    await telegramService.syncFolders(d)
-    syncPending = false
-  } catch (e) { 
-    log('error', 'syncFolders: ' + (e as Error).message) 
-    // syncPending remains true so we retry next time instead of overwriting
-  }
-}
 
 ipcMain.handle('folders:list', async () => {
-  try { const d = await readFolders(); return { success: true, data: d } }
-  catch (error) { return { success: false, error: (error as Error).message } }
+  try {
+    // Migration check
+    const p = foldersPath()
+    if (fs.existsSync(p)) {
+      const all = getAllFolders()
+      if (all.length === 0) {
+        // One-time migration
+        const d = await readFoldersLegacy()
+        db.transaction(() => {
+          for (const f of d.folders) {
+            insertFolder(f)
+          }
+          for (const [msgId, folderId] of Object.entries(d.fileFolders)) {
+            addFileToFolder(Number(msgId), folderId as string)
+          }
+        })()
+        fs.renameSync(p, p + '.bak')
+      }
+    }
+    
+    return { success: true, data: getLegacyFolders() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:load-from-telegram', async () => {
   try {
-    return await withFoldersLock(async () => {
-      const data = await telegramService.loadFoldersFromChannel()
-      if (data) {
-        if (data.botToken && !botService.getToken()) {
-          botService.setToken(data.botToken)
-          log('info', 'Bot token synced from channel data')
-        }
-        
-        // Data loss prevention: If we have pending local changes that failed to upload, 
-        // DO NOT overwrite them with older cloud data! Instead, try uploading again.
-        if (syncPending) {
-          log('warn', 'Pending local folder changes exist. Retrying upload instead of overwriting from cloud.')
-          syncFoldersToTelegram().catch(() => {})
-          const local = await readFolders()
-          return { success: true, data: local }
-        }
-
-        if (data.folders && data.fileFolders) await writeFolders(data)
-        initialFolderSyncDone = true
-        return { success: true, data }
+    const data = await telegramService.loadFoldersFromChannel()
+    if (data) {
+      if (data.botToken && !botService.getToken()) {
+        botService.setToken(data.botToken)
+        log('info', 'Bot token synced from channel data')
       }
-      const local: any = await readFolders()
-      if (!initialFolderSyncDone && (local.folders.length > 0 || Object.keys(local.fileFolders).length > 0)) {
-        try { 
-          const botToken = botService.getToken()
-          if (botToken) local.botToken = botToken
-          syncPending = true
-          await telegramService.syncFolders(local)
-          syncPending = false 
-        } catch {
-          // syncPending remains true
+      
+      // Import into SQLite if our SQLite is empty
+      if (data.folders && Array.isArray(data.folders)) {
+        const all = getAllFolders()
+        if (all.length === 0) {
+          log('info', 'Importing folders from cloud into local SQLite')
+          db.transaction(() => {
+            for (const f of data.folders) {
+              insertFolder(f)
+            }
+            if (data.fileFolders) {
+              for (const [msgId, folderId] of Object.entries(data.fileFolders)) {
+                addFileToFolder(Number(msgId), folderId as string)
+              }
+            }
+          })()
         }
-        initialFolderSyncDone = true
       }
-      return { success: true, data: local }
-    })
+    }
+    return { success: true, data: getLegacyFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:create', async (_, name: string, parentId?: string) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-      d.folders.push({ id, name, parentId: parentId || null, createdAt: Math.floor(Date.now() / 1000) })
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true, data: d }
-    })
+    const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    const payload = { id, name, parentId: parentId || null, createdAt: Math.floor(Date.now() / 1000) }
+    insertFolder(payload)
+    eventSyncService.publishEvent({ type: 'FOLDER_CREATE', payload })
+    return { success: true, data: getLegacyFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:rename', async (_, id: string, name: string) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      const f = d.folders.find((x: any) => x.id === id)
-      if (!f) throw new Error('Folder not found')
-      f.name = name
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true, data: d }
-    })
+    updateFolder(id, name)
+    eventSyncService.publishEvent({ type: 'FOLDER_RENAME', payload: { id, name } })
+    return { success: true, data: getLegacyFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:delete', async (_, id: string) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      const idsToDelete = new Set<string>()
-      const collect = (parentId: string) => {
-        idsToDelete.add(parentId)
-        d.folders.filter((x: any) => x.parentId === parentId).forEach((x: any) => collect(x.id))
-      }
-      collect(id)
-      d.folders = d.folders.filter((x: any) => !idsToDelete.has(x.id))
-      Object.keys(d.fileFolders).forEach(k => { if (idsToDelete.has(d.fileFolders[k])) delete d.fileFolders[k] })
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true, data: d }
-    })
+    deleteFolder(id)
+    eventSyncService.publishEvent({ type: 'FOLDER_DELETE', payload: { id } })
+    return { success: true, data: getLegacyFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:add-file', async (_, folderId: string, messageId: number) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      d.fileFolders[messageId] = folderId
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true }
-    })
+    addFileToFolder(messageId, folderId)
+    eventSyncService.publishEvent({ type: 'FILE_ADD', payload: { messageId, folderId } })
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:remove-file', async (_, messageId: number) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      delete d.fileFolders[messageId]
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true }
-    })
+    removeFileFromFolder(messageId)
+    eventSyncService.publishEvent({ type: 'FILE_REMOVE', payload: { messageId } })
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: string | null) => {
   try {
-    return await withFoldersLock(async () => {
-      const d = await readFolders()
-      if (folderId) d.fileFolders[messageId] = folderId
-      else delete d.fileFolders[messageId]
-      await writeFolders(d)
-      await syncFoldersToTelegram()
-      return { success: true }
-    })
+    if (folderId) addFileToFolder(messageId, folderId)
+    else removeFileFromFolder(messageId)
+    eventSyncService.publishEvent({ type: 'FILE_MOVE', payload: { messageId, folderId } })
+    return { success: true, data: getLegacyFolders() }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -1102,8 +1085,9 @@ ipcMain.handle('folders:move-folder', async (_, folderId: string, parentId: stri
         }
       }
       f.parentId = parentId || null
+      d._syncPending = true
       await writeFolders(d)
-      await syncFoldersToTelegram()
+      requestFolderSync()
       return { success: true, data: d }
     })
   } catch (error) { return { success: false, error: (error as Error).message } }

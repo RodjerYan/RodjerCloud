@@ -54,5 +54,5 @@
   "afterSign": null,
   "buildDependenciesFromSource": false,
   "nodeGypRebuild": false,
-  "npmRebuild": false
+  "npmRebuild": true
 }
