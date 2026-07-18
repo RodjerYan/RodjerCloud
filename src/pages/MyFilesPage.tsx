@@ -1030,10 +1030,9 @@ export default function MyFilesPage() {
               </div>
             )
           })}
-
           {(folders.length > 0 || folderDrill || pendingUploads.length > 0) && (() => {
             const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
-            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : [];
+            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId]);
 
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
