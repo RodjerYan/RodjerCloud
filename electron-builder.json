@@ -42,10 +42,7 @@
       }
     ],
     "icon": "resources/icon.icns",
-    "category": "public.app-category.utilities",
-    "hardenedRuntime": true,
-    "entitlements": "build/entitlements.mac.plist",
-    "entitlementsInherit": "build/entitlements.mac.plist"
+    "category": "public.app-category.utilities"
   },
   "afterSign": null,
   "buildDependenciesFromSource": false,
