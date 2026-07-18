@@ -365,12 +365,22 @@ export class TelegramService {
         }
       }
       if (matches.length > 0) {
-        matches.sort((a, b) => Number(b.id) - Number(a.id)) // Largest math value (smallest absolute value) is the oldest channel
-        const oldest = matches[0]
-        this.channelId = BigInt(oldest.id.toString())
+        let activeChannel = matches[0]
+        let latestDate = 0
+        for (const match of matches) {
+          try {
+            const msgs = await this.client.getMessages(match.id, { limit: 1 })
+            const date = msgs.length > 0 ? msgs[0].date : 0
+            if (date >= latestDate) {
+              latestDate = date
+              activeChannel = match
+            }
+          } catch (e) {}
+        }
+        this.channelId = BigInt(activeChannel.id.toString())
         return {
           channelId: this.channelId.toString(),
-          channelName: oldest.title,
+          channelName: activeChannel.title,
         }
       }
     } catch (e) {
@@ -411,12 +421,22 @@ export class TelegramService {
       }
     }
     if (matches.length > 0) {
-      matches.sort((a, b) => Number(b.id) - Number(a.id))
-      const oldest = matches[0]
-      this.channelId = BigInt(oldest.id.toString())
+      let activeChannel = matches[0]
+      let latestDate = 0
+      for (const match of matches) {
+        try {
+          const msgs = await this.client.getMessages(match.id, { limit: 1 })
+          const date = msgs.length > 0 ? msgs[0].date : 0
+          if (date >= latestDate) {
+            latestDate = date
+            activeChannel = match
+          }
+        } catch (e) {}
+      }
+      this.channelId = BigInt(activeChannel.id.toString())
       return {
         channelId: this.channelId.toString(),
-        channelName: oldest.title,
+        channelName: activeChannel.title,
       }
     }
     return await this.createPrivateChannel()
