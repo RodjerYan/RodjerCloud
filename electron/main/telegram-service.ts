@@ -356,7 +356,7 @@ export class TelegramService {
     if (!this.client) throw new Error('Client not initialized')
 
     try {
-      const dialogs = await this.client.getDialogs()
+      const dialogs = await this.client.getDialogs({ limit: 2000 })
       const matches: any[] = []
       for (const dialog of dialogs) {
         const entity = dialog.entity as any
@@ -365,7 +365,7 @@ export class TelegramService {
         }
       }
       if (matches.length > 0) {
-        matches.sort((a, b) => Number(a.id) - Number(b.id)) // Smallest ID is the oldest channel
+        matches.sort((a, b) => Number(b.id) - Number(a.id)) // Largest math value (smallest absolute value) is the oldest channel
         const oldest = matches[0]
         this.channelId = BigInt(oldest.id.toString())
         return {
@@ -402,7 +402,7 @@ export class TelegramService {
     this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5 })
     await this.client.connect()
 
-    const dialogs = await this.client.getDialogs()
+    const dialogs = await this.client.getDialogs({ limit: 2000 })
     const matches: any[] = []
     for (const dialog of dialogs) {
       const entity = dialog.entity as any
@@ -411,7 +411,7 @@ export class TelegramService {
       }
     }
     if (matches.length > 0) {
-      matches.sort((a, b) => Number(a.id) - Number(b.id))
+      matches.sort((a, b) => Number(b.id) - Number(a.id))
       const oldest = matches[0]
       this.channelId = BigInt(oldest.id.toString())
       return {
