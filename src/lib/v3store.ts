@@ -98,32 +98,32 @@ export const v3store = {
   init: initStore,
   // trash
   getTrash: (): TrashItem[] => get(K.trash, []),
-  addTrash: (it: TrashItem) => { const a = v3store.getTrash(); a.unshift(it); set(K.trash, a); scheduleSync() },
+  addTrash: (it: TrashItem) => { const a = [...v3store.getTrash()]; a.unshift(it); set(K.trash, a); scheduleSync() },
   removeTrash: (id: number) => { set(K.trash, v3store.getTrash().filter(x => x.messageId !== id)); scheduleSync() },
   clearOldTrash: () => { const cutoff = Date.now() - 30*864e5; set(K.trash, v3store.getTrash().filter(x => x.deletedAt > cutoff)); scheduleSync() },
   // favorites
   getFavs: (): FavItem[] => get(K.favs, []),
   isFav: (id: number) => v3store.getFavs().some(f => f.messageId === id),
-  toggleFav: (it: FavItem) => { const a = v3store.getFavs(); const i = a.findIndex(f => f.messageId === it.messageId); if (i >= 0) a.splice(i, 1); else a.unshift(it); set(K.favs, a); scheduleSync(); return i < 0 },
+  toggleFav: (it: FavItem) => { const a = [...v3store.getFavs()]; const i = a.findIndex(f => f.messageId === it.messageId); if (i >= 0) a.splice(i, 1); else a.unshift(it); set(K.favs, a); scheduleSync(); return i < 0 },
   // shared links
   getShared: (): SharedLink[] => get(K.shared, []),
-  addShared: (s: SharedLink) => { const a = v3store.getShared(); a.unshift(s); set(K.shared, a); scheduleSync() },
+  addShared: (s: SharedLink) => { const a = [...v3store.getShared()]; a.unshift(s); set(K.shared, a); scheduleSync() },
   removeShared: (id: string) => { set(K.shared, v3store.getShared().filter(x => x.id !== id)); scheduleSync() },
-  bumpShared: (id: string) => { const a = v3store.getShared(); const t = a.find(x => x.id === id); if (t) { t.useCount++; set(K.shared, a); scheduleSync() } },
+  bumpShared: (id: string) => { const a = [...v3store.getShared()]; const t = a.find(x => x.id === id); if (t) { t.useCount++; set(K.shared, a); scheduleSync() } },
   // activity
   getActivity: (): ActivityEntry[] => get(K.activity, []),
   logActivity: (type: ActivityEntry["type"], message: string) => {
-    const a = v3store.getActivity(); a.unshift({ id: Math.random().toString(36).slice(2), type, message, ts: Date.now() })
+    const a = [...v3store.getActivity()]; a.unshift({ id: Math.random().toString(36).slice(2), type, message, ts: Date.now() })
     if (a.length > 2000) a.length = 2000; set(K.activity, a); scheduleSync()
   },
   clearActivity: () => { set(K.activity, []); scheduleSync() },
   // tags
   getTags: (): TagEntry[] => get(K.tags, []),
-  addTag: (t: TagEntry) => { const a = v3store.getTags(); if (!a.find(x => x.name === t.name)) { a.push(t); set(K.tags, a); scheduleSync() } },
+  addTag: (t: TagEntry) => { const a = [...v3store.getTags()]; if (!a.find(x => x.name === t.name)) { a.push(t); set(K.tags, a); scheduleSync() } },
   removeTag: (name: string) => { set(K.tags, v3store.getTags().filter(t => t.name !== name)); scheduleSync() },
   getFileTags: (): FileTag[] => get(K.fileTags, []),
   setFileTags: (messageId: number, tags: string[]) => {
-    const a = v3store.getFileTags(); const i = a.findIndex(x => x.messageId === messageId)
+    const a = [...v3store.getFileTags()]; const i = a.findIndex(x => x.messageId === messageId)
     if (i >= 0) a[i].tags = tags; else a.push({ messageId, tags }); set(K.fileTags, a); scheduleSync()
   },
   tagsForFile: (messageId: number): string[] => v3store.getFileTags().find(x => x.messageId === messageId)?.tags || [],
@@ -131,18 +131,18 @@ export const v3store = {
   getNotes: (): NoteEntry[] => get(K.notes, []),
   noteFor: (messageId: number): NoteEntry | undefined => v3store.getNotes().find(n => n.messageId === messageId),
   setNote: (messageId: number, markdown: string) => {
-    const a = v3store.getNotes(); const i = a.findIndex(x => x.messageId === messageId)
+    const a = [...v3store.getNotes()]; const i = a.findIndex(x => x.messageId === messageId)
     if (i >= 0) a[i] = { messageId, markdown, updatedAt: Date.now() }
     else a.push({ messageId, markdown, updatedAt: Date.now() }); set(K.notes, a); scheduleSync()
   },
   removeNote: (messageId: number) => { set(K.notes, v3store.getNotes().filter(n => n.messageId !== messageId)); scheduleSync() },
   // albums
   getAlbums: (): AlbumEntry[] => get(K.albums, []),
-  addAlbum: (a: AlbumEntry) => { const arr = v3store.getAlbums(); arr.push(a); set(K.albums, arr); scheduleSync() },
+  addAlbum: (a: AlbumEntry) => { const arr = [...v3store.getAlbums()]; arr.push(a); set(K.albums, arr); scheduleSync() },
   removeAlbum: (id: string) => { set(K.albums, v3store.getAlbums().filter(a => a.id !== id)); scheduleSync() },
-  updateAlbum: (id: string, patch: Partial<AlbumEntry>) => { const arr = v3store.getAlbums(); const i = arr.findIndex(a => a.id === id); if (i >= 0) { arr[i] = { ...arr[i], ...patch }; set(K.albums, arr); scheduleSync() } },
-  addToAlbum: (id: string, messageId: number) => { const arr = v3store.getAlbums(); const a = arr.find(x => x.id === id); if (a && !a.messageIds.includes(messageId)) { a.messageIds.push(messageId); set(K.albums, arr); scheduleSync() } },
-  removeFromAlbum: (id: string, messageId: number) => { const arr = v3store.getAlbums(); const a = arr.find(x => x.id === id); if (a) { a.messageIds = a.messageIds.filter(m => m !== messageId); set(K.albums, arr); scheduleSync() } },
+  updateAlbum: (id: string, patch: Partial<AlbumEntry>) => { const arr = [...v3store.getAlbums()]; const i = arr.findIndex(a => a.id === id); if (i >= 0) { arr[i] = { ...arr[i], ...patch }; set(K.albums, arr); scheduleSync() } },
+  addToAlbum: (id: string, messageId: number) => { const arr = [...v3store.getAlbums()]; const a = arr.find(x => x.id === id); if (a && !a.messageIds.includes(messageId)) { a.messageIds = [...a.messageIds, messageId]; set(K.albums, arr); scheduleSync() } },
+  removeFromAlbum: (id: string, messageId: number) => { const arr = [...v3store.getAlbums()]; const a = arr.find(x => x.id === id); if (a) { a.messageIds = a.messageIds.filter(m => m !== messageId); set(K.albums, arr); scheduleSync() } },
   // file meta (pin, color, folder)
   getMeta: (): FileMeta[] => get(K.meta, []),
   setMeta: (m: FileMeta) => { const a = v3store.getMeta(); const i = a.findIndex(x => x.messageId === m.messageId); if (i >= 0) a[i] = { ...a[i], ...m }; else a.push(m); set(K.meta, a); scheduleSync() },

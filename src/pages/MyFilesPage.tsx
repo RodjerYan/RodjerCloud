@@ -209,18 +209,20 @@ export default function MyFilesPage() {
   }
 
   const deleteFolder = async (id: string, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+    
     if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.'))) return
 
     let x = 0.5, y = 0.5
-    if (e) {
-      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
-      if (rect) {
-        x = (rect.left + rect.width / 2) / window.innerWidth
-        y = (rect.top + rect.height / 2) / window.innerHeight
-      } else {
-        x = e.clientX / window.innerWidth
-        y = e.clientY / window.innerHeight
-      }
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
     }
     confetti({
       particleCount: 50,
@@ -290,16 +292,20 @@ export default function MyFilesPage() {
   }
   const confirmMoveFile = async (target: string) => {
     if (!moveTarget || moveTarget.length === 0) return
+    let updated = { ...fileFolders }
     for (const id of moveTarget) {
       if (target.startsWith('cat:')) {
         await window.electronAPI.folders.removeFile(id)
+        delete updated[id]
       } else {
         await window.electronAPI.folders.moveFile(id, target)
+        updated[id] = target
       }
     }
+    setFileFolders(updated)
     setMoveTarget(null)
     clearSelection()
-    loadFolders()
+    showToast('Перемещено')
   }
 
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -504,19 +510,22 @@ export default function MyFilesPage() {
     showToast(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
   }
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+
     if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
     
     let x = 0.5, y = 0.5
-    if (e) {
-      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
-      if (rect) {
-        x = (rect.left + rect.width / 2) / window.innerWidth
-        y = (rect.top + rect.height / 2) / window.innerHeight
-      } else {
-        x = e.clientX / window.innerWidth
-        y = e.clientY / window.innerHeight
-      }
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
     }
+    
     confetti({
       particleCount: 50,
       spread: 80,

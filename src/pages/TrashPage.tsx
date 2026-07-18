@@ -96,16 +96,22 @@ export default function TrashPage() {
   const clearSelection = () => setSelected(new Set())
 
   const handleRestore = async (id: number, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+    
+    // Note: appConfirm requires no e.currentTarget reference here as it's an async operation that clears the event context
+    const confirmed = await appConfirm('Восстановить файл?')
+    if (!confirmed) return
+
     let x = 0.5, y = 0.5
-    if (e) {
-      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
-      if (rect) {
-        x = (rect.left + rect.width / 2) / window.innerWidth
-        y = (rect.top + rect.height / 2) / window.innerHeight
-      } else {
-        x = e.clientX / window.innerWidth
-        y = e.clientY / window.innerHeight
-      }
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
     }
     confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
@@ -129,11 +135,20 @@ export default function TrashPage() {
   }
 
   const handlePurge = async (id: number, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+
     if (!(await appConfirm('Удалить файл навсегда?'))) return
+
     let x = 0.5, y = 0.5
-    if (e) {
-      let rect = (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr')?.getBoundingClientRect()
-      if (rect) { x = (rect.left + rect.width / 2) / window.innerWidth; y = (rect.top + rect.height / 2) / window.innerHeight } else { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
     }
     confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
