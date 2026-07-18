@@ -57,6 +57,11 @@
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "empty-npm-package": "^1.0.0"
+  },
+  "overrides": {
+    "bufferutil": "npm:empty-npm-package@1.0.0",
+    "utf-8-validate": "npm:empty-npm-package@1.0.0"
   }
 }
