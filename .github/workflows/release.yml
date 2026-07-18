@@ -9,7 +9,10 @@ jobs:
   release:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+          - os: macos-latest
+          - os: macos-13
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -37,12 +40,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate .icns (Mac)
-        if: matrix.os == 'macos-latest'
+        if: startsWith(matrix.os, 'macos')
         run: bash scripts/generate-icons.sh
 
-      - name: Build and Publish (Mac)
+      - name: Build and Publish (Mac arm64)
         if: matrix.os == 'macos-latest'
-        run: npm run build:mac -- -p always
+        run: npm run build:mac -- --arm64 -p always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build and Publish (Mac x64)
+        if: matrix.os == 'macos-13'
+        run: npm run build:mac -- --x64 -p always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
