@@ -1124,6 +1124,7 @@ export class TelegramService {
     let offsetId = 0
     let foundSyncMsg: any = null
     const BATCH = 100
+    const textMsgs: any[] = []
 
     while (true) {
       const batch = await this.client.getMessages(this.channelId as any, {
@@ -1133,9 +1134,29 @@ export class TelegramService {
       if (batch.length === 0) break
 
       for (const m of batch) {
+        if (m.message && !m.file) {
+          textMsgs.push(m)
+        }
+      }
+
+      for (let i = 0; i < textMsgs.length; i++) {
+        const m = textMsgs[i]
         if (m.message && (m.message.startsWith('rf') || m.message.startsWith('RFSYNC:'))) {
-          foundSyncMsg = m
-          break
+          let concatenated = m.message
+          let parsed = this.parseSyncMessage(concatenated)
+
+          if (!parsed) {
+            for (let j = i - 1; j >= 0; j--) {
+              concatenated += textMsgs[j].message
+              parsed = this.parseSyncMessage(concatenated)
+              if (parsed) break
+            }
+          }
+
+          if (parsed) {
+            foundSyncMsg = { message: concatenated, id: m.id }
+            break
+          }
         }
       }
       if (foundSyncMsg) break
