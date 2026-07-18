@@ -25,6 +25,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Python 3.11 for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Cache node_modules
         uses: actions/cache@v4
         with:
@@ -45,16 +50,7 @@ jobs:
 
       - name: Build and Publish (Mac arm64)
         if: matrix.os == 'macos-latest'
-        run: |
-          npm run build:mac -- --arm64 -p always > build_log.txt 2>&1 || (
-            git config --global user.name "github-actions"
-            git config --global user.email "github-actions@github.com"
-            git switch -C debug-log
-            git add build_log.txt
-            git commit -m "Add build log"
-            git push -f origin debug-log
-            exit 1
-          )
+        run: npm run build:mac -- --arm64 -p always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
