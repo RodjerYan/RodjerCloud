@@ -743,8 +743,8 @@ function platformAssetPattern(): (name: string) => boolean {
   const plat = process.platform
   const arch = process.arch
   if (plat === 'darwin') {
-    if (arch === 'arm64') return (n: string) => n.endsWith('-arm64.dmg') || n.endsWith('-arm64-mac.zip')
-    return (n: string) => n.endsWith('.dmg') && !n.includes('-arm64') || n.endsWith('-mac.zip') && !n.includes('-arm64')
+    if (arch === 'arm64') return (n: string) => n.endsWith('-arm64.dmg')
+    return (n: string) => n.endsWith('.dmg') && !n.includes('-arm64')
   }
   if (plat === 'win32') return (n: string) => n.endsWith('.exe') || n.endsWith('-win.zip')
   return () => false
