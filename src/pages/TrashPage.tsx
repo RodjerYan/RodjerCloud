@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom'
 import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2, Trash2 as DeleteIcon, Circle } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
+import { toast } from '../lib/toast'
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -22,7 +23,6 @@ export default function TrashPage() {
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [toast, setToast] = useState('')
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
@@ -33,7 +33,6 @@ export default function TrashPage() {
     })
   }, [])
 
-  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -126,9 +125,9 @@ export default function TrashPage() {
 
     const r = await window.electronAPI.telegram.restoreFile(id)
     if (r.success) {
-      showToast('Файл восстановлен')
+      toast.success('Файл восстановлен')
     } else {
-      showToast('Ошибка восстановления')
+      toast.error('Ошибка восстановления')
       const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
       if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
@@ -163,9 +162,9 @@ export default function TrashPage() {
 
     const r = await window.electronAPI.telegram.permDeleteFile(id)
     if (r.success) {
-      showToast('Файл удалён навсегда')
+      toast.success('Файл удалён навсегда')
     } else {
-      showToast('Ошибка удаления')
+      toast.error('Ошибка удаления')
       const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
       if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
@@ -193,9 +192,9 @@ export default function TrashPage() {
       if (!r.success) allSuccess = false
     }
     if (allSuccess) {
-      showToast(`Восстановлено ${ids.length} файлов`)
+      toast.success(`Восстановлено ${ids.length} файлов`)
     } else {
-      showToast('Ошибка восстановления некоторых файлов')
+      toast.error('Ошибка восстановления некоторых файлов')
       const revert = () => {
         flushSync(() => {
           setFiles(prev => {
@@ -232,9 +231,9 @@ export default function TrashPage() {
       if (!r.success) allSuccess = false
     }
     if (allSuccess) {
-      showToast(`Удалено навсегда ${ids.length} файлов`)
+      toast.success(`Удалено навсегда ${ids.length} файлов`)
     } else {
-      showToast('Ошибка удаления некоторых файлов')
+      toast.error('Ошибка удаления некоторых файлов')
       const revert = () => {
         flushSync(() => {
           setFiles(prev => {
@@ -251,9 +250,9 @@ export default function TrashPage() {
   const handleBulkDownload = async () => {
     if (selected.size === 0) return
     const items = files.filter(f => selected.has(f.messageId)).map(f => ({ messageId: f.messageId, fileName: f.fileName }))
-    showToast('Скачивание ' + items.length + ' файлов…')
+    toast.loading('Скачивание ' + items.length + ' файлов…')
     await window.electronAPI.telegram.bulkDownload(items)
-    showToast('Скачивание завершено')
+    toast.success('Скачивание завершено')
   }
 
   const filtered = files.filter(f => {
@@ -342,8 +341,6 @@ export default function TrashPage() {
           </tbody>
         </table>
       )}
-
-      {toast && <div className="mf-toast">{toast}</div>}
 
       {ctxMenu && createPortal(
         <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>

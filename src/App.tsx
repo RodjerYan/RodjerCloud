@@ -40,6 +40,7 @@ import "./styles/modal.css"
 import ErrorBoundary from "./components/ErrorBoundary"
 
 import GlobalDialogs from "./components/GlobalDialogs"
+import GlobalToasts from "./components/GlobalToasts"
 import Titlebar from "./components/Titlebar"
 
 declare global { interface Window { electronAPI: any } }

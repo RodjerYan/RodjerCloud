@@ -4,11 +4,12 @@ import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal, flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle } from 'lucide-react'
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle, Check, UploadCloud } from 'lucide-react'
 import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
-import { appConfirm } from '../lib/dialogs'
+import { appConfirm, appAlert } from '../lib/dialogs'
+import { toast } from '../lib/toast'
 import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
 import { FileThumb } from '../components/FileThumb'
 import '../styles/duplicate-modal.css'
@@ -97,7 +98,7 @@ export default function MyFilesPage() {
 
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
   const isSelecting = useRef(false)
-  const selectionStart = useRef<{ x: number, y: number } | null>(null)
+  const selectionStart = useRef<{ x: number, y: number, scrollY: number } | null>(null)
   const selectedRef = useRef(selected)
   const initialSelectedOnDrag = useRef<Set<number>>(new Set())
 
@@ -107,9 +108,14 @@ export default function MyFilesPage() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isSelecting.current || !selectionStart.current) return
       
+      const container = document.querySelector('.v2-main')
+      const currentScroll = container ? container.scrollTop : 0
+      const scrollDiff = currentScroll - selectionStart.current.scrollY
+      const adjustedStartY = selectionStart.current.y - scrollDiff
+      
       const newBox = {
         startX: selectionStart.current.x,
-        startY: selectionStart.current.y,
+        startY: adjustedStartY,
         endX: e.clientX,
         endY: e.clientY
       }
@@ -124,6 +130,9 @@ export default function MyFilesPage() {
       const nextSelected = new Set(initialSelectedOnDrag.current)
       
       elements.forEach(el => {
+        const section = el.closest('.mf-section-body')
+        if (section && !section.classList.contains('open')) return
+        
         const rect = el.getBoundingClientRect()
         if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
           const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
@@ -149,14 +158,21 @@ export default function MyFilesPage() {
     }
   }, [])
 
-  const handleContainerMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('.mf-card, .mf-folder-card, .mf-table, .v3-btn, button, input, .mf-gm-card')) return
-    if (e.button !== 0) return 
-    selectionStart.current = { x: e.clientX, y: e.clientY }
-    isSelecting.current = true
-    initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
-    setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
-  }
+  useEffect(() => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('.mf-card, .mf-folder-card, .mf-table, .v3-btn, button, input, .mf-gm-card')) return
+      if (e.button !== 0) return 
+      const currentScroll = container.scrollTop
+      selectionStart.current = { x: e.clientX, y: e.clientY, scrollY: currentScroll }
+      isSelecting.current = true
+      initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
+      setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
+    }
+    container.addEventListener('mousedown', handleGlobalMouseDown)
+    return () => container.removeEventListener('mousedown', handleGlobalMouseDown)
+  }, [])
 
   useEffect(() => {
     window.electronAPI.share.getBotToken().then((r: any) => {
@@ -196,6 +212,11 @@ export default function MyFilesPage() {
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
   const loadFolders = async () => {
+    const r = await window.electronAPI.folders.list()
+    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
+  }
+
+  const loadFoldersFromCloud = async () => {
     const r = await window.electronAPI.folders.loadFromTelegram()
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
   }
@@ -205,7 +226,7 @@ export default function MyFilesPage() {
     if (!newFolderName.trim()) return
     const r = await window.electronAPI.folders.create(newFolderName.trim(), folderDrill)
     setShowCreateFolder(false)
-    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}); showToast('Папка создана') }
+    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}); toast.success('Папка создана') }
   }
 
   const deleteFolder = async (id: string, e?: React.MouseEvent) => {
@@ -253,7 +274,7 @@ export default function MyFilesPage() {
       setFileFolders(r.data.fileFolders || {})
       if (folderDrill === id) setFolderDrill(null)
     } else {
-      showToast('Ошибка удаления папки')
+      toast.error('Ошибка удаления папки')
       const revert = () => {
         flushSync(() => {
           if (folderToRestore) setFolders(prev => [...prev, folderToRestore])
@@ -305,7 +326,7 @@ export default function MyFilesPage() {
     setFileFolders(updated)
     setMoveTarget(null)
     clearSelection()
-    showToast('Перемещено')
+    toast.success('Перемещено')
   }
 
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -377,13 +398,20 @@ export default function MyFilesPage() {
       }
 
       window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
-        if (res.success && res.data?.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
-        if (res.success && res.data?.messageId && targetFolderId) {
-          await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
-        }
-        
         setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: 100 } : p))
         await new Promise(r => setTimeout(r, 500))
+
+        if (res.success && res.data) {
+          if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
+          if (targetFolderId && res.data.messageId) {
+            setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
+            window.electronAPI.folders.addFile(targetFolderId, res.data.messageId).catch(console.error)
+          }
+          setFiles(prev => {
+            if (prev.find(x => x.messageId === res.data.messageId)) return prev
+            return [res.data, ...prev].sort((a, b) => b.messageId - a.messageId)
+          })
+        }
 
         setPendingUploads(prev => {
           const next = prev.filter(p => p.id !== pendingId)
@@ -400,7 +428,7 @@ export default function MyFilesPage() {
               setDropProgress(null)
               loadFolders()
               load(true)
-            }, 2000)
+            }, 6000)
           }
           return { ...dp, completed, pct }
         })
@@ -418,14 +446,14 @@ export default function MyFilesPage() {
     await uploadDroppedFiles(pick.data.map((f: any) => ({ filePath: f.filePath, fileName: f.fileName })), folderId)
   }
 
-  useEffect(() => { load(); loadFolders() }, [])
+  useEffect(() => { load(); loadFoldersFromCloud() }, [])
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>
-    const start = () => { interval = setInterval(() => loadFolders(), 30000) }
+    const start = () => { interval = setInterval(() => loadFoldersFromCloud(), 30000) }
     const onVisibility = () => {
       if (document.hidden) clearInterval(interval)
-      else { loadFolders(); start() }
+      else { loadFoldersFromCloud(); start() }
     }
     start()
     document.addEventListener('visibilitychange', onVisibility)
@@ -490,13 +518,6 @@ export default function MyFilesPage() {
     return flat;
   }, [galleryFiles]);
 
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const showToast = (s: string) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast(s)
-    toastTimerRef.current = setTimeout(() => setToast(''), 3000)
-  }
-
   const toggleSelect = (id: number) => {
     setSelected(prev => {
       const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s
@@ -505,9 +526,9 @@ export default function MyFilesPage() {
   const clearSelection = () => setSelected(new Set())
 
   const handleDownload = async (f: any) => {
-    showToast('Скачивание ' + f.fileName)
+    toast.info('Скачивание ' + f.fileName)
     const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    showToast(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
+    toast.success(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
   }
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
     let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
@@ -536,7 +557,7 @@ export default function MyFilesPage() {
     })
 
     setDeletingIds(prev => new Set(prev).add(f.messageId))
-    showToast('Перемещение в корзину…')
+    toast.info('Перемещение в корзину…')
     
     const applyRemove = () => {
       flushSync(() => {
@@ -553,9 +574,9 @@ export default function MyFilesPage() {
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
-      showToast('Перемещено в корзину')
+      toast.success('Перемещено в корзину')
     } else {
-      showToast('Ошибка удаления, отмена операции')
+      toast.error('Ошибка удаления, отмена операции')
       const revert = () => {
         flushSync(() => {
           setFiles(prev => {
@@ -584,16 +605,16 @@ export default function MyFilesPage() {
           setTimeout(() => setShareProgress(null), 2500)
         } else {
           setShareProgress(null)
-          showToast('Ошибка: ' + (r.error || ''))
+          toast.error('Ошибка: ' + (r.error || ''))
         }
       } catch (e: any) {
         setShareProgress(null)
-        showToast('Ошибка: ' + (e.message || ''))
+        toast.error('Ошибка: ' + (e.message || ''))
       }
     } else {
       const link = `https://t.me/c/${f.chatId || ''}/${f.messageId}`
       await window.electronAPI.app.copyToClipboard(link)
-      showToast('Ссылка скопирована (требуется подписка на канал)')
+      toast.info('Ссылка скопирована (требуется подписка на канал)')
     }
   }
   const handlePreview = async (f: any, idx: number, list?: any[]) => {
@@ -695,7 +716,7 @@ export default function MyFilesPage() {
     })
 
     setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
-    showToast('Перемещение в корзину…')
+    toast.info('Перемещение в корзину…')
     
     const filesToRestore = files.filter(f => ids.includes(f.messageId))
     
@@ -715,9 +736,9 @@ export default function MyFilesPage() {
 
     const r = await window.electronAPI.telegram.bulkDelete(ids)
     if (r.success) {
-      showToast('Успешно удалено')
+      toast.success('Успешно удалено')
     } else {
-      showToast('Ошибка массового удаления, отмена')
+      toast.error('Ошибка массового удаления, отмена')
       const revert = () => {
         flushSync(() => {
           setFiles(prev => {
@@ -737,9 +758,9 @@ export default function MyFilesPage() {
   const bulkDownload = async () => {
     if (selected.size === 0) return
     const items = files.filter(f => selected.has(f.messageId)).map(f => ({ messageId: f.messageId, fileName: f.fileName }))
-    showToast('Скачивание ' + items.length + ' файлов…')
+    toast.info('Скачивание ' + items.length + ' файлов…')
     await window.electronAPI.telegram.bulkDownload(items)
-    showToast('Скачивание завершено')
+    toast.success('Скачивание завершено')
   }
 
   const [archiveProgress, setArchiveProgress] = useState<{ percent: number; phase: string } | null>(null)
@@ -759,7 +780,7 @@ export default function MyFilesPage() {
     })
     off()
     setArchiveProgress(null)
-    showToast(res.success ? `Архив ${catOrFolder}.zip загружен` : 'Ошибка архивации: ' + (res.error || ''))
+    toast.success(res.success ? `Архив ${catOrFolder}.zip загружен` : 'Ошибка архивации: ' + (res.error || ''))
   }
 
   const toggleCategory = (cat: string) => {
@@ -830,7 +851,6 @@ export default function MyFilesPage() {
 
   return (
     <div className={"mf-root mf-hide-checks" + (isDragOver ? " drag-over" : "")}
-         onMouseDown={handleContainerMouseDown}
          onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsDragOver(true) }}
          onDragOver={(e) => { e.preventDefault() }}
          onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsDragOver(false) } }}
@@ -880,50 +900,74 @@ export default function MyFilesPage() {
         </div>
       </div>
 
+      {/* Premium Floating Upload Center */}
       <div style={{
-        maxHeight: dropProgress ? 48 : 0,
+        position: 'fixed', bottom: 30, right: 30, zIndex: 9999,
+        background: 'rgba(22, 24, 42, 0.85)',
+        backdropFilter: 'blur(24px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 20,
+        padding: 20, width: 340,
+        boxShadow: '0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
+        transform: dropProgress ? 'translateY(0) scale(1)' : 'translateY(120%) scale(0.9)',
         opacity: dropProgress ? 1 : 0,
-        overflow: 'hidden',
-        transition: 'max-height 0.35s ease, opacity 0.3s ease',
-        width: '100%',
+        pointerEvents: dropProgress ? 'auto' : 'none',
+        transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
       }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {dropProgress && dropProgress.pct >= 100 ? (
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6ee7b7' }}>
+                <Check size={18} />
+              </div>
+            ) : (
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(124,131,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bcc0ff' }}>
+                <UploadCloud size={18} />
+              </div>
+            )}
+            <div>
+              <div style={{ fontWeight: 600, color: '#fff', fontSize: 14 }}>
+                {dropProgress && dropProgress.pct >= 100 ? 'Загрузка завершена' : 'Загрузка файлов...'}
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
+                {dropProgress ? `${dropProgress.completed} из ${dropProgress.total} файлов` : ''}
+              </div>
+            </div>
+          </div>
+          <button onClick={() => setDropProgress(null)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Progress Bar Track */}
         <div style={{
-          width: '100%',
-          background: dropProgress && dropProgress.pct >= 100
-            ? 'rgba(52,211,153,0.08)'
-            : 'rgba(124,131,255,0.08)',
-          borderBottom: '1px solid ' + (dropProgress && dropProgress.pct >= 100
-            ? 'rgba(52,211,153,0.2)'
-            : 'rgba(124,131,255,0.15)'),
+          width: '100%', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden', marginBottom: 12
         }}>
           <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-            padding: '8px 16px',
-            fontSize: 13, color: dropProgress && dropProgress.pct >= 100 ? '#6ee7b7' : '#bcc0ff',
-            fontWeight: 500,
-          }}>
-            <div style={{
-              width: 80, height: 4,
-              background: 'rgba(255,255,255,0.08)',
-              borderRadius: 2, overflow: 'hidden', flexShrink: 0,
-            }}>
-              <div style={{
-                height: '100%', width: (dropProgress?.pct ?? 0) + '%',
-                background: dropProgress && dropProgress.pct >= 100
-                  ? 'linear-gradient(90deg, #34d399, #6ee7b7)'
-                  : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
-                borderRadius: 2,
-                transition: 'width 0.25s ease',
-                boxShadow: dropProgress && dropProgress.pct >= 100
-                  ? '0 0 6px rgba(52,211,153,0.4)'
-                  : '0 0 6px rgba(124,131,255,0.4)',
-              }} />
-            </div>
-            {dropProgress && dropProgress.completed >= dropProgress.total && dropProgress.total > 0
-              ? 'Загрузка завершена'
-              : `Загружено: ${dropProgress?.completed ?? 0} из ${dropProgress?.total ?? 0} • Осталось: ${(dropProgress?.total ?? 0) - (dropProgress?.completed ?? 0)} • ${dropProgress?.pct ?? 0}%`}
-          </div>
+            height: '100%', width: (dropProgress?.pct ?? 0) + '%',
+            background: dropProgress && dropProgress.pct >= 100 ? 'linear-gradient(90deg, #34d399, #6ee7b7)' : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
+            borderRadius: 3, transition: 'width 0.3s ease',
+            boxShadow: dropProgress && dropProgress.pct >= 100 ? '0 0 10px rgba(52,211,153,0.5)' : '0 0 10px rgba(124,131,255,0.5)'
+          }} />
         </div>
+
+        {/* Active Uploads List */}
+        {pendingUploads.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 90, overflowY: 'auto' }}>
+            {pendingUploads.slice(0, 3).map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{p.fileName || 'Файл'}</span>
+                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff' }}>{p.progress === 100 ? '100%' : '...'}</span>
+              </div>
+            ))}
+            {pendingUploads.length > 3 && (
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 4 }}>
+                и еще {pendingUploads.length - 3}...
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mf-toolbar">
@@ -996,7 +1040,13 @@ export default function MyFilesPage() {
         <button onClick={clearSelection}>Снять</button>
       </div>
 
-      {loading ? <div className="mf-empty">Загрузка…</div> : drillDown ? (
+      {loading ? (
+        <div className="mf-skeleton-grid" style={{ marginTop: '20px' }}>
+          {[...Array(12)].map((_, i) => (
+            <div key={i} className="mf-skeleton-card" />
+          ))}
+        </div>
+      ) : drillDown ? (
         <div className="mf-gallery">
           <div className="mf-gallery-head" onClick={() => setDrillDown(null)} style={{ '--cat-color': CAT_COLOR[drillDown] } as React.CSSProperties}>
             <ArrowLeft size={18} />
@@ -1023,7 +1073,7 @@ export default function MyFilesPage() {
                       <td>
                         <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                         <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                        <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                        <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
                         <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                       </td>
                     </tr>
@@ -1058,7 +1108,7 @@ export default function MyFilesPage() {
                                       <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
                                       {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
                                       <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
-                                      <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={13} /></button>
+                                      <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={13} /></button>
                                       <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button>
                                     </div>
                                   </div>
@@ -1115,7 +1165,7 @@ export default function MyFilesPage() {
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                               {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                              <button title="Переместить в папку" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                              <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
                           </div>
@@ -1142,7 +1192,7 @@ export default function MyFilesPage() {
                                 <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
                                 {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                                 <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                                <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                                <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
                                 <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                               </td>
                             </tr>
@@ -1251,60 +1301,57 @@ export default function MyFilesPage() {
                         </div>
                       ))}
                       </div>}
-                      <VirtuosoGrid
-                  customScrollParent={document.querySelector('.v2-main') as HTMLElement}
-                  data={[...currentFiles, ...pendingUploads.filter(p => {
-      if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
-      return p.folderId === folderDrill
-    })]}
-                  listClassName="mf-grid"
-                  itemClassName=""
-                  itemContent={(index, f: any) => {
-                    if (f.id && !f.messageId) {
-                      return (
-                        <div key={f.id} className="mf-card magnetic pending-upload" style={{ cursor: 'wait' }}>
-                          <div className="mf-card-icon" data-type={typeOf(f.fileName)} style={{ position: 'relative', overflow: 'hidden' }}>
-                            {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                      <div className="mf-grid">
+                        {[...currentFiles, ...pendingUploads.filter(p => {
+                          if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
+                          return p.folderId === folderDrill
+                        })].map((f: any, index) => {
+                          if (f.id && !f.messageId) {
+                            return (
+                              <div key={f.id} className="mf-card magnetic pending-upload" style={{ cursor: 'wait' }}>
+                                <div className="mf-card-icon" data-type={typeOf(f.fileName)} style={{ position: 'relative', overflow: 'hidden' }}>
+                                  {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                                  
+                                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                                    <svg width="40" height="40" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+                                      <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
+                                      <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (f.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
+                                    </svg>
+                                  </div>
+                                </div>
+                                <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                                <div className="mf-card-meta">{f.progress < 100 ? `Загрузка ${f.progress}%` : 'Обработка...'}</div>
+                              </div>
+                            )
+                          }
+                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
+                          return (
+                          <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                               style={{ viewTransitionName: `card_${f.messageId}` }}
+                            onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                            onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
+                            draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             
-                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
-                              <svg width="40" height="40" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
-                                <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
-                                <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (f.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
-                              </svg>
+                            <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                            </div>
+                            
+                            <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                            <div className="mf-card-actions">
+                              <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
+                              <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
                           </div>
-                          <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                          <div className="mf-card-meta">{f.progress < 100 ? `Загрузка ${f.progress}%` : 'Обработка...'}</div>
-                        </div>
-                      )
-                    }
-                    const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                    const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
-                    return (
-                    <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                         style={{ viewTransitionName: `card_${f.messageId}` }}
-                      onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                      onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
-                      draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
-                      <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                      
-                      <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
-                        {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                          )
+                        })}
                       </div>
-                      
-                      <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                      <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                      <div className="mf-card-actions">
-                        <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                        <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                        {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
-                        <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                        <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
-                      </div>
-                    </div>
-                  )}}
-                />
                     </>
                   ) : (
                     <table className="mf-table">
@@ -1459,18 +1506,18 @@ export default function MyFilesPage() {
         </div>
       )}
 
-      {moveTarget !== null && (
+      {moveTarget !== null && createPortal(
         <div className="mf-modal" onClick={() => setMoveTarget(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 320, maxHeight: '80vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{moveTarget.length > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{(moveTarget?.length || 0) > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}</div>
             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', margin: '4px 0', padding: '0 4px' }}>Действия</div>
             <button className="v3-btn" onClick={() => confirmMoveFile('cat:root')}
               style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
               <ArrowLeft size={16} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
               Вынести из папки
             </button>
-            {folders.length > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
-            {folders.map(f => (
+            {(folders?.length || 0) > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
+            {(folders || []).map(f => (
               <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
                 style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Folder size={16} style={{ flexShrink: 0, color: '#7c83ff' }} />
@@ -1478,10 +1525,10 @@ export default function MyFilesPage() {
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {toast && <div className="mf-toast">{toast}</div>}
       {archiveProgress && (
         <div className="mf-toast" style={{ bottom: 60, display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 16px', minWidth: 260 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>

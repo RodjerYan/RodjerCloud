@@ -145,21 +145,21 @@ export const v3store = {
   removeFromAlbum: (id: string, messageId: number) => { const arr = [...v3store.getAlbums()]; const a = arr.find(x => x.id === id); if (a) { a.messageIds = a.messageIds.filter(m => m !== messageId); set(K.albums, arr); scheduleSync() } },
   // file meta (pin, color, folder)
   getMeta: (): FileMeta[] => get(K.meta, []),
-  setMeta: (m: FileMeta) => { const a = v3store.getMeta(); const i = a.findIndex(x => x.messageId === m.messageId); if (i >= 0) a[i] = { ...a[i], ...m }; else a.push(m); set(K.meta, a); scheduleSync() },
+  setMeta: (m: FileMeta) => { const a = [...v3store.getMeta()]; const i = a.findIndex(x => x.messageId === m.messageId); if (i >= 0) a[i] = { ...a[i], ...m }; else a.push(m); set(K.meta, a); scheduleSync() },
   metaFor: (id: number): FileMeta | undefined => v3store.getMeta().find(m => m.messageId === id),
   // preferences (theme, accent, density, animations, font)
   getPrefs: () => get(K.prefs, { theme: "dark", accent: "cyan-purple", density: "comfortable", animations: "full", font: "inter", sidebarCollapsed: false }),
   setPrefs: (p: any) => { set(K.prefs, { ...v3store.getPrefs(), ...p }); scheduleSync() },
   // smart filters
   getSmart: () => get(K.smart, [] as Array<{ name: string; query: string; type?: string; minSize?: number; maxSize?: number; days?: number }>),
-  addSmart: (f: any) => { const a = v3store.getSmart(); a.push(f); set(K.smart, a); scheduleSync() },
+  addSmart: (f: any) => { const a = [...v3store.getSmart()]; a.push(f); set(K.smart, a); scheduleSync() },
   removeSmart: (name: string) => { set(K.smart, v3store.getSmart().filter(f => f.name !== name)); scheduleSync() },
   // recent
   getRecent: (): number[] => get(K.recent, []),
   pushRecent: (id: number) => { let a = v3store.getRecent().filter(x => x !== id); a.unshift(id); if (a.length > 20) a = a.slice(0, 20); set(K.recent, a); scheduleSync() },
   // audit log
   getAudit: () => get(K.audit, [] as Array<{ event: string; ts: number }>),
-  logAudit: (event: string) => { const a = v3store.getAudit(); a.unshift({ event, ts: Date.now() }); if (a.length > 1000) a.length = 1000; set(K.audit, a); scheduleSync() },
+  logAudit: (event: string) => { const a = [...v3store.getAudit()]; a.unshift({ event, ts: Date.now() }); if (a.length > 1000) a.length = 1000; set(K.audit, a); scheduleSync() },
 }
 
 export { fmtSize as fmtBytes } from './utils'

@@ -1,5 +1,5 @@
 .mf-cat-anim { animation: pulse 2.5s ease-in-out infinite; filter: drop-shadow(0 0 4px currentColor); }
-.mf-root { animation: fadeInUp 0.3s ease both; }
+.mf-root { animation: fadeInUp 0.3s ease both; flex: 1; }
 .mf-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: var(--space-md); flex-wrap: wrap; }
 .mf-search { display: flex; align-items: center; gap: var(--space-sm); background: var(--panel);
   border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm) 12px; flex: 1; min-width: 240px; color: var(--text-dim); }
@@ -9,15 +9,20 @@
 .mf-view-toggle { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; -webkit-app-region: no-drag; }
 .mf-view-toggle button { background: transparent; border: none; color: var(--text-dim); padding: 7px 10px; cursor: pointer; border-radius: var(--radius-sm); }
 .mf-view-toggle button.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
-.mf-bulkbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius-md);
-  backdrop-filter: blur(16px); }
-.mf-bulkbar button { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text);
-  padding: 6px 10px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: var(--text-xs); }
-.mf-bulkbar button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.mf-bulkbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 12px 20px;
+  background: rgba(22, 24, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px;
+  backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06); }
+.mf-bulkbar > span { font-weight: 600; font-size: var(--text-base); color: var(--text); margin-right: 8px; letter-spacing: 0.3px; }
+.mf-bulkbar button { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); color: var(--text);
+  padding: 8px 14px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all 0.2s; }
+.mf-bulkbar button:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.25); transform: translateY(-1px); }
+.mf-bulkbar button.danger { color: #ff8787; background: rgba(255, 107, 107, 0.12); border-color: rgba(255, 107, 107, 0.2); }
+.mf-bulkbar button.danger:hover { background: rgba(255, 107, 107, 0.25); border-color: rgba(255, 107, 107, 0.35); }
 .mf-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .mf-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px;
-padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
+padding: 14px; transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+animation: dropIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
 .mf-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translate3d(0, -4px, 0); }
 
 
@@ -87,15 +92,18 @@ body.compact .mf-card-icon { height: 60px; }
   background: rgba(255,255,255,0.05); padding: 1px var(--space-sm); border-radius: var(--radius-md); flex-shrink: 0;
 }
 .mf-section-body {
-  max-height: 0; overflow: hidden; transition: max-height 0.3s;
+  max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;
   position: relative;
+  padding-left: 22px;
 }
-.mf-section-body.open { max-height: 20000px; padding-left: 22px; }
-.mf-section-body.open::before {
+.mf-section-body.open { max-height: 20000px; transition: max-height 0.5s ease-in; }
+.mf-section-body::before {
   content: ''; position: absolute; left: 8px; top: 0; bottom: 0;
   width: 1.5px; border-radius: 2px;
   background: color-mix(in srgb, var(--cat-color) 30%, transparent);
+  opacity: 0; transition: opacity 0.3s;
 }
+.mf-section-body.open::before { opacity: 1; }
 .mf-section .mf-grid { padding: 6px 0 var(--space-sm) 0; margin: 0; }
 .mf-section .mf-table { border-radius: 0; border: none; margin: var(--space-xs) 0 var(--space-sm) 0; }
 .mf-section-drill { font-size: var(--text-xs); color: var(--cat-color); opacity: 0.6; }
@@ -137,6 +145,7 @@ body.compact .mf-card-icon { height: 60px; }
 .mf-gm-card { position: relative; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05);
 border-radius: 20px; padding: 12px;
 transform: translateZ(0); transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+animation: dropIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
 }
 .mf-gm-card:hover { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 15%, rgba(0,0,0,0.5)); transform: translate3d(0, -4px, 0); }
 
@@ -189,3 +198,36 @@ background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent);
   background: rgba(0,0,0,0.3); color: #fff; border-radius: var(--radius-sm);
 }
 
+/* Shimmer Skeletons */
+.mf-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+.mf-skeleton-card {
+  height: 180px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+}
+.mf-skeleton-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.5s infinite ease-in-out;
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

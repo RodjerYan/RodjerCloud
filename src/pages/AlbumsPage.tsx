@@ -195,18 +195,20 @@ export default function AlbumsPage() {
   }
 
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-gm-card') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+    
     if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
 
     let x = 0.5, y = 0.5
-    if (e) {
-      let rect = (e.currentTarget as HTMLElement).closest('.mf-gm-card')?.getBoundingClientRect()
-      if (rect) {
-        x = (rect.left + rect.width / 2) / window.innerWidth
-        y = (rect.top + rect.height / 2) / window.innerHeight
-      } else {
-        x = e.clientX / window.innerWidth
-        y = e.clientY / window.innerHeight
-      }
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
     }
     confetti({
       particleCount: 50,
