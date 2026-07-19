@@ -19,6 +19,7 @@ const DAY_MS = 86400000
 export default function TrashPage() {
   const [fairAnim, setFairAnim] = useState<any>(null)
   const [files, setFiles] = useState<any[]>([])
+  const [trashedFolders, setTrashedFolders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -111,8 +112,12 @@ export default function TrashPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const r = await window.electronAPI.telegram.listTrash()
+    const [r, rf] = await Promise.all([
+      window.electronAPI.telegram.listTrash(),
+      window.electronAPI.folders.listTrash()
+    ])
     if (r.success) setFiles(r.data || [])
+    if (rf.success) setTrashedFolders(rf.data || [])
     setLoading(false)
   }, [])
 
@@ -330,6 +335,50 @@ export default function TrashPage() {
     toast.success('Скачивание завершено')
   }
 
+  const handleRestoreFolder = async (id: string, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+    if (!(await appConfirm('Восстановить папку?'))) return
+    let x = 0.5, y = 0.5
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
+    }
+    confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+    const f = trashedFolders.find(x => x.id === id)
+    const applyRemove = () => { flushSync(() => { setTrashedFolders(prev => prev.filter(x => x.id !== id)) }) }
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    const r = await window.electronAPI.folders.restore(id)
+    if (r.success) { toast.success('Папка восстановлена') } else { toast.error('Ошибка восстановления'); load() }
+  }
+
+  const handlePermDeleteFolder = async (id: string, e?: React.MouseEvent) => {
+    let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
+    let clientX = e ? e.clientX : undefined;
+    let clientY = e ? e.clientY : undefined;
+    if (!(await appConfirm('Удалить папку навсегда? Все файлы внутри будут удалены.'))) return
+    let x = 0.5, y = 0.5
+    if (targetElement) {
+      let rect = targetElement.getBoundingClientRect()
+      x = (rect.left + rect.width / 2) / window.innerWidth
+      y = (rect.top + rect.height / 2) / window.innerHeight
+    } else if (clientX !== undefined && clientY !== undefined) {
+      x = clientX / window.innerWidth
+      y = clientY / window.innerHeight
+    }
+    confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#f87171', '#ef4444', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+    const f = trashedFolders.find(x => x.id === id)
+    const applyRemove = () => { flushSync(() => { setTrashedFolders(prev => prev.filter(x => x.id !== id)) }) }
+    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    const r = await window.electronAPI.folders.permDelete(id)
+    if (r.success) { toast.success('Папка удалена навсегда') } else { toast.error('Ошибка удаления'); load() }
+  }
+
   const filtered = files.filter(f => {
     if (search) return (f.fileName || '').toLowerCase().includes(search.toLowerCase())
     return true
@@ -350,7 +399,7 @@ export default function TrashPage() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 0 8px', color: 'var(--text-dim)', fontSize: 13 }}>
         <Trash2 size={16} style={{ color: '#f87171' }} />
-        <span>Корзина · {files.length} файлов</span>
+        <span>Корзина · {files.length} файлов · {trashedFolders.length} папок</span>
         <span style={{ fontSize: 11, opacity: 0.7 }}>— удаляются через 3 дня автоматически</span>
         <div style={{ flex: 1 }} />
         <button className="v3-btn ghost" style={{ fontSize: 12, padding: '4px 8px', color: '#f87171' }} onClick={async () => {
@@ -374,7 +423,7 @@ export default function TrashPage() {
         <button onClick={clearSelection}>Снять</button>
       </div>
 
-      {loading ? <div className="mf-empty">Загрузка…</div> : filtered.length === 0 ? (
+      {loading ? <div className="mf-empty">Загрузка…</div> : (filtered.length === 0 && trashedFolders.length === 0) ? (
         <div className="mf-empty" style={{ paddingTop: 60 }}>
           {fairAnim ? (
             <Player autoplay loop src={fairAnim} style={{ width: 140, height: 140, marginBottom: 12 }} />
@@ -384,7 +433,29 @@ export default function TrashPage() {
           <div>Корзина пуста</div>
         </div>
       ) : view === 'grid' ? (
-        <div className="mf-grid" style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12 }}>
+          {trashedFolders.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 1, marginBottom: 8 }}>Папки</div>
+              <div className="mf-grid">
+                {trashedFolders.map(f => {
+                  const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+                  return (
+                    <div key={f.id} className="mf-card" style={{ viewTransitionName: `folder_${f.id}` }}>
+                      <div className="mf-card-icon" data-type="trash" style={{ color: '#fbbf24' }}>DIR</div>
+                      <div className="mf-card-name" title={f.name}>{f.name}</div>
+                      <div className="mf-card-meta">{daysLeft > 0 ? `удал. через ${daysLeft} дн.` : 'сегодня'}</div>
+                      <div className="mf-card-actions">
+                        <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
+                        <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          <div className="mf-grid">
           {filtered.map(f => {
             const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
             return (
@@ -401,8 +472,30 @@ export default function TrashPage() {
               </div>
             )
           })}
+          </div>
         </div>
       ) : (
+        <div>
+          {trashedFolders.length > 0 && (
+            <table className="mf-table" style={{ marginTop: 12 }}>
+              <thead><tr><th>Имя</th><th>Удалена</th><th>Действия</th></tr></thead>
+              <tbody>
+                {trashedFolders.map(f => {
+                  const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+                  return (
+                    <tr key={f.id} style={{ viewTransitionName: `folder_${f.id}` }}>
+                      <td className="ellip" title={f.name}>📁 {f.name}</td>
+                      <td>{daysLeft > 0 ? `через ${daysLeft} дн.` : 'сегодня'}</td>
+                      <td>
+                        <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
+                        <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         <table className="mf-table" style={{ marginTop: 12 }}>
           <thead><tr>
             <th><input type="checkbox" onChange={() => filtered.forEach(f => toggleSelect(f.messageId))} /></th>
@@ -427,6 +520,7 @@ export default function TrashPage() {
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       {ctxMenu && createPortal(

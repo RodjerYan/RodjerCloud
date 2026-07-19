@@ -933,10 +933,12 @@ function foldersPath(): string {
 }
 async function readFolders(): Promise<any> {
   try {
-    if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {} }
+    if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {}, trashedFolders: [] }
     const data = await fs.promises.readFile(foldersPath(), 'utf8')
-    return JSON.parse(data)
-  } catch { return { folders: [], fileFolders: {} } }
+    const parsed = JSON.parse(data)
+    if (!parsed.trashedFolders) parsed.trashedFolders = []
+    return parsed
+  } catch { return { folders: [], fileFolders: {}, trashedFolders: [] } }
 }
 async function writeFolders(d: any) {
   await fs.promises.writeFile(foldersPath(), JSON.stringify(d, null, 2))
@@ -1042,14 +1044,84 @@ ipcMain.handle('folders:delete', async (_, id: string) => {
       }
       collect(id)
 
+      const trashedFolders = d.trashedFolders || []
+      d.folders.filter((x: any) => idsToDelete.has(x.id)).forEach((f: any) => {
+        trashedFolders.push({ ...f, trashedAt: Date.now() })
+      })
+
+      d.folders = d.folders.filter((x: any) => !idsToDelete.has(x.id))
+      d.trashedFolders = trashedFolders
+      await writeFolders(d)
+      await syncFoldersToTelegram()
+      return { success: true, data: d }
+    })
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:list-trash', async () => {
+  try {
+    const d = await readFolders()
+    const trashedFolders = d.trashedFolders || []
+    const now = Date.now()
+    const THREE_DAYS = 3 * 24 * 60 * 60 * 1000
+    const expired = trashedFolders.filter((f: any) => now - f.trashedAt > THREE_DAYS)
+    const active = trashedFolders.filter((f: any) => now - f.trashedAt <= THREE_DAYS)
+    if (expired.length > 0) {
+      d.trashedFolders = active
+      const expiredIds = new Set(expired.map((f: any) => f.id))
+      const expiredFileIds = Object.keys(d.fileFolders)
+        .filter(k => expiredIds.has(d.fileFolders[k]))
+        .map(Number)
+      if (expiredFileIds.length > 0) {
+        try { await telegramService.permanentDeleteBatch(expiredFileIds) } catch {}
+      }
+      expiredIds.forEach(id => {
+        d.folders = d.folders.filter((x: any) => x.id !== id)
+      })
+      Object.keys(d.fileFolders).forEach(k => { if (expiredIds.has(d.fileFolders[k])) delete d.fileFolders[k] })
+      await writeFolders(d)
+      await syncFoldersToTelegram()
+    }
+    return { success: true, data: active }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:restore', async (_, id: string) => {
+  try {
+    return await withFoldersLock(async () => {
+      const d = await readFolders()
+      const idx = (d.trashedFolders || []).findIndex((f: any) => f.id === id)
+      if (idx === -1) return { success: false, error: 'Folder not found in trash' }
+      const folder = d.trashedFolders[idx]
+      d.trashedFolders.splice(idx, 1)
+      const { trashedAt, ...rest } = folder
+      d.folders.push(rest)
+      await writeFolders(d)
+      await syncFoldersToTelegram()
+      return { success: true, data: d }
+    })
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('folders:perm-delete', async (_, id: string) => {
+  try {
+    return await withFoldersLock(async () => {
+      const d = await readFolders()
+      const idsToDelete = new Set<string>()
+      const collect = (parentId: string) => {
+        idsToDelete.add(parentId)
+        ;(d.trashedFolders || []).filter((x: any) => x.parentId === parentId).forEach((x: any) => collect(x.id))
+      }
+      collect(id)
+
       const fileIdsToDelete = Object.keys(d.fileFolders)
         .filter(k => idsToDelete.has(d.fileFolders[k]))
         .map(Number)
       if (fileIdsToDelete.length > 0) {
-        await telegramService.permanentDeleteBatch(fileIdsToDelete)
+        try { await telegramService.permanentDeleteBatch(fileIdsToDelete) } catch {}
       }
 
-      d.folders = d.folders.filter((x: any) => !idsToDelete.has(x.id))
+      d.trashedFolders = (d.trashedFolders || []).filter((x: any) => !idsToDelete.has(x.id))
       Object.keys(d.fileFolders).forEach(k => { if (idsToDelete.has(d.fileFolders[k])) delete d.fileFolders[k] })
       await writeFolders(d)
       await syncFoldersToTelegram()
