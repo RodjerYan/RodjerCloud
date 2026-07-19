@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react"
+import React, { useEffect, useState, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
 import confetti from 'canvas-confetti'
 import { flushSync } from 'react-dom'
@@ -26,6 +26,81 @@ export default function TrashPage() {
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
+
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
+  const isSelecting = useRef(false)
+  const selectionStart = useRef<{ x: number, y: number, scrollY: number } | null>(null)
+  const selectedRef = useRef(selected)
+  const initialSelectedOnDrag = useRef<Set<number>>(new Set())
+
+  useEffect(() => { selectedRef.current = selected }, [selected])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isSelecting.current || !selectionStart.current) return
+      
+      const container = document.querySelector('.v2-main')
+      const currentScroll = container ? container.scrollTop : 0
+      const scrollDiff = currentScroll - selectionStart.current.scrollY
+      const adjustedStartY = selectionStart.current.y - scrollDiff
+      
+      const newBox = {
+        startX: selectionStart.current.x,
+        startY: adjustedStartY,
+        endX: e.clientX,
+        endY: e.clientY
+      }
+      setSelectionBox(newBox)
+      
+      const left = Math.min(newBox.startX, newBox.endX)
+      const right = Math.max(newBox.startX, newBox.endX)
+      const top = Math.min(newBox.startY, newBox.endY)
+      const bottom = Math.max(newBox.startY, newBox.endY)
+      
+      const elements = document.querySelectorAll('[data-mid]')
+      const nextSelected = new Set(initialSelectedOnDrag.current)
+      
+      elements.forEach(el => {
+        const rect = el.getBoundingClientRect()
+        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+          const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
+          if (mid) nextSelected.add(mid)
+        }
+      })
+      
+      setSelected(nextSelected)
+    }
+    const handleMouseUp = () => {
+      if (isSelecting.current) {
+        isSelecting.current = false
+        selectionStart.current = null
+        setSelectionBox(null)
+      }
+    }
+    
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  useEffect(() => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('.mf-card, .mf-list-item, tr, button, input, .mf-gm-card')) return
+      if (e.button !== 0) return 
+      const currentScroll = container.scrollTop
+      selectionStart.current = { x: e.clientX, y: e.clientY, scrollY: currentScroll }
+      isSelecting.current = true
+      initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
+      setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
+    }
+    container.addEventListener('mousedown', handleGlobalMouseDown)
+    return () => container.removeEventListener('mousedown', handleGlobalMouseDown)
+  }, [])
 
   useEffect(() => {
     window.electronAPI.tgs.read('fair.tgs').then((r: any) => {
@@ -362,6 +437,20 @@ export default function TrashPage() {
         </div>,
         document.body
       )}
+
+      {selectionBox && createPortal(
+        <div style={{
+          position: 'fixed',
+          zIndex: 9999,
+          pointerEvents: 'none',
+          background: 'rgba(124, 131, 255, 0.2)',
+          border: '1px solid rgba(124, 131, 255, 0.5)',
+          left: Math.min(selectionBox.startX, selectionBox.endX),
+          top: Math.min(selectionBox.startY, selectionBox.endY),
+          width: Math.abs(selectionBox.endX - selectionBox.startX),
+          height: Math.abs(selectionBox.endY - selectionBox.startY),
+        }} />
+      , document.body)}
     </div>
   )
 }
