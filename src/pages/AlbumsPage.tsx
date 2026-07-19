@@ -473,7 +473,6 @@ export default function AlbumsPage() {
         document.body
       )}
 
-      {toast && <div className="mf-toast">{toast}</div>}
     </div>
   )
 }
