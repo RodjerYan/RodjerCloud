@@ -1083,6 +1083,21 @@ ipcMain.handle('folders:move-file', async (_, messageId: number, folderId: strin
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('folders:move-files', async (_, messageIds: number[], folderId: string | null) => {
+  try {
+    return await withFoldersLock(async () => {
+      const d = await readFolders()
+      for (const id of messageIds) {
+        if (folderId) d.fileFolders[id] = folderId
+        else delete d.fileFolders[id]
+      }
+      await writeFolders(d)
+      await syncFoldersToTelegram()
+      return { success: true }
+    })
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('folders:move-folder', async (_, folderId: string, parentId: string | null) => {
   try {
     return await withFoldersLock(async () => {

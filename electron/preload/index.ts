@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
     removeFile: (messageId: number) => ipcRenderer.invoke('folders:remove-file', messageId),
     moveFile: (messageId: number, folderId: string | null) => ipcRenderer.invoke('folders:move-file', messageId, folderId),
+    moveFiles: (messageIds: number[], folderId: string | null) => ipcRenderer.invoke('folders:move-files', messageIds, folderId),
     moveFolder: (folderId: string, parentId: string | null) => ipcRenderer.invoke('folders:move-folder', folderId, parentId),
     archiveAndUpload: (opts: { folderPath?: string; folderName?: string; files?: Array<{ messageId: number; fileName: string }> }) =>
       ipcRenderer.invoke('folder:archive-and-upload', opts),

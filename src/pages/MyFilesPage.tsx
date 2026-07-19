@@ -309,20 +309,36 @@ export default function MyFilesPage() {
   }
   const confirmMoveFile = async (target: string) => {
     if (!moveTarget || moveTarget.length === 0) return
+    const idsToMove = [...moveTarget]
+    
+    // 1. Optimistic UI Update & close modal immediately
     let updated = { ...fileFolders }
-    for (const id of moveTarget) {
-      if (target.startsWith('cat:')) {
-        await window.electronAPI.folders.removeFile(id)
-        delete updated[id]
-      } else {
-        await window.electronAPI.folders.moveFile(id, target)
-        updated[id] = target
-      }
+    for (const id of idsToMove) {
+      if (target.startsWith('cat:')) delete updated[id]
+      else updated[id] = target
     }
-    setFileFolders(updated)
+    
     setMoveTarget(null)
     clearSelection()
-    toast.success('Перемещено')
+    
+    if ('startViewTransition' in document) {
+      (document as any).startViewTransition(() => setFileFolders(updated))
+    } else {
+      setFileFolders(updated)
+    }
+
+    // 2. Background API call
+    try {
+      if (target.startsWith('cat:')) {
+        await window.electronAPI.folders.moveFiles(idsToMove, null)
+      } else {
+        await window.electronAPI.folders.moveFiles(idsToMove, target)
+      }
+      toast.success('Перемещено')
+    } catch (e) {
+      toast.error('Ошибка при перемещении')
+      console.error(e)
+    }
   }
 
   const [loadError, setLoadError] = useState<string | null>(null)
