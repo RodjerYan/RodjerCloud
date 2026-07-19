@@ -1437,7 +1437,13 @@ export default function MyFilesPage() {
                                         <div style={{ fontSize: 14, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.fileName}</div>
                                         <div style={{ fontSize: 13, color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
                                           {p.progress < 100 ? (
-                                            <>Загрузка: <span style={{ color: '#e2e8f0' }}>{fmtSize(p.sent || 0)}</span> из {fmtSize(p.total)} ({p.progress}%)</>
+                                            <>
+                                              <span style={{ color: '#e2e8f0' }}>{fmtSize(p.sent || 0)}</span> / {fmtSize(p.total || 0)} 
+                                              <span style={{ opacity: 0.5, margin: '0 6px' }}>•</span> 
+                                              Осталось: <span style={{ color: '#cbd5e1' }}>{fmtSize((p.total || 0) - (p.sent || 0))}</span>
+                                              <span style={{ opacity: 0.5, margin: '0 6px' }}>•</span> 
+                                              <span style={{ color: '#818cf8' }}>{p.progress}%</span>
+                                            </>
                                           ) : (
                                             <span style={{ color: '#34d399' }}>Завершение...</span>
                                           )}
