@@ -1502,42 +1502,73 @@ export default function MyFilesPage() {
       )}
 
       {moveTarget !== null && createPortal(
-        <div className="mf-modal" onClick={() => setMoveTarget(null)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, minWidth: 320, maxHeight: '80vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{(moveTarget?.length || 0) > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}</div>
-            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', margin: '4px 0', padding: '0 4px' }}>Действия</div>
-            <button className="v3-btn" onClick={() => confirmMoveFile('cat:root')}
-              style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ArrowLeft size={16} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
-              Вынести из папки
+        <div className="mf-modal" onClick={() => setMoveTarget(null)} style={{ padding: '20px', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="mf-modal-glass" onClick={e => e.stopPropagation()} style={{ borderRadius: 20, padding: '28px 32px', width: '100%', maxWidth: 440, maxHeight: '85vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 16, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px color-mix(in srgb, var(--accent) 20%, transparent)' }}>
+                <Folder size={24} style={{ color: 'var(--accent)' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, background: 'linear-gradient(90deg, #fff, #a1a1aa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                  {(moveTarget?.length || 0) > 1 ? `Переместить ${moveTarget.length} файла(ов)` : 'Переместить файл'}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 2 }}>Выберите папку назначения</div>
+              </div>
+            </div>
+
+            <button className="v3-btn mf-move-dropzone" onClick={() => confirmMoveFile('cat:root')}
+              style={{ textAlign: 'left', justifyContent: 'center', padding: '14px 16px', borderRadius: 12, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s', marginTop: 4 }}>
+              <ArrowLeft size={18} style={{ flexShrink: 0, opacity: 0.8 }} />
+              Вынести из папки в корень
             </button>
-            {(folders?.length || 0) > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
-            {(() => {
-              const fmap = new Map<string, any[]>();
-              const fset = new Set((folders || []).map(f => f.id));
-              (folders || []).forEach(f => {
-                const pid = (f.parentId && fset.has(f.parentId)) ? f.parentId : 'root';
-                if (!fmap.has(pid)) fmap.set(pid, []);
-                fmap.get(pid)!.push(f);
-              });
-              const flat: { f: any, depth: number }[] = [];
-              const traverse = (pid: string, depth: number) => {
-                const children = fmap.get(pid) || [];
-                children.sort((a, b) => a.name.localeCompare(b.name));
-                children.forEach(c => {
-                  flat.push({ f: c, depth });
-                  traverse(c.id, depth + 1);
+
+            {(folders?.length || 0) > 0 && <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 1, marginTop: 12, paddingLeft: 4 }}>Папки</div>}
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
+              {(() => {
+                const fmap = new Map<string, any[]>();
+                const fset = new Set((folders || []).map(f => f.id));
+                (folders || []).forEach(f => {
+                  const pid = (f.parentId && fset.has(f.parentId)) ? f.parentId : 'root';
+                  if (!fmap.has(pid)) fmap.set(pid, []);
+                  fmap.get(pid)!.push(f);
                 });
-              };
-              traverse('root', 0);
-              return flat.map(({ f, depth }) => (
-                <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
-                  style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', paddingLeft: 12 + depth * 20, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Folder size={16} style={{ flexShrink: 0, color: '#7c83ff', opacity: Math.max(0.4, 1 - depth * 0.15) }} />
-                  {f.name}
-                </button>
-              ));
-            })()}
+                const flat: { f: any, depth: number }[] = [];
+                const traverse = (pid: string, depth: number) => {
+                  const children = fmap.get(pid) || [];
+                  children.sort((a, b) => a.name.localeCompare(b.name));
+                  children.forEach(c => {
+                    flat.push({ f: c, depth });
+                    traverse(c.id, depth + 1);
+                  });
+                };
+                traverse('root', 0);
+                return flat.map(({ f, depth }, idx) => (
+                  <button key={f.id} className="v3-btn mf-move-btn" onClick={() => confirmMoveFile(f.id)}
+                    style={{ 
+                      textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', 
+                      border: '1px solid transparent', color: 'var(--text)', 
+                      padding: '10px 14px', paddingLeft: 14 + depth * 24, 
+                      borderRadius: 10, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10,
+                      animation: `dropFolderIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) ${idx * 0.03}s both`,
+                      position: 'relative'
+                    }}>
+                    
+                    {/* Tree line connector */}
+                    {depth > 0 && <div style={{ position: 'absolute', left: 24 + (depth - 1) * 24, top: 0, bottom: '50%', width: 1, background: 'rgba(255,255,255,0.1)' }} />}
+                    {depth > 0 && <div style={{ position: 'absolute', left: 24 + (depth - 1) * 24, top: '50%', width: 12, height: 1, background: 'rgba(255,255,255,0.1)' }} />}
+
+                    <Folder size={18} style={{ flexShrink: 0, color: '#7c83ff', filter: `brightness(${1 - depth * 0.15})` }} />
+                    {f.name}
+                  </button>
+                ));
+              })()}
+            </div>
+
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+              <button className="v3-btn" onClick={() => setMoveTarget(null)} style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-dim)', padding: '10px 24px', borderRadius: 10 }}>Отмена</button>
+            </div>
           </div>
         </div>,
         document.body
