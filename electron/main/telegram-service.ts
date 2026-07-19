@@ -439,7 +439,7 @@ export class TelegramService {
     const fileName = customFileName || path.basename(filePath)
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
-    const CHUNK_SIZE = 1.95 * 1024 * 1024 * 1024 // 1.95 GB
+    const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024) // 1.95 GB
 
     let turboMode = false
     try {

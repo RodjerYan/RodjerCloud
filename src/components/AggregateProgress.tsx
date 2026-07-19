@@ -1,36 +1,48 @@
-import React from "react"
+import React, { useEffect, useState } from "react"
 import { useUploadProgress } from "../lib/useUploadProgress"
 import { fmtBytes, fmtTime } from "../lib/v3store"
 import { Activity } from "lucide-react"
 
 import { useUploadQueue } from "../lib/UploadQueueContext"
+import { pendingStore, type PendingUpload } from "../lib/PendingUploadStore"
 
 export default function AggregateProgress() {
   const { items } = useUploadProgress()
   const { queue } = useUploadQueue()
+  const [pendingMyFiles, setPendingMyFiles] = useState<PendingUpload[]>(pendingStore.uploads)
+
+  useEffect(() => {
+    return pendingStore.subscribe(setPendingMyFiles)
+  }, [])
   
   const pendingQueue = queue.filter(q => q.status === 'waiting' || q.status === 'uploading')
-  if (pendingQueue.length === 0) return null
+  if (pendingQueue.length === 0 && pendingMyFiles.length === 0) return null
 
   const list = Object.values(items)
   const active = list.filter(i => !i.finished)
   
-  const totalBytes = queue.reduce((s, q) => s + (q.fileSize || 0), 0)
-  const sentBytes = queue.reduce((s, q) => {
+  const totalQueueBytes = queue.reduce((s, q) => s + (q.fileSize || 0), 0)
+  const totalMyFilesBytes = pendingMyFiles.reduce((s, p) => s + (p.total || 0), 0)
+  const totalBytes = totalQueueBytes + totalMyFilesBytes
+
+  const sentQueueBytes = queue.reduce((s, q) => {
     if (q.status === 'done') return s + q.fileSize
     if (q.status === 'waiting' || q.status === 'failed') return s
     const p = items[q.id]
     if (p) return s + (p.sent || 0)
     return s + (q.fileSize * ((q.percent || 0) / 100))
   }, 0)
+
+  const sentMyFilesBytes = pendingMyFiles.reduce((s, p) => s + (p.sent || 0), 0)
+  const sentBytes = sentQueueBytes + sentMyFilesBytes
   
   const overall = totalBytes > 0 ? Math.min(100, Math.floor((sentBytes / totalBytes) * 100)) : 0
   const speed = list.reduce((s, i) => s + (i.speed || 0), 0)
   const remaining = Math.max(0, totalBytes - sentBytes)
   const eta = speed > 0 ? (remaining / speed) * 1000 : 0
   
-  const totalFiles = queue.length
-  const doneFiles = queue.filter(q => q.status === 'done').length
+  const totalFiles = queue.length + pendingMyFiles.length
+  const doneFiles = queue.filter(q => q.status === 'done').length + pendingMyFiles.filter(p => p.progress === 100).length
   return (
     <>
       <div className="v3-aggregate" data-testid="aggregate-progress">

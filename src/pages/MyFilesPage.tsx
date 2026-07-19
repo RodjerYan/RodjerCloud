@@ -41,16 +41,7 @@ const CAT_ICON: Record<string, React.ReactNode> = {
 const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
-
-interface PendingUpload {
-  id: string;
-  fileName: string;
-  progress: number;
-  sent?: number;
-  total?: number;
-  folderId?: string | null;
-  objectUrl?: string;
-}
+import { pendingStore, type PendingUpload } from '../lib/PendingUploadStore'
 
 const matchVirtualFolder = (fileName: string, folderId: string) => {
   if (folderId === '__type_Изображения') return !!fileName.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg)$/i)
@@ -381,7 +372,7 @@ export default function MyFilesPage() {
       folderId: targetFolderId || null,
       objectUrl: d.objectUrl
     }))
-    setPendingUploads(prev => [...prev, ...newPending])
+    pendingStore.add(newPending)
 
     for (let i = 0; i < dropped.length; i++) {
       const file = dropped[i]
@@ -399,7 +390,7 @@ export default function MyFilesPage() {
         setDuplicatePrompt(null)
 
         if (choice === 'skip') {
-          setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
+          pendingStore.remove(pendingId)
           setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
           continue
         }
@@ -421,7 +412,7 @@ export default function MyFilesPage() {
       }
 
       window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
-        setPendingUploads(prev => prev.map(p => p.id === pendingId ? { ...p, progress: 100 } : p))
+        pendingStore.updateProgress({ id: pendingId, percent: 100 })
         await new Promise(r => setTimeout(r, 500))
 
         if (res.success && res.data) {
@@ -434,13 +425,12 @@ export default function MyFilesPage() {
             if (prev.find(x => x.messageId === res.data.messageId)) return prev
             return [res.data, ...prev].sort((a, b) => b.messageId - a.messageId)
           })
+        } else {
+          toast.error(`Ошибка загрузки: ${res.error || 'неизвестная ошибка'}`)
         }
 
-        setPendingUploads(prev => {
-          const next = prev.filter(p => p.id !== pendingId)
-          if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
-          return next
-        })
+        pendingStore.remove(pendingId)
+        if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
         setDropProgress(dp => {
           if (!dp) return null
           const completed = dp.completed + 1
@@ -457,7 +447,7 @@ export default function MyFilesPage() {
         })
       }).catch((err: any) => {
         console.error('Upload failed:', err)
-        setPendingUploads(prev => prev.filter(p => p.id !== pendingId))
+        pendingStore.remove(pendingId)
         setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
       })
     }
@@ -810,30 +800,20 @@ export default function MyFilesPage() {
 
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number; completed: number } | null>(null)
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>(pendingStore.uploads)
   const dropDoneRef = useRef<NodeJS.Timeout>()
   const dragCounter = useRef(0)
 
   useEffect(() => {
-    const off = window.electronAPI.telegram.onUploadProgress((d: any) => {
-      if (!d.id) return
-      setPendingUploads(prev => {
-        const idx = prev.findIndex(p => p.id === d.id)
-        if (idx === -1) return prev
-        const next = [...prev]
-        next[idx] = { ...next[idx], progress: d.percent, sent: d.sent, total: d.total }
-        
-        setDropProgress(dp => {
-          if (!dp) return null
-          const activeProgresses = next.reduce((sum, p) => sum + p.progress, 0)
-          const totalProgressPct = dp.total > 0 ? Math.floor(((dp.completed * 100) + activeProgresses) / dp.total) : 0
-          return { ...dp, pct: Math.min(100, totalProgressPct) }
-        })
-        
-        return next
+    return pendingStore.subscribe((updates: PendingUpload[]) => {
+      setPendingUploads(updates)
+      setDropProgress(dp => {
+        if (!dp) return null
+        const activeProgresses = updates.reduce((sum, p) => sum + p.progress, 0)
+        const totalProgressPct = dp.total > 0 ? Math.floor(((dp.completed * 100) + activeProgresses) / dp.total) : 0
+        return { ...dp, pct: Math.min(100, totalProgressPct) }
       })
     })
-    return () => { off(); clearTimeout(dropDoneRef.current) }
   }, [])
 
   const extractDroppedFiles = (e: React.DragEvent) => {
