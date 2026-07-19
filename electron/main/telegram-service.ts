@@ -549,8 +549,7 @@ export class TelegramService {
       }
     }
 
-    const CHUNK_SIZE = 1.95 * 1024 * 1024 * 1024
-    const totalParts = Math.ceil(sizeBytes / CHUNK_SIZE)
+    const totalParts = Math.max(1, Math.ceil(sizeBytes / CHUNK_SIZE))
     const isMultipart = totalParts > 1
     
     let mainMessageId: number | null = null
