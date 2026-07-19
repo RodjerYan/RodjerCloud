@@ -337,7 +337,14 @@ export default function MyFilesPage() {
     try {
       const r = await window.electronAPI.telegram.listFiles()
       if (r.success) {
-        setFiles(r.data?.filter((x: any) => !locallyDeletedIds.current.has(x.messageId)) || [])
+        const processedFiles = (r.data || [])
+          .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
+          .map((f: any) => {
+            const meta = v3store.metaFor(f.messageId)
+            if (meta?.displayName) return { ...f, fileName: meta.displayName }
+            return f
+          })
+        setFiles(processedFiles)
       }
       else setLoadError(r.error || 'Не удалось загрузить файлы')
     } catch (e: any) {

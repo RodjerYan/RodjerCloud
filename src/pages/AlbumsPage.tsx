@@ -8,6 +8,7 @@ import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from "../lib/dialogs"
+import { toast } from '../lib/toast'
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -23,7 +24,6 @@ export default function AlbumsPage() {
   const [hashing, setHashing] = useState(false)
   const [hashProgress, setHashProgress] = useState({ done: 0, total: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
-  const [toast, setToast] = useState('')
   const [renameTarget, setRenameTarget] = useState<any>(null)
   const [renameInput, setRenameInput] = useState('')
   const [showSub, setShowSub] = useState<string | null>(null)
@@ -49,7 +49,6 @@ export default function AlbumsPage() {
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
-  const showToast = (s: string) => { setToast(s); setTimeout(() => setToast(''), 3000) }
   const closeCtx = useCallback(() => { setCtxMenu(null); setShowSub(null) }, [])
 
   useEffect(() => {
@@ -254,9 +253,9 @@ export default function AlbumsPage() {
   const handleCopyLink = async (f: any) => {
     try {
       const r = await window.electronAPI.share.generateLink(f.messageId, f.chatId || '', f.fileName)
-      if (r.success) { const url = r.data.url || r.data; window.electronAPI.app.copyToClipboard(url); showToast('Ссылка скопирована') }
-      else showToast(r.error || 'Ошибка')
-    } catch { showToast('Ошибка') }
+      if (r.success) { const url = r.data.url || r.data; window.electronAPI.app.copyToClipboard(url); toast.success('Ссылка скопирована') }
+      else toast.error(r.error || 'Ошибка')
+    } catch { toast.error('Ошибка') }
   }
 
   const renderCard = (f: any, isSmart: boolean, isDup?: boolean) => {
@@ -282,7 +281,6 @@ export default function AlbumsPage() {
     const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
     return (
       <div className="v3-page">
-        {toast && <div className="mf-toast">{toast}</div>}
         <div className="v3-row" style={{ marginBottom: 14 }}>
           <button className="v3-btn ghost" onClick={() => setOpenAlbum(null)}><ArrowLeft size={18} /></button>
           <h1 className="v3-h1" style={{ margin: 0 }}>{currentAlbum.name}</h1>
@@ -368,7 +366,7 @@ export default function AlbumsPage() {
                 <button className="v3-btn" onClick={() => setRenameTarget(null)}>Отмена</button>
                 <button className="v3-btn primary" onClick={() => {
                   v3store.setMeta({ messageId: renameTarget.messageId, displayName: renameInput.trim() || undefined })
-                  setRenameTarget(null); showToast('Переименовано')
+                  setRenameTarget(null); toast.success('Переименовано')
                   setAllFiles(prev => prev.map(f => f.messageId === renameTarget.messageId ? { ...f, fileName: renameInput.trim() || f.fileName } : f))
                 }}>Сохранить</button>
               </div>
@@ -396,7 +394,7 @@ export default function AlbumsPage() {
                       if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
                       else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
                       setAlbums(v3store.getAlbums())
-                      showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
+                      toast.success(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
                       closeCtx()
                     }} style={{ paddingLeft: 36, fontSize: 12 }}>
                       <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>

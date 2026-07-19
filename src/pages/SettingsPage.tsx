@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom'
 import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock, CheckCircle2 } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import iconUrl from '../assets/icon.png'
+import { toast } from '../lib/toast'
 
 export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
   const [concurrency, setConcurrency] = useState(2)
   const [autoRename, setAutoRename] = useState(false)
   const [turboMode, setTurboMode] = useState(false)
-  const [toast, setToast] = useState('')
   const [botToken, setBotToken] = useState('')
   const pwdInputRef = useRef<HTMLInputElement>(null)
   const [botConfigured, setBotConfigured] = useState(false)
@@ -49,8 +49,6 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     })
   }, [])
 
-  const show = (s: string) => { setToast(s); setTimeout(() => setToast(''), 1800) }
-
   const onConcurrency = async (n: number) => {
     setConcurrency(n)
     await window.electronAPI.storage.setUploadConcurrency(n)
@@ -59,7 +57,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
   const copyKey = async () => {
     if (!channelInfo?.token) return
     await window.electronAPI.app.copyToClipboard(channelInfo.token)
-    show('Ключ скопирован')
+    toast.success('Ключ скопирован')
   }
 
   const checkUpdates = async (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -73,7 +71,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     if (r.success && r.data) {
       setUpdateModal(r.data)
       if (!r.data.hasUpdate) {
-        show('У вас последняя версия')
+        toast.success('У вас последняя версия')
         confetti({
           particleCount: 100,
           spread: 70,
@@ -82,12 +80,12 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
         })
       }
     } else {
-      show(r.error || 'Ошибка проверки обновлений')
+      toast.error(r.error || 'Ошибка проверки обновлений')
     }
   }
 
   const startDownload = async () => {
-    if (!updateModal?.assetId) { show('Ошибка: файл обновления не найден'); return }
+    if (!updateModal?.assetId) { toast.error('Ошибка: файл обновления не найден'); return }
     setDownloading(true)
     setDownloadProgress(0)
     const unsub = window.electronAPI.app.onDownloadProgress((p) => {
@@ -99,7 +97,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
       setDownloadPathState(r.data.filePath)
       setDownloadProgress(100)
     } else {
-      show(r.error || 'Ошибка загрузки')
+      toast.error(r.error || 'Ошибка загрузки')
       setDownloading(false)
     }
   }
@@ -108,7 +106,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
     if (!downloadPathState) return
     const r = await window.electronAPI.app.installUpdate(downloadPathState)
     if (!r.success) {
-      show(r.error || 'Ошибка запуска установщика')
+      toast.error(r.error || 'Ошибка запуска установщика')
     }
     setDownloading(false)
     setUpdateModal(null)
@@ -249,10 +247,10 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
               placeholder="Введите токен бота: 123456:ABCdef..."
               style={{ flex: 1, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono, monospace)' }} />
             <button className="v3-btn primary" onClick={async () => {
-              if (!botToken.trim()) return show('Введите токен')
+              if (!botToken.trim()) return toast.error('Введите токен')
               const r = await window.electronAPI.share.setBotToken(botToken.trim())
-              if (r.success) { setBotConfigured(true); show('Токен сохранён') }
-              else show(r.error || 'Ошибка')
+              if (r.success) { setBotConfigured(true); toast.success('Токен сохранён') }
+              else toast.error(r.error || 'Ошибка')
             }}>Сохранить</button>
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, paddingBottom: 16, borderTop: '1px solid var(--border-soft)', paddingTop: 16 }}>
@@ -361,15 +359,13 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
                 } else {
                   await window.electronAPI.vault.setPassword(pwd)
                   setShowPwdPrompt(false)
-                  show('Пароль успешно изменен')
+                  toast.success('Пароль успешно изменен')
                 }
               }}>{checkingOldPwd ? 'Далее' : 'Сохранить'}</button>
             </div>
           </div>
         </div>
       )}
-
-      {toast && <div className="mf-toast">{toast}</div>}
     </div>
   )
 }

@@ -212,6 +212,7 @@ function App() {
         </AudioPlayerProvider>
         <CommandPalette />
         <GlobalDialogs />
+        <GlobalToasts />
       </div>
     </MemoryRouter>
     </ErrorBoundary>
