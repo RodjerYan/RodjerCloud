@@ -319,10 +319,10 @@ export default function AlbumsPage() {
                     </div>
                   )
                 }
-                return Array.from(groups.entries()).slice().map(([hash, files]) => (
+                return groups.map(([hash, files]) => (
                   <div key={hash} className="mf-gy">
                     <div className="mf-gy-title">{files.length} дубликата</div>
-                    <div className="mf-gm-items">{files.slice().map(f => renderCard(f, true, true))}</div>
+                    <div className="mf-gm-items">{files.map((f: any) => renderCard(f, true, true))}</div>
                   </div>
                 ))
               })()}
