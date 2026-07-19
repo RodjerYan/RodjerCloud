@@ -46,6 +46,8 @@ interface PendingUpload {
   id: string;
   fileName: string;
   progress: number;
+  sent?: number;
+  total?: number;
   folderId?: string | null;
   objectUrl?: string;
 }
@@ -819,7 +821,7 @@ export default function MyFilesPage() {
         const idx = prev.findIndex(p => p.id === d.id)
         if (idx === -1) return prev
         const next = [...prev]
-        next[idx] = { ...next[idx], progress: d.percent }
+        next[idx] = { ...next[idx], progress: d.percent, sent: d.sent, total: d.total }
         
         setDropProgress(dp => {
           if (!dp) return null
@@ -1422,23 +1424,54 @@ export default function MyFilesPage() {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
       return p.folderId === folderDrill
     }).map(p => (
-                          <tr key={p.id} className="pending-upload" style={{ cursor: 'wait' }}>
-                            <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: 0.8 }}>
-                              <div style={{ position: 'relative', width: 24, height: 24, borderRadius: 4, overflow: 'hidden' }}>
-                                 {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <FileText size={16} />}
-                                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
-                                    <svg width="16" height="16" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
-                                      <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="12" />
-                                      <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (p.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
-                                    </svg>
-                                 </div>
-                              </div>
-                              {p.fileName}
-                            </span></td>
-                            <td>{p.progress < 100 ? `Загрузка ${p.progress}%` : 'Обработка...'}</td>
-                            <td>—</td>
-                            <td></td>
-                          </tr>
+                          <React.Fragment key={p.id}>
+                            {p.total && p.total > 50 * 1024 * 1024 ? (
+                              <tr className="pending-upload heavy-upload" style={{ cursor: 'wait', background: 'var(--v3-surface)' }}>
+                                <td colSpan={5} style={{ padding: '16px 20px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                    <div style={{ position: 'relative', width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flexShrink: 0, border: '1px solid rgba(255,255,255,0.1)' }}>
+                                       {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }}><FileText size={20} color="#cbd5e1" /></div>}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.fileName}</div>
+                                        <div style={{ fontSize: 13, color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                                          {p.progress < 100 ? (
+                                            <>Загрузка: <span style={{ color: '#e2e8f0' }}>{fmtSize(p.sent || 0)}</span> из {fmtSize(p.total)} ({p.progress}%)</>
+                                          ) : (
+                                            <span style={{ color: '#34d399' }}>Завершение...</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div style={{ height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+                                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${p.progress || 0}%`, background: 'linear-gradient(90deg, #6366f1, #a855f7)', transition: 'width 0.2s ease-out', borderRadius: 3 }}>
+                                          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)', transform: 'translateX(-100%)', animation: 'shimmer 1.5s infinite' }} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              <tr className="pending-upload" style={{ cursor: 'wait' }}>
+                                <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: 0.8 }}>
+                                  <div style={{ position: 'relative', width: 24, height: 24, borderRadius: 4, overflow: 'hidden' }}>
+                                     {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <FileText size={16} />}
+                                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                                        <svg width="16" height="16" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+                                          <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="12" />
+                                          <circle cx="50" cy="50" r="40" fill="none" stroke="#fff" strokeWidth="12" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (p.progress || 0)) / 100} style={{ transition: 'stroke-dashoffset 0.1s linear' }} strokeLinecap="round" />
+                                        </svg>
+                                     </div>
+                                  </div>
+                                  {p.fileName}
+                                </span></td>
+                                <td>{p.progress < 100 ? `Загрузка ${p.progress}%` : 'Обработка...'}</td>
+                                <td>—</td>
+                                <td></td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))}
                       </tbody>
                     </table>
