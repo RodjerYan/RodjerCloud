@@ -34,51 +34,14 @@ function deferred<T>(): Deferred<T> {
 
 const CHANNEL_NAME = 'My area'
 
-async function splitFileLocal(filePath: string, chunkSize: number): Promise<string[]> {
-  const fileStats = fs.statSync(filePath)
-  if (fileStats.size <= chunkSize) return [filePath]
-
-  const tempDir = app.getPath('temp')
-  const baseName = path.basename(filePath)
-  const parts: string[] = []
-  
-  const readStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 })
-  let currentPartIndex = 0
-  let currentPartPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${currentPartIndex}`)
-  let writeStream = fs.createWriteStream(currentPartPath)
-  parts.push(currentPartPath)
-  let bytesWritten = 0
-
+async function extractChunkToDisk(source: string, target: string, start: number, end: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      for (const p of parts) {
-        try { fs.unlinkSync(p) } catch {}
-      }
-    }
-    readStream.on('data', (chunk: Buffer) => {
-      if (bytesWritten + chunk.length > chunkSize) {
-        const spaceLeft = chunkSize - bytesWritten
-        writeStream.write(chunk.slice(0, spaceLeft))
-        writeStream.end()
-        
-        currentPartIndex++
-        currentPartPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${currentPartIndex}`)
-        parts.push(currentPartPath)
-        writeStream = fs.createWriteStream(currentPartPath)
-        writeStream.on('error', (err) => { cleanup(); reject(err) })
-        writeStream.write(chunk.slice(spaceLeft))
-        bytesWritten = chunk.length - spaceLeft
-      } else {
-        writeStream.write(chunk)
-        bytesWritten += chunk.length
-      }
-    })
-    readStream.on('end', () => {
-      writeStream.end()
-      resolve(parts)
-    })
-    readStream.on('error', (err) => { cleanup(); reject(err) })
-    writeStream.on('error', (err) => { cleanup(); reject(err) })
+    const rs = fs.createReadStream(source, { start, end: end - 1, highWaterMark: 256 * 1024 })
+    const ws = fs.createWriteStream(target)
+    rs.on('error', reject)
+    ws.on('error', reject)
+    ws.on('finish', resolve)
+    rs.pipe(ws)
   })
 }
 
@@ -586,8 +549,9 @@ export class TelegramService {
       }
     }
 
-    const parts = await splitFileLocal(uploadPath, CHUNK_SIZE)
-    const isMultipart = parts.length > 1
+    const CHUNK_SIZE = 1.95 * 1024 * 1024 * 1024
+    const totalParts = Math.ceil(sizeBytes / CHUNK_SIZE)
+    const isMultipart = totalParts > 1
     
     let mainMessageId: number | null = null
     const multipartIds: number[] = []
@@ -597,9 +561,19 @@ export class TelegramService {
 
     let mainCaptionStr = ''
 
-    for (let i = 0; i < parts.length; i++) {
-      const partPath = parts[i]
-      const partSizeBytes = fs.statSync(partPath).size
+    const tempDir = app.getPath('temp')
+
+    for (let i = 0; i < totalParts; i++) {
+      const partStart = i * CHUNK_SIZE
+      const partEnd = Math.min((i + 1) * CHUNK_SIZE, sizeBytes)
+      const partSizeBytes = partEnd - partStart
+      
+      let partPath = uploadPath
+      if (isMultipart) {
+        partPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${i}`)
+        await extractChunkToDisk(uploadPath, partPath, partStart, partEnd)
+      }
+
       let partSent = 0
 
       let captionStr = ''
@@ -636,15 +610,15 @@ export class TelegramService {
         },
       } as any)
 
+      if (isMultipart) {
+        try { fs.unlinkSync(partPath) } catch {}
+      }
+
       const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
       if (i === 0) {
         mainMessageId = msgId
       } else {
         multipartIds.push(msgId)
-      }
-
-      if (isMultipart) {
-        fs.unlink(partPath, () => {})
       }
     }
 
