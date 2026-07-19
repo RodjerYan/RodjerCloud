@@ -1468,6 +1468,60 @@ export class TelegramService {
     const botFather = await this.client.getEntity('BotFather') as any
     if (!botFather) throw new Error('Cannot find BotFather')
 
+    if (!existingBot) {
+      try {
+        await this.client!.sendMessage(botFather, { message: '/mybots', silent: true } as any)
+        let mybotsMsg: any = null;
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 1000))
+          const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
+          const m = msgs.find(x => x.message?.includes('Choose a bot from the list below') || x.message?.includes('You have no bots'))
+          if (m) { mybotsMsg = m; break; }
+        }
+        
+        let orphanedBot: string | null = null;
+        if (mybotsMsg && mybotsMsg.replyMarkup) {
+          for (const row of mybotsMsg.replyMarkup.rows) {
+            for (const btn of row.buttons) {
+              if (btn.text.startsWith('@rodjercloud_') && btn.text.endsWith('_bot')) {
+                orphanedBot = btn.text.slice(1) // remove @
+                break
+              }
+            }
+            if (orphanedBot) break
+          }
+        }
+        
+        if (orphanedBot) {
+          const token = await this.fetchExistingBotToken(orphanedBot)
+          if (token) {
+            await this.client!.invoke(
+              new Api.channels.InviteToChannel({
+                channel: this.channelId as any,
+                users: [orphanedBot]
+              })
+            )
+            await this.client!.invoke(
+              new Api.channels.EditAdmin({
+                channel: this.channelId as any,
+                userId: orphanedBot,
+                adminRights: new Api.ChatAdminRights({
+                  changeInfo: false, postMessages: true, editMessages: true, deleteMessages: true,
+                  banUsers: false, inviteUsers: true, pinMessages: false, addAdmins: false,
+                  anonymous: false, manageCall: false, other: true, manageTopics: false
+                }),
+                rank: ''
+              })
+            )
+            this.cleanupBots(token).catch(() => {})
+            return { token, username: orphanedBot }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to reuse orphaned bot:', e)
+      }
+    }
+
     const sendAndWait = async (msg: string): Promise<string> => {
       const before = (await this.client!.getMessages(botFather, { limit: 1 })) as any[] | undefined
       const lastId = before && before.length > 0 ? before[0]!.id : 0

@@ -29,6 +29,7 @@ export default function AlbumsPage() {
   const [showSub, setShowSub] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
+  const [hashTrigger, setHashTrigger] = useState(0)
   
   const loaderRef = useRef<HTMLDivElement>(null)
 
@@ -103,7 +104,7 @@ export default function AlbumsPage() {
       if (m?.hash) { const g = groups.get(m.hash) || []; g.push(f); groups.set(m.hash, g) }
     })
     return groups
-  }, [allFiles])
+  }, [allFiles, hashTrigger])
 
   const albumFiles = useMemo(() => {
     if (!currentAlbum) return []
@@ -132,6 +133,7 @@ export default function AlbumsPage() {
             for (const e of r.data) {
               if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
             }
+            setHashTrigger(prev => prev + 1)
           }
           setHashing(false)
         })
