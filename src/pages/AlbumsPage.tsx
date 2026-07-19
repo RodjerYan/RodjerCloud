@@ -312,6 +312,7 @@ export default function AlbumsPage() {
                             for (const e of r.data) {
                               if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
                             }
+                            setHashTrigger(prev => prev + 1)
                           }
                         }
                         setHashing(false)
