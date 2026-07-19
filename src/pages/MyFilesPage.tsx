@@ -227,7 +227,7 @@ export default function MyFilesPage() {
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
     
-    if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.', true))) return
+    if (!(await appConfirm('Удалить папку со всеми файлами?', true))) return
 
     let x = 0.5, y = 0.5
     if (targetElement) {

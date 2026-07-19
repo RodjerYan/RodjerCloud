@@ -897,6 +897,25 @@ export class TelegramService {
     await this.client.deleteMessages(this.channelId as any, idsToDelete, { revoke: true })
   }
 
+  async permanentDeleteBatch(messageIds: number[]) {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const BATCH = 100
+    for (let i = 0; i < messageIds.length; i += BATCH) {
+      const batch = messageIds.slice(i, i + BATCH)
+      const messages = await this.client.getMessages(this.channelId as any, { ids: batch })
+      const extraIds: number[] = []
+      for (const m of (messages || [])) {
+        const caption = m.message || ''
+        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+        if (multipartMatch) extraIds.push(...multipartMatch[1].split(',').map(Number))
+      }
+      const allIds = [...batch, ...extraIds]
+      for (const id of batch) this.localTrashedIds.delete(id)
+      await this.client.deleteMessages(this.channelId as any, allIds, { revoke: true })
+    }
+    this.saveTrashState()
+  }
+
   async cleanupGhosts() {
     if (!this.client || !this.channelId) return { success: false, error: 'Not initialized' }
     try {

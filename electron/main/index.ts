@@ -1041,6 +1041,14 @@ ipcMain.handle('folders:delete', async (_, id: string) => {
         d.folders.filter((x: any) => x.parentId === parentId).forEach((x: any) => collect(x.id))
       }
       collect(id)
+
+      const fileIdsToDelete = Object.keys(d.fileFolders)
+        .filter(k => idsToDelete.has(d.fileFolders[k]))
+        .map(Number)
+      if (fileIdsToDelete.length > 0) {
+        await telegramService.permanentDeleteBatch(fileIdsToDelete)
+      }
+
       d.folders = d.folders.filter((x: any) => !idsToDelete.has(x.id))
       Object.keys(d.fileFolders).forEach(k => { if (idsToDelete.has(d.fileFolders[k])) delete d.fileFolders[k] })
       await writeFolders(d)
