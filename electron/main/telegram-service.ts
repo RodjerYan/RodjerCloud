@@ -1495,24 +1495,7 @@ export class TelegramService {
         if (orphanedBot) {
           const token = await this.fetchExistingBotToken(orphanedBot)
           if (token) {
-            await this.client!.invoke(
-              new Api.channels.InviteToChannel({
-                channel: this.channelId as any,
-                users: [orphanedBot]
-              })
-            )
-            await this.client!.invoke(
-              new Api.channels.EditAdmin({
-                channel: this.channelId as any,
-                userId: orphanedBot,
-                adminRights: new Api.ChatAdminRights({
-                  changeInfo: false, postMessages: true, editMessages: true, deleteMessages: true,
-                  banUsers: false, inviteUsers: true, pinMessages: false, addAdmins: false,
-                  anonymous: false, manageCall: false, other: true, manageTopics: false
-                }),
-                rank: ''
-              })
-            )
+            await this.addBotToChannel(orphanedBot)
             this.cleanupBots(token).catch(() => {})
             return { token, username: orphanedBot }
           }
