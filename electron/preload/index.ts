@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
     restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),
     permDeleteFile: (messageId: number) => ipcRenderer.invoke('telegram:perm-delete-file', messageId),
+    cleanupGhosts: () => ipcRenderer.invoke('telegram:cleanup-ghosts'),
     cacheAudio: (messageId: number, fileName: string) => ipcRenderer.invoke('telegram:cache-audio', messageId, fileName),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
       ipcRenderer.invoke('telegram:bulk-download', items),

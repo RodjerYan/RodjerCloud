@@ -708,9 +708,12 @@ export class TelegramService {
         const trashedAt = parseInt(match[1], 10)
         if (now - trashedAt > this.TRASH_DAYS * 24 * 3600 * 1000) {
           try {
-            await this.client.invoke(
-              new Api.channels.DeleteMessages({ channel: this.channelId as any, id: [this.msgId(m)] })
-            )
+            let idsToDelete = [this.msgId(m)]
+            const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+            if (multipartMatch) {
+              idsToDelete.push(...multipartMatch[1].split(',').map(Number))
+            }
+            await this.client.deleteMessages(this.channelId as any, idsToDelete, { revoke: true })
           } catch {}
         }
       }
@@ -916,9 +919,84 @@ export class TelegramService {
           idsToDelete.push(...multipartMatch[1].split(',').map(Number))
        }
     }
-    await this.client.invoke(
-      new Api.channels.DeleteMessages({ channel: this.channelId as any, id: idsToDelete })
-    )
+    this.localTrashedIds.delete(messageId)
+    this.saveTrashState()
+    await this.client.deleteMessages(this.channelId as any, idsToDelete, { revoke: true })
+  }
+
+  async cleanupGhosts() {
+    if (!this.client || !this.channelId) return { success: false, error: 'Not initialized' }
+    try {
+      const messages: any[] = []
+      let offsetId = 0
+      const BATCH = 200
+      while (true) {
+        const batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+        if (batch.length === 0) break
+        messages.push(...batch)
+        if (batch.length < BATCH) break
+        offsetId = this.msgId(batch[batch.length - 1])
+      }
+
+      const claimedChunkIds = new Set<number>()
+      const trashIds = new Set<number>()
+      const knownIds = new Set<number>()
+
+      for (const m of messages) {
+        if (!m.file || m.message === TelegramService.STATE_CAPTION) continue
+        const msgId = this.msgId(m)
+        const caption: string = m.message || ''
+        
+        if (caption.includes('#chunk_of')) continue
+        
+        knownIds.add(msgId)
+        
+        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+        if (multipartMatch) {
+          multipartMatch[1].split(',').map(Number).forEach(id => claimedChunkIds.add(id))
+        }
+
+        const escapedMarker = this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        if (caption.match(new RegExp(`${escapedMarker}(\\d+)`)) || this.localTrashedIds.has(msgId)) {
+          trashIds.add(msgId)
+        }
+      }
+
+      const idsToDelete = new Set<number>()
+
+      for (const m of messages) {
+        if (m.message === TelegramService.STATE_CAPTION) continue
+        const msgId = this.msgId(m)
+        const caption: string = m.message || ''
+
+        if (caption.includes('#chunk_of')) {
+          if (!claimedChunkIds.has(msgId)) idsToDelete.add(msgId)
+        } else if (trashIds.has(msgId)) {
+          idsToDelete.add(msgId)
+          const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+          if (multipartMatch) {
+            multipartMatch[1].split(',').map(Number).forEach(id => idsToDelete.add(id))
+          }
+        }
+      }
+
+      if (idsToDelete.size > 0) {
+        const arr = Array.from(idsToDelete)
+        for (let i = 0; i < arr.length; i += 100) {
+          await this.client.deleteMessages(this.channelId as any, arr.slice(i, i + 100), { revoke: true })
+        }
+      }
+      
+      this.localTrashedIds.clear()
+      this.saveTrashState()
+
+      return { success: true, deletedCount: idsToDelete.size }
+    } catch (e: any) {
+      return { success: false, error: e.message }
+    }
   }
 
   private async performDownload(message: any, targetPath: string) {

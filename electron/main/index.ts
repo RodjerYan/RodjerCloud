@@ -540,6 +540,10 @@ ipcMain.handle('telegram:perm-delete-file', async (_, messageId: number) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:cleanup-ghosts', async () => {
+  return await telegramService.cleanupGhosts()
+})
+
 ipcMain.handle('telegram:logout', async () => {
   try {
     await telegramService.logout()

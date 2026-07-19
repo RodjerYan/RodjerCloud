@@ -352,6 +352,18 @@ export default function TrashPage() {
         <Trash2 size={16} style={{ color: '#f87171' }} />
         <span>Корзина · {files.length} файлов</span>
         <span style={{ fontSize: 11, opacity: 0.7 }}>— удаляются через 3 дня автоматически</span>
+        <div style={{ flex: 1 }} />
+        <button className="v3-btn ghost" style={{ fontSize: 12, padding: '4px 8px', color: '#f87171' }} onClick={async () => {
+          if (!(await appConfirm('Выполнить глубокую очистку канала от "призраков"? Это удалит все осиротевшие части файлов и зависшие файлы корзины.'))) return
+          toast.loading('Очистка канала...')
+          const r: any = await window.electronAPI.telegram.cleanupGhosts()
+          if (r.success) {
+            toast.success(`Очистка завершена! Удалено сообщений: ${r.deletedCount || 0}`)
+            load()
+          } else {
+            toast.error('Ошибка очистки: ' + r.error)
+          }
+        }}>Очистить призраки</button>
       </div>
 
       <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
