@@ -1512,13 +1512,32 @@ export default function MyFilesPage() {
               Вынести из папки
             </button>
             {(folders?.length || 0) > 0 && <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, margin: '8px 0 4px', padding: '0 4px' }}>Папки</div>}
-            {(folders || []).map(f => (
-              <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
-                style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Folder size={16} style={{ flexShrink: 0, color: '#7c83ff' }} />
-                {f.name}
-              </button>
-            ))}
+            {(() => {
+              const fmap = new Map<string, any[]>();
+              const fset = new Set((folders || []).map(f => f.id));
+              (folders || []).forEach(f => {
+                const pid = (f.parentId && fset.has(f.parentId)) ? f.parentId : 'root';
+                if (!fmap.has(pid)) fmap.set(pid, []);
+                fmap.get(pid)!.push(f);
+              });
+              const flat: { f: any, depth: number }[] = [];
+              const traverse = (pid: string, depth: number) => {
+                const children = fmap.get(pid) || [];
+                children.sort((a, b) => a.name.localeCompare(b.name));
+                children.forEach(c => {
+                  flat.push({ f: c, depth });
+                  traverse(c.id, depth + 1);
+                });
+              };
+              traverse('root', 0);
+              return flat.map(({ f, depth }) => (
+                <button key={f.id} className="v3-btn" onClick={() => confirmMoveFile(f.id)}
+                  style={{ textAlign: 'left', justifyContent: 'flex-start', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', padding: '9px 12px', paddingLeft: 12 + depth * 20, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Folder size={16} style={{ flexShrink: 0, color: '#7c83ff', opacity: Math.max(0.4, 1 - depth * 0.15) }} />
+                  {f.name}
+                </button>
+              ));
+            })()}
           </div>
         </div>,
         document.body
