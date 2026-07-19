@@ -66,6 +66,7 @@ export default function MyFilesPage() {
   const loaderRef = useRef<HTMLDivElement>(null)
 
   const [files, setFiles] = useState<any[]>([])
+  const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [search, setSearch] = useState('')
@@ -335,7 +336,9 @@ export default function MyFilesPage() {
     setLoadError(null)
     try {
       const r = await window.electronAPI.telegram.listFiles()
-      if (r.success) setFiles(r.data || [])
+      if (r.success) {
+        setFiles(r.data?.filter((x: any) => !locallyDeletedIds.current.has(x.messageId)) || [])
+      }
       else setLoadError(r.error || 'Не удалось загрузить файлы')
     } catch (e: any) {
       setLoadError(e.message || 'Ошибка загрузки')
@@ -560,6 +563,7 @@ export default function MyFilesPage() {
     toast.info('Перемещение в корзину…')
     
     const applyRemove = () => {
+      locallyDeletedIds.current.add(f.messageId)
       flushSync(() => {
         setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
         setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
@@ -578,6 +582,7 @@ export default function MyFilesPage() {
     } else {
       toast.error('Ошибка удаления, отмена операции')
       const revert = () => {
+        locallyDeletedIds.current.delete(f.messageId)
         flushSync(() => {
           setFiles(prev => {
             if (prev.find(x => x.messageId === f.messageId)) return prev
@@ -721,6 +726,7 @@ export default function MyFilesPage() {
     const filesToRestore = files.filter(f => ids.includes(f.messageId))
     
     const applyRemove = () => {
+      ids.forEach(id => locallyDeletedIds.current.add(id))
       flushSync(() => {
         setFiles(prev => prev.filter(x => !ids.includes(x.messageId)))
         setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
@@ -740,6 +746,7 @@ export default function MyFilesPage() {
     } else {
       toast.error('Ошибка массового удаления, отмена')
       const revert = () => {
+        ids.forEach(id => locallyDeletedIds.current.delete(id))
         flushSync(() => {
           setFiles(prev => {
             const currentIds = new Set(prev.map(p => p.messageId))
