@@ -741,6 +741,9 @@ export class TelegramService {
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+        const msgId = this.msgId(m)
+        if (this.localTrashedIds.has(msgId)) return false
+        if (this.localRestoredIds.has(msgId)) return true
         const caption: string = m.message || ''
         return !caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
       })
@@ -784,6 +787,9 @@ export class TelegramService {
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+        const msgId = this.msgId(m)
+        if (this.localTrashedIds.has(msgId)) return true
+        if (this.localRestoredIds.has(msgId)) return false
         const caption: string = m.message || ''
         return caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
       })
@@ -805,9 +811,13 @@ export class TelegramService {
         }
       })
   }
+  private localTrashedIds = new Set<number>();
+  private localRestoredIds = new Set<number>();
 
   async trashFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    this.localTrashedIds.add(messageId)
+    this.localRestoredIds.delete(messageId)
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
     if (!messages || messages.length === 0) throw new Error('Message not found')
     const m = messages[0]
@@ -833,6 +843,8 @@ export class TelegramService {
 
   async restoreFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    this.localTrashedIds.delete(messageId)
+    this.localRestoredIds.add(messageId)
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
     if (!messages || messages.length === 0) throw new Error('Message not found')
     const m = messages[0]
