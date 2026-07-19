@@ -173,6 +173,13 @@ export class BotService {
     const all = await telegramService.listFiles()
     if (!all || all.length === 0) return { found: 0, groups: 0 }
 
+    const activeIds = new Set(all.map((f: any) => f.messageId))
+    const initialLen = this.hashDb.length
+    this.hashDb = this.hashDb.filter(e => activeIds.has(e.messageId))
+    if (this.hashDb.length !== initialLen) {
+      this.saveHashDb()
+    }
+
     const hashedIds = new Set(this.hashDb.map(e => e.messageId))
     const toScan = all.filter((f: any) => !hashedIds.has(f.messageId) && (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')))
     const total = toScan.length
