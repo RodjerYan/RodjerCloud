@@ -8,6 +8,8 @@ import path from 'path'
 import crypto from 'crypto'
 import zlib from 'zlib'
 import { app, ipcMain, nativeImage } from 'electron'
+
+const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
@@ -87,6 +89,10 @@ export class TelegramService {
 
   private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
   private processingHeavyQueue = false
+
+  constructor() {
+    this.loadTrashState()
+  }
 
   private async processHeavyThumbQueue() {
     if (this.processingHeavyQueue) return
@@ -813,31 +819,55 @@ export class TelegramService {
   }
   private localTrashedIds = new Set<number>();
   private localRestoredIds = new Set<number>();
+  
+  private saveTrashState() {
+    try {
+      fs.writeFileSync(TRASH_DATA_PATH, JSON.stringify({
+        trashed: Array.from(this.localTrashedIds),
+        restored: Array.from(this.localRestoredIds)
+      }))
+    } catch(e) { console.error('Failed to save trash state', e) }
+  }
+  
+  private loadTrashState() {
+    try {
+      if (fs.existsSync(TRASH_DATA_PATH)) {
+        const data = JSON.parse(fs.readFileSync(TRASH_DATA_PATH, 'utf-8'))
+        if (Array.isArray(data.trashed)) this.localTrashedIds = new Set(data.trashed)
+        if (Array.isArray(data.restored)) this.localRestoredIds = new Set(data.restored)
+      }
+    } catch(e) { console.error('Failed to load trash state', e) }
+  }
 
   async trashFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     this.localTrashedIds.add(messageId)
     this.localRestoredIds.delete(messageId)
-    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
-    if (!messages || messages.length === 0) throw new Error('Message not found')
-    const m = messages[0]
-    const oldCaption = m.message || ''
-    const newCaption = oldCaption.includes(this.TRASH_MARKER)
-      ? oldCaption
-      : oldCaption + `\n${this.TRASH_MARKER}${Date.now()}`
-    await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
-    
-    const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
-    if (multipartMatch) {
-      const partIds = multipartMatch[1].split(',').map(Number)
-      for (const id of partIds) {
-        const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
-        if (pMsgs && pMsgs.length > 0) {
-           const pOld = pMsgs[0].message || ''
-           const pNew = pOld.includes(this.TRASH_MARKER) ? pOld : pOld + `\n${this.TRASH_MARKER}${Date.now()}`
-           await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
+    this.saveTrashState()
+    try {
+      const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+      if (!messages || messages.length === 0) return
+      const m = messages[0]
+      const oldCaption = m.message || ''
+      const newCaption = oldCaption.includes(this.TRASH_MARKER)
+        ? oldCaption
+        : oldCaption + `\n${this.TRASH_MARKER}${Date.now()}`
+      await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
+      
+      const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
+      if (multipartMatch) {
+        const partIds = multipartMatch[1].split(',').map(Number)
+        for (const id of partIds) {
+          const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
+          if (pMsgs && pMsgs.length > 0) {
+             const pOld = pMsgs[0].message || ''
+             const pNew = pOld.includes(this.TRASH_MARKER) ? pOld : pOld + `\n${this.TRASH_MARKER}${Date.now()}`
+             await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
+          }
         }
       }
+    } catch (e) {
+      console.warn('Telegram API rejected edit for trash, falling back to local memory:', e)
     }
   }
 
@@ -845,28 +875,33 @@ export class TelegramService {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     this.localTrashedIds.delete(messageId)
     this.localRestoredIds.add(messageId)
-    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
-    if (!messages || messages.length === 0) throw new Error('Message not found')
-    const m = messages[0]
-    const oldCaption = m.message || ''
-    const newCaption = oldCaption.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
-    if (newCaption !== oldCaption) {
-      await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
-    }
-    
-    const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
-    if (multipartMatch) {
-      const partIds = multipartMatch[1].split(',').map(Number)
-      for (const id of partIds) {
-        const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
-        if (pMsgs && pMsgs.length > 0) {
-           const pOld = pMsgs[0].message || ''
-           const pNew = pOld.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
-           if (pNew !== pOld) {
-              await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
-           }
+    this.saveTrashState()
+    try {
+      const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+      if (!messages || messages.length === 0) return
+      const m = messages[0]
+      const oldCaption = m.message || ''
+      const newCaption = oldCaption.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
+      if (newCaption !== oldCaption) {
+        await this.client.editMessage(this.channelId as any, { message: messageId, text: newCaption })
+      }
+      
+      const multipartMatch = oldCaption.match(/#multipart\s+([\d,]+)/)
+      if (multipartMatch) {
+        const partIds = multipartMatch[1].split(',').map(Number)
+        for (const id of partIds) {
+          const pMsgs = await this.client.getMessages(this.channelId as any, { ids: [id] })
+          if (pMsgs && pMsgs.length > 0) {
+             const pOld = pMsgs[0].message || ''
+             const pNew = pOld.replace(new RegExp(`\n?${this.TRASH_MARKER}\\d+`), '')
+             if (pNew !== pOld) {
+                await this.client.editMessage(this.channelId as any, { message: id, text: pNew })
+             }
+          }
         }
       }
+    } catch (e) {
+      console.warn('Telegram API rejected edit for restore, falling back to local memory:', e)
     }
   }
 

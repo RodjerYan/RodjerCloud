@@ -76,7 +76,6 @@ export default function MyFilesPage() {
   const [preview, setPreview] = useState<{ idx: number; list: any[] } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
-  const [toast, setToast] = useState<string>('')
   const [drillDown, setDrillDown] = useState<string | null>(null)
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [folders, setFolders] = useState<any[]>([])
@@ -235,7 +234,7 @@ export default function MyFilesPage() {
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
     
-    if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.'))) return
+    if (!(await appConfirm('Удалить папку? Файлы останутся в общем списке.', true))) return
 
     let x = 0.5, y = 0.5
     if (targetElement) {
@@ -263,11 +262,7 @@ export default function MyFilesPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    applyRemove()
 
     const r = await window.electronAPI.folders.delete(id)
     if (r.success) { 
@@ -545,7 +540,7 @@ export default function MyFilesPage() {
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
 
-    if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
+    if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?', true))) return
     
     let x = 0.5, y = 0.5
     if (targetElement) {
@@ -577,11 +572,7 @@ export default function MyFilesPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    applyRemove()
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
@@ -595,13 +586,10 @@ export default function MyFilesPage() {
             if (prev.find(x => x.messageId === f.messageId)) return prev
             return [...prev, f].sort((a, b) => (b.messageId - a.messageId))
           })
+          setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
         revert()
-      }
     }
   }
   const handleCopyLink = async (f: any) => {
@@ -710,7 +698,7 @@ export default function MyFilesPage() {
   }, [preview, navPreview])
   const bulkDelete = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
+    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`, true))) return
     const ids = Array.from(selected)
     
     let x = 0.5, y = 0.5
@@ -741,11 +729,7 @@ export default function MyFilesPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    applyRemove()
 
     const r = await window.electronAPI.telegram.bulkDelete(ids)
     if (r.success) {
@@ -760,13 +744,10 @@ export default function MyFilesPage() {
             const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
             return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
           })
+          setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
         revert()
-      }
     }
   }
   const bulkDownload = async () => {
