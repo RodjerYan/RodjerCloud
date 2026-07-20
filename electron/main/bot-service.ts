@@ -237,8 +237,8 @@ export class BotService {
     if (!this.token) throw new Error('Bot token not configured')
 
     const userId = await telegramService.getUserId()
-    const channelPeer = channelId.startsWith('-100') ? channelId : `-100${channelId}`
-    const fromChatId = channelPeer
+    const actualChannelId = telegramService.getChannelId()
+    const fromChatId = actualChannelId || (channelId.startsWith('-100') ? channelId : `-100${channelId}`)
 
     const sent = await botApiRequest(this.token, 'forwardMessage', {
       chat_id: Number(userId),
