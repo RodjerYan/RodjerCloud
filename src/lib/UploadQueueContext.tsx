@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react'
 
+const CHUNK_GB = 1.95
+const CHUNK_SIZE = Math.floor(CHUNK_GB * 1024 * 1024 * 1024)
+
 export interface QueueItem {
   id: string
   filePath: string
@@ -7,6 +10,8 @@ export interface QueueItem {
   fileSize: number
   status: 'waiting' | 'uploading' | 'done' | 'failed'
   percent: number
+  sent?: number
+  total?: number
   error?: string
   encrypt?: boolean
 }
@@ -85,7 +90,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           rafId = window.requestAnimationFrame(() => {
             setQueue(prev => prev.map(q => {
               if (pendingUpdates.has(q.id)) {
-                return { ...q, percent: pendingUpdates.get(q.id)! };
+                return { ...q, percent: pendingUpdates.get(q.id)!, sent: data.sent, total: data.total };
               }
               return q;
             }));

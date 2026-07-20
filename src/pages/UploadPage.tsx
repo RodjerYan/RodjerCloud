@@ -6,6 +6,7 @@ import { fmtSize } from '../lib/utils'
 import { useUploadQueue } from '../lib/UploadQueueContext'
 
 const TG_LIMIT = 2 * 1024 * 1024 * 1024
+const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 
 const ALL_STEPS = [
   { key: 'downloading', label: 'Скачивание' },
@@ -211,6 +212,13 @@ export default function UploadPage() {
                   {q.status === 'failed' && <AlertTriangle size={16} className="err" />}
                   <div className="up-bar"><div className="up-bar-fill" style={{ width: q.percent + '%' }} /></div>
                   <span className="up-pct">{q.percent}%</span>
+                  {q.fileSize > 50 * 1024 * 1024 && q.sent !== undefined && q.total ? (
+                    <>
+                      <span className="up-detail">{fmtSize(q.sent)} / {fmtSize(q.total)}</span>
+                      <span className="up-detail">ост. {fmtSize(Math.max(0, q.total - q.sent))}</span>
+                      {(() => { const totalCh = Math.max(1, Math.ceil(q.total / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((q.sent || 1) / CHUNK_SIZE))); return totalCh > 1 ? <span className="up-detail">ч. {curCh}/{totalCh}</span> : null })()}
+                    </>
+                  ) : null}
                   {q.status === 'waiting' && <button onClick={() => removeItem(q.id)}><Trash2 size={14} /></button>}
                 </div>
               </li>
