@@ -82,7 +82,7 @@ export default function GlobalDialogs() {
             <button 
               onClick={() => d.resolve(false)}
               className="v3-btn"
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--v3-text)', border: '1px solid rgba(255,255,255,0.1)' }}
+              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--v3-text)', border: '1px solid rgba(255,255,255,0.1)', flex: 1, maxWidth: 140 }}
             >
               Отмена
             </button>
@@ -98,7 +98,7 @@ export default function GlobalDialogs() {
                 background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
                 color: '#f87171', fontWeight: 600, cursor: 'pointer', transition: 'transform 0.1s',
                 transform: holdProgress > 0 ? 'scale(0.96)' : 'scale(1)',
-                userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 140
+                userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, maxWidth: 140
               }}
             >
               <div style={{
@@ -113,6 +113,7 @@ export default function GlobalDialogs() {
             <button 
               onClick={() => d.resolve(true)}
               className="v3-btn"
+              style={{ flex: 1, maxWidth: 140 }}
             >
               ОК
             </button>
