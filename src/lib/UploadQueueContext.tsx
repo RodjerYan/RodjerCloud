@@ -45,7 +45,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     const items: QueueItem[] = files.map(f => ({
       id: Math.random().toString(36).slice(2),
       filePath: f.filePath, fileName: f.fileName, fileSize: f.fileSize,
-      status: 'waiting', percent: 0, encrypt: encryptNext
+      status: 'waiting', percent: 0, sent: 0, total: f.fileSize, encrypt: encryptNext
     }))
     setQueue(prev => [...prev, ...items])
     if (!isProcessing.current) {
@@ -77,11 +77,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let lastUpdate = 0;
-    let pendingUpdates = new Map<string, number>();
+    let pendingUpdates = new Map<string, { percent: number; sent: number; total: number }>();
     let rafId: number | null = null;
 
     const off = window.electronAPI.telegram.onUploadProgress?.((data: any) => {
-      pendingUpdates.set(data.id, data.percent);
+      pendingUpdates.set(data.id, { percent: data.percent, sent: data.sent, total: data.total });
       const now = Date.now();
 
       // Only schedule a state update if we haven't done one recently (throttle to 100ms)
@@ -89,8 +89,9 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         if (!rafId) {
           rafId = window.requestAnimationFrame(() => {
             setQueue(prev => prev.map(q => {
-              if (pendingUpdates.has(q.id)) {
-                return { ...q, percent: pendingUpdates.get(q.id)!, sent: data.sent, total: data.total };
+              const u = pendingUpdates.get(q.id);
+              if (u) {
+                return { ...q, percent: u.percent, sent: u.sent, total: u.total };
               }
               return q;
             }));
