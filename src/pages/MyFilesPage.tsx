@@ -806,6 +806,13 @@ export default function MyFilesPage() {
   const dragCounter = useRef(0)
 
   useEffect(() => {
+    const active = pendingStore.uploads.filter(u => u.progress < 100)
+    if (active.length > 0) {
+      setDropProgress({ current: 0, total: active.length, pct: 0, completed: 0 })
+    }
+  }, [])
+
+  useEffect(() => {
     return pendingStore.subscribe((updates: PendingUpload[]) => {
       setPendingUploads(updates)
       setDropProgress(dp => {
