@@ -238,12 +238,12 @@ export class BotService {
 
     const userId = await telegramService.getUserId()
     const actualChannelId = telegramService.getChannelId()
-    const fromChatId = actualChannelId || (channelId.startsWith('-100') ? channelId : `-100${channelId}`)
+    const fromChatId = actualChannelId ? String(actualChannelId) : (channelId.startsWith('-100') ? channelId : `-100${channelId}`)
 
     const sent = await botApiRequest(this.token, 'forwardMessage', {
       chat_id: Number(userId),
       from_chat_id: fromChatId,
-      message_id: messageId,
+      message_id: Number(messageId),
       disable_notification: true,
     })
 
