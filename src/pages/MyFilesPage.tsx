@@ -11,6 +11,7 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from '../lib/dialogs'
 import { toast } from '../lib/toast'
 import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
+const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 import { FileThumb } from '../components/FileThumb'
 import '../styles/duplicate-modal.css'
 
@@ -950,8 +951,12 @@ export default function MyFilesPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 90, overflowY: 'auto' }}>
             {pendingUploads.slice(0, 3).map(p => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{p.fileName || 'Файл'}</span>
-                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff' }}>{p.progress === 100 ? '100%' : '...'}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>{p.fileName || 'Файл'}</span>
+                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff', fontVariantNumeric: 'tabular-nums', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {p.progress === 100 ? '100%' : p.total && p.total > 50 * 1024 * 1024 ? (
+                    <>{fmtSize(p.sent || 0)} / {fmtSize(p.total)}</>
+                  ) : `${p.progress}%`}
+                </span>
               </div>
             ))}
             {pendingUploads.length > 3 && (
@@ -1313,7 +1318,7 @@ export default function MyFilesPage() {
                                   </div>
                                 </div>
                                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                                <div className="mf-card-meta">{f.progress < 100 ? `Загрузка ${f.progress}%` : 'Обработка...'}</div>
+                                <div className="mf-card-meta">{f.progress < 100 ? (f.total && f.total > 50 * 1024 * 1024 ? `${fmtSize(f.sent || 0)} / ${fmtSize(f.total)}` : `Загрузка ${f.progress}%`) : 'Обработка...'}</div>
                               </div>
                             )
                           }
@@ -1423,6 +1428,7 @@ export default function MyFilesPage() {
                                               Осталось: <span style={{ color: '#cbd5e1' }}>{fmtSize((p.total || 0) - (p.sent || 0))}</span>
                                               <span style={{ opacity: 0.5, margin: '0 6px' }}>•</span> 
                                               <span style={{ color: '#818cf8' }}>{p.progress}%</span>
+                                              {(() => { const t = p.total || 0; const s = p.sent || 0; const totalCh = Math.max(1, Math.ceil(t / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((s || 1) / CHUNK_SIZE))); return totalCh > 1 ? <><span style={{ opacity: 0.5, margin: '0 6px' }}>•</span><span style={{ color: '#a78bfa' }}>ч. {curCh}/{totalCh}</span></> : null })()}
                                             </>
                                           ) : (
                                             <span style={{ color: '#34d399' }}>Завершение...</span>
