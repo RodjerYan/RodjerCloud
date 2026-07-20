@@ -411,7 +411,7 @@ export class TelegramService {
     return await this.createPrivateChannel()
   }
 
-  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string) {
+  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
     let uploadPath = filePath
@@ -563,6 +563,7 @@ export class TelegramService {
     const tempDir = app.getPath('temp')
 
     for (let i = 0; i < totalParts; i++) {
+      if (checkCancelled?.()) throw new Error('Upload cancelled by user')
       const partStart = i * CHUNK_SIZE
       const partEnd = Math.min((i + 1) * CHUNK_SIZE, sizeBytes)
       const partSizeBytes = partEnd - partStart

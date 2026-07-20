@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive, Lock, Unlock } from 'lucide-react'
+import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive, Lock, Unlock, X } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
 import { useUploadQueue } from '../lib/UploadQueueContext'
@@ -219,7 +219,9 @@ export default function UploadPage() {
                       {(() => { const totalCh = Math.max(1, Math.ceil(q.total / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((q.sent || 1) / CHUNK_SIZE))); return totalCh > 1 ? <span className="up-detail">ч. {curCh}/{totalCh}</span> : null })()}
                     </>
                   ) : null}
-                  {q.status === 'waiting' && <button onClick={() => removeItem(q.id)}><Trash2 size={14} /></button>}
+                  {(q.status === 'waiting' || q.status === 'uploading') && (
+                    <button onClick={() => { window.electronAPI.telegram.cancelUpload(q.id); removeItem(q.id) }} title="Отменить"><X size={14} /></button>
+                  )}
                 </div>
               </li>
             ))}

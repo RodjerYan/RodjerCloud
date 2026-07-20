@@ -318,6 +318,7 @@ ipcMain.handle('telegram:get-user-info', async () => {
 type UploadJob = { id: string; filePath: string; encrypt?: boolean; customFileName?: string; event: { sender: { send: (c: string, d: any) => void } } }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
+const uploadCancelled = new Set<string>()
 async function getConcurrency(): Promise<number> {
   const p = await readPrefs()
   const c = parseInt(String(p.uploadConcurrency || 2), 10)
@@ -335,7 +336,9 @@ async function runUpload(job: UploadJob): Promise<void> {
   try {
     let lastSend = 0
     const THROTTLE_MS = 250
+    const isCancelled = () => uploadCancelled.has(job.id)
     const sendProgress = (sent: number, total: number) => {
+      if (isCancelled()) return
       const now = Date.now()
       if (now - lastSend < THROTTLE_MS && sent < total) return
       lastSend = now
@@ -347,11 +350,18 @@ async function runUpload(job: UploadJob): Promise<void> {
     sendProgress(0, 1)
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
       sendProgress(sent, total)
-    }, job.encrypt, job.customFileName)
+    }, job.encrypt, job.customFileName, isCancelled)
+    if (isCancelled()) {
+      uploadCancelled.delete(job.id)
+      return
+    }
     sendProgress(result.fileSize, result.fileSize)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
-    job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
+    if (!uploadCancelled.has(job.id)) {
+      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
+    }
+    uploadCancelled.delete(job.id)
   }
 }
 
@@ -372,6 +382,11 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
       processQueue()
     })
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:cancel-upload', async (event, id: string) => {
+  uploadCancelled.add(id)
+  return { success: true }
 })
 
 ipcMain.handle('folder:archive-and-upload', async (event, options: {

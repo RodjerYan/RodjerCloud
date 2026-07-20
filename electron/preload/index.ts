@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verify2FA: (password: string) => ipcRenderer.invoke('telegram:verify-2fa', password),
     reconnect: () => ipcRenderer.invoke('telegram:reconnect'),
     uploadFile: (filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => ipcRenderer.invoke('telegram:upload-file', filePath, id, encrypt, customFileName),
+    cancelUpload: (id: string) => ipcRenderer.invoke('telegram:cancel-upload', id),
     onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('telegram:upload-progress', listener)

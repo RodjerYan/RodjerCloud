@@ -214,6 +214,11 @@ export default function AutoSyncPage() {
                   )}
                   {item.status === 'failed' && item.error && <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{item.error}</div>}
                 </div>
+                {(item.status === 'pending' || item.status === 'uploading') && (
+                  <button onClick={() => { window.electronAPI.telegram.cancelUpload(item.id); setQueue(prev => prev.filter(q => q.id !== item.id)) }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 4, flexShrink: 0, lineHeight: 0 }} title="Отменить">
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             ))}
           </div>

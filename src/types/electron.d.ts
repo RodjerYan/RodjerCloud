@@ -10,6 +10,7 @@ declare global {
         verify2FA: (password: string) => Promise<{ success: boolean; data?: any; error?: string }>
         reconnect: () => Promise<{ success: boolean; data?: any; error?: string }>
         uploadFile: (filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        cancelUpload: (id: string) => Promise<{ success: boolean; error?: string }>
         onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => () => void
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>

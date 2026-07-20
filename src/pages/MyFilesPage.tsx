@@ -950,13 +950,18 @@ export default function MyFilesPage() {
         {pendingUploads.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 90, overflowY: 'auto' }}>
             {pendingUploads.slice(0, 3).map(p => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>{p.fileName || 'Файл'}</span>
-                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff', fontVariantNumeric: 'tabular-nums', textAlign: 'right', whiteSpace: 'nowrap' }}>
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{p.fileName || 'Файл'}</span>
+                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
                   {p.progress === 100 ? '100%' : p.total && p.total > 50 * 1024 * 1024 ? (
                     <>{fmtSize(p.sent || 0)} / {fmtSize(p.total)}</>
                   ) : `${p.progress}%`}
                 </span>
+                {p.progress < 100 && (
+                  <button onClick={(e) => { e.stopPropagation(); window.electronAPI.telegram.cancelUpload(p.id); pendingStore.remove(p.id) }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 2, flexShrink: 0 }} title="Отменить">
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             ))}
             {pendingUploads.length > 3 && (
@@ -1306,7 +1311,12 @@ export default function MyFilesPage() {
                         })].map((f: any, index) => {
                           if (f.id && !f.messageId) {
                             return (
-                              <div key={f.id} className="mf-card magnetic pending-upload" style={{ cursor: 'wait' }}>
+                              <div key={f.id} className="mf-card magnetic pending-upload" style={{ cursor: 'wait', position: 'relative' }}>
+                                {f.progress < 100 && (
+                                  <button onClick={(e) => { e.stopPropagation(); window.electronAPI.telegram.cancelUpload(f.id); pendingStore.remove(f.id) }} style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, background: 'rgba(0,0,0,0.5)', border: 'none', color: '#fff', cursor: 'pointer', padding: 4, borderRadius: 6, lineHeight: 0 }} title="Отменить">
+                                    <X size={14} />
+                                  </button>
+                                )}
                                 <div className="mf-card-icon" data-type={typeOf(f.fileName)} style={{ position: 'relative', overflow: 'hidden' }}>
                                   {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
                                   
@@ -1434,6 +1444,11 @@ export default function MyFilesPage() {
                                             <span style={{ color: '#34d399' }}>Завершение...</span>
                                           )}
                                         </div>
+                                        {p.progress < 100 && (
+                                          <button onClick={() => { window.electronAPI.telegram.cancelUpload(p.id); pendingStore.remove(p.id) }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 6, borderRadius: 6, flexShrink: 0, lineHeight: 0 }} title="Отменить">
+                                            <X size={16} />
+                                          </button>
+                                        )}
                                       </div>
                                       <div style={{ height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
                                         <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${p.progress || 0}%`, background: 'linear-gradient(90deg, #6366f1, #a855f7)', transition: 'width 0.2s ease-out', borderRadius: 3 }}>
@@ -1460,7 +1475,7 @@ export default function MyFilesPage() {
                                 </span></td>
                                 <td>{p.progress < 100 ? `Загрузка ${p.progress}%` : 'Обработка...'}</td>
                                 <td>—</td>
-                                <td></td>
+                                <td>{p.progress < 100 ? <button onClick={() => { window.electronAPI.telegram.cancelUpload(p.id); pendingStore.remove(p.id) }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 4, lineHeight: 0 }} title="Отменить"><X size={14} /></button> : null}</td>
                               </tr>
                             )}
                           </React.Fragment>
