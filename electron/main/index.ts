@@ -352,6 +352,7 @@ async function runUpload(job: UploadJob): Promise<void> {
       sendProgress(sent, total)
     }, job.encrypt, job.customFileName, isCancelled)
     if (isCancelled()) {
+      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
       uploadCancelled.delete(job.id)
       return
     }
@@ -360,6 +361,8 @@ async function runUpload(job: UploadJob): Promise<void> {
   } catch (error) {
     if (!uploadCancelled.has(job.id)) {
       job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
+    } else {
+      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
     }
     uploadCancelled.delete(job.id)
   }
