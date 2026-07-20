@@ -419,36 +419,33 @@ export default function MyFilesPage() {
         if (res.success && res.data) {
           if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
           if (targetFolderId && res.data.messageId) {
-            setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
             window.electronAPI.folders.addFile(targetFolderId, res.data.messageId).catch(console.error)
           }
-          setFiles(prev => {
-            if (prev.find(x => x.messageId === res.data.messageId)) return prev
-            return [res.data, ...prev].sort((a, b) => b.messageId - a.messageId)
-          })
         } else {
           toast.error(`Ошибка загрузки: ${res.error || 'неизвестная ошибка'}`)
         }
 
         pendingStore.remove(pendingId)
         if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
+
+        loadFolders()
+        load(true)
+
         setDropProgress(dp => {
           if (!dp) return null
           const completed = dp.completed + 1
           const pct = Math.floor((completed / dp.total) * 100)
           if (completed >= dp.total) {
             clearTimeout(dropDoneRef.current)
-            dropDoneRef.current = setTimeout(() => {
-              setDropProgress(null)
-              loadFolders()
-              load(true)
-            }, 6000)
+            dropDoneRef.current = setTimeout(() => setDropProgress(null), 6000)
           }
           return { ...dp, completed, pct }
         })
       }).catch((err: any) => {
         console.error('Upload failed:', err)
         pendingStore.remove(pendingId)
+        loadFolders()
+        load(true)
         setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
       })
     }
