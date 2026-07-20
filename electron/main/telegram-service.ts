@@ -591,6 +591,7 @@ export class TelegramService {
       const result = await this.client.sendFile(this.channelId as any, {
         file: partPath,
         caption: captionStr,
+        fileName,
         forceDocument: true,
         workers: workersCount,
         thumb: i === 0 ? thumbBuffer : undefined,
