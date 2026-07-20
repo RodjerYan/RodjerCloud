@@ -5,7 +5,7 @@ import { fmtSize } from '../lib/utils'
 
 const DEFAULTS = ['Documents', 'Downloads', 'Pictures', 'Desktop']
 
-interface QueueItem { id: string; filePath: string; fileName: string; fileSize: number; status: 'pending' | 'uploading' | 'done' | 'failed'; percent: number; error?: string }
+interface QueueItem { id: string; filePath: string; fileName: string; fileSize: number; status: 'pending' | 'uploading' | 'done' | 'failed'; percent: number; sent?: number; total?: number; error?: string }
 interface SyncEvent { type: string; file?: string; current?: number; total?: number; uploaded?: number; failed?: number; error?: string; ts?: number; queue?: QueueItem[] }
 
 const eventIcon: Record<string, string> = { detected: '👁️', uploading: '📤', uploaded: '✅', failed: '❌', skipped: '⏭️', 'scan-start': '🔍', 'scan-progress': '📡', 'scan-done': '🏁', started: '▶️', stopped: '⏹️', error: '⚠️' }
@@ -195,9 +195,13 @@ export default function AutoSyncPage() {
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.fileName}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
                       {item.status === 'pending' && 'Ожидает'}
-                      {item.status === 'uploading' && <span style={{ color: '#7cc8ff', fontWeight: 600 }}>{item.percent}%</span>}
+                      {item.status === 'uploading' && (
+                        item.total && item.total > 50 * 1024 * 1024
+                          ? <><span style={{ color: '#e2e8f0' }}>{fmtSize(item.sent || 0)}</span> / {fmtSize(item.total)}</>
+                          : <span style={{ color: '#7cc8ff', fontWeight: 600 }}>{item.percent}%</span>
+                      )}
                       {item.status === 'done' && <span style={{ color: '#34d399' }}>Готово</span>}
                       {item.status === 'failed' && <span style={{ color: '#f87171' }}>Ошибка</span>}
                     </div>

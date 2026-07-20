@@ -767,7 +767,7 @@ export default function MyFilesPage() {
     toast.success('Скачивание завершено')
   }
 
-  const [archiveProgress, setArchiveProgress] = useState<{ percent: number; phase: string } | null>(null)
+  const [archiveProgress, setArchiveProgress] = useState<{ percent: number; phase: string; sent?: number; total?: number } | null>(null)
   const [archiveDonePhases, setArchiveDonePhases] = useState<Set<string>>(new Set())
 
   const handleArchive = async (catOrFolder: string, files: any[]) => {
@@ -775,7 +775,7 @@ export default function MyFilesPage() {
     setArchiveProgress({ percent: 0, phase: 'downloading' })
     setArchiveDonePhases(new Set())
     const off = window.electronAPI.folders.onArchiveProgress((d: any) => {
-      setArchiveProgress({ percent: d.percent, phase: d.phase })
+      setArchiveProgress({ percent: d.percent, phase: d.phase, sent: d.sent, total: d.total })
       setArchiveDonePhases(prev => new Set(prev).add(d.phase))
     })
     const res = await window.electronAPI.folders.archiveAndUpload({
@@ -1622,7 +1622,12 @@ export default function MyFilesPage() {
             <span style={{ fontWeight: 600, color: '#fff' }}>
               {archiveProgress.phase === 'downloading' ? 'Скачивание файлов' : archiveProgress.phase === 'compressing' ? 'Архивация' : 'Загрузка архива'}
             </span>
-            <span style={{ marginLeft: 'auto', color: 'var(--v3-text-dim)', fontSize: 11 }}>{archiveProgress.percent}%</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--v3-text-dim)', fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+              {archiveProgress.phase === 'uploading' && archiveProgress.total && archiveProgress.total > 50 * 1024 * 1024
+                ? <>{fmtSize(archiveProgress.sent || 0)} / {fmtSize(archiveProgress.total)}</>
+                : `${archiveProgress.percent}%`
+              }
+            </span>
           </div>
           <div className="up-bar" style={{ height: 4 }}>
             <div className="up-bar-fill" style={{ width: archiveProgress.percent + '%', background: '#7c83ff', transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)' }} />

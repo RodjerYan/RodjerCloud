@@ -11,7 +11,7 @@ export interface SyncConfig {
 
 export interface QueueItem {
   id: string; filePath: string; fileName: string; fileSize: number
-  status: 'pending' | 'uploading' | 'done' | 'failed'; percent: number; error?: string
+  status: 'pending' | 'uploading' | 'done' | 'failed'; percent: number; sent?: number; total?: number; error?: string
 }
 
 export interface SyncEvent {
@@ -177,6 +177,7 @@ export class AutoSyncService {
 
       await this.tg.uploadFile(fp, (sent, total) => {
         item.percent = Math.round((sent / total) * 100)
+        item.sent = sent; item.total = total
         this.emitQueue()
       })
 
