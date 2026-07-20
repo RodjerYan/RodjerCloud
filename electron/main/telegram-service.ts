@@ -1666,6 +1666,48 @@ export class TelegramService {
     }
   }
 
+  async reAddBotToChannel(botToken: string) {
+    if (!this.client || !this.channelId) throw new Error('Not initialized')
+    const botId = botToken.split(':')[0]
+
+    let botEntity: any
+    try {
+      botEntity = await this.client.getEntity(Number(botId)) as any
+    } catch {
+      return
+    }
+
+    try {
+      await this.client.invoke(
+        new Api.channels.InviteToChannel({
+          channel: this.channelId as any,
+          users: [botEntity],
+        } as any)
+      )
+    } catch {}
+
+    try {
+      await this.client.invoke(
+        new Api.channels.EditAdmin({
+          channel: this.channelId as any,
+          userId: botEntity,
+          adminRights: new Api.ChatAdminRights({
+            changeInfo: true,
+            postMessages: true,
+            editMessages: true,
+            deleteMessages: true,
+            inviteUsers: true,
+            pinMessages: true,
+            addAdmins: false,
+            manageCall: true,
+            other: true,
+          }),
+          rank: 'Bot',
+        })
+      )
+    } catch {}
+  }
+
   async createCloudFolder(botUsername?: string) {
     if (!this.client || !this.channelId) return
 
