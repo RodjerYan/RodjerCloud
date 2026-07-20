@@ -240,11 +240,29 @@ export class BotService {
     const actualChannelId = telegramService.getChannelId()
     const fromChatId = actualChannelId ? `-100${String(actualChannelId)}` : (channelId.startsWith('-100') ? channelId : `-100${channelId}`)
 
+    console.log('[share] userId:', String(userId), 'actualChannelId:', String(actualChannelId), 'fromChatId:', fromChatId, 'messageId:', messageId)
+
     const sent = await botApiRequest(this.token, 'forwardMessage', {
       chat_id: Number(userId),
       from_chat_id: fromChatId,
       message_id: Number(messageId),
       disable_notification: true,
+    }).catch(async (e) => {
+      console.error('[share] forwardMessage error:', e.message, 'fromChatId:', fromChatId)
+      console.error('[share] Attempting to re-add bot to channel...')
+      try {
+        await telegramService.reAddBotToChannel(this.token)
+        console.error('[share] Bot re-added, retrying forward...')
+        return await botApiRequest(this.token, 'forwardMessage', {
+          chat_id: Number(userId),
+          from_chat_id: fromChatId,
+          message_id: Number(messageId),
+          disable_notification: true,
+        })
+      } catch (e2) {
+        console.error('[share] Re-add failed:', e2.message)
+        throw e
+      }
     })
 
     const info = extractFileInfo(sent)
