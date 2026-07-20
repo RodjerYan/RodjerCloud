@@ -333,11 +333,13 @@ async function processQueue() {
 }
 async function runUpload(job: UploadJob): Promise<void> {
   try {
-    let lastPct = -1
+    let lastSend = 0
+    const THROTTLE_MS = 250
     const sendProgress = (sent: number, total: number) => {
+      const now = Date.now()
+      if (now - lastSend < THROTTLE_MS && sent < total) return
+      lastSend = now
       const pct = total > 0 ? Math.floor((sent / total) * 100) : 0
-      if (pct <= lastPct) return
-      lastPct = pct
       try {
         job.event.sender.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct })
       } catch {}
