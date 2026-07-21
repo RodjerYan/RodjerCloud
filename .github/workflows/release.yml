@@ -6,15 +6,18 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    permissions:
-      contents: write
+        include:
+          - os: windows-latest
+            build: build:win
+            artifact: RodjerCloud-*.exe
+          - os: macos-latest
+            build: build:mac:arm64
+            artifact: RodjerCloud-*-arm64.dmg
 
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,30 +25,9 @@ jobs:
         with:
           node-version: 20
 
-      - name: Cache node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
 
-      - run: npm ci --legacy-peer-deps
-
-      - name: Build and Publish (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npm run build:win -- -p always
+      - name: Build
+        run: npm run ${{ matrix.build }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate .icns (Mac)
-        if: matrix.os == 'macos-latest'
-        run: bash scripts/generate-icons.sh
-
-      - name: Build and Publish (Mac)
-        if: matrix.os == 'macos-latest'
-        run: npm run build:mac -- -p always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
