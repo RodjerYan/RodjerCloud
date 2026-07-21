@@ -15,10 +15,10 @@ jobs:
         include:
           - os: windows-latest
             build: build:win
-            artifact: RodjerCloud-*.exe
+            glob: '*.exe*'
           - os: macos-latest
             build: build:mac:arm64
-            artifact: RodjerCloud-*-arm64.dmg
+            glob: '*.dmg*'
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -30,7 +30,33 @@ jobs:
 
       - run: npm ci --legacy-peer-deps
 
-      - name: Build
-        run: npm run ${{ matrix.build }}
+      - run: npm run ${{ matrix.build }}
+        env:
+          GH_TOKEN: ''
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ runner.os }}
+          path: dist/${{ matrix.glob }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - run: ls -la
+
+      - name: Create or update release
+        run: |
+          if gh release view "${{ github.ref_name }}" --json tagName > /dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" *.* --clobber || true
+          else
+            gh release create "${{ github.ref_name }}" *.* \
+              --title "${{ github.ref_name }}" \
+              --notes "Автоматическая сборка" || true
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
