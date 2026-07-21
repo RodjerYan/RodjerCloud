@@ -77,12 +77,15 @@ export default function GlobalDialogs() {
           {d.message}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
           {d.type === 'confirm' && (
             <button 
               onClick={() => d.resolve(false)}
-              className="v3-btn"
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--v3-text)', border: '1px solid rgba(255,255,255,0.1)', flex: 1, maxWidth: 140 }}
+              style={{
+                padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.04)', color: 'var(--v3-text)', fontWeight: 500,
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px'
+              }}
             >
               Отмена
             </button>
@@ -94,11 +97,11 @@ export default function GlobalDialogs() {
               onMouseUp={stopHold}
               onMouseLeave={stopHold}
               style={{
-                position: 'relative', overflow: 'hidden', padding: '8px 20px', borderRadius: 8,
-                background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#f87171', fontWeight: 600, cursor: 'pointer', transition: 'transform 0.1s',
-                transform: holdProgress > 0 ? 'scale(0.96)' : 'scale(1)',
-                userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, maxWidth: 140
+                padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.35)',
+                background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', fontWeight: 600,
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px', position: 'relative', overflow: 'hidden',
+                transition: 'transform 0.1s', transform: holdProgress > 0 ? 'scale(0.96)' : 'scale(1)',
+                userSelect: 'none'
               }}
             >
               <div style={{
@@ -112,8 +115,11 @@ export default function GlobalDialogs() {
           ) : (
             <button 
               onClick={() => d.resolve(true)}
-              className="v3-btn"
-              style={{ flex: 1, maxWidth: 140 }}
+              style={{
+                padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.04)', color: 'var(--v3-text)', fontWeight: 500,
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px'
+              }}
             >
               ОК
             </button>
