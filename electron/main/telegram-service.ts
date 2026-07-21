@@ -460,9 +460,9 @@ export class TelegramService {
 
     let workersCount = 4
     if (turboMode) {
-      if (sizeBytes < 10 * 1024 * 1024) workersCount = 4
-      else if (sizeBytes < 100 * 1024 * 1024) workersCount = 8
-      else workersCount = 16
+      if (sizeBytes < 10 * 1024 * 1024) workersCount = 8
+      else if (sizeBytes < 100 * 1024 * 1024) workersCount = 16
+      else workersCount = 32
     } else {
       if (sizeBytes > 100 * 1024 * 1024) workersCount = 4
       else workersCount = 2
