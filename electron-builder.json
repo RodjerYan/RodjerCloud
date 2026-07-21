@@ -11,12 +11,6 @@
   "asarUnpack": [
     "node_modules/ffmpeg-static/**/*"
   ],
-  "publish": {
-    "provider": "github",
-    "owner": "RodjerYan",
-    "repo": "RodjerCloud",
-    "releaseType": "release"
-  },
   "win": {
     "target": [
       "nsis"
