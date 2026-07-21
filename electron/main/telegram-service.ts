@@ -1,4 +1,12 @@
 import { TelegramClient } from 'telegram'
+import * as fs from 'fs'
+import * as path from 'path'
+import { app } from 'electron'
+
+const SHARE_LOG = () => path.join(app.isPackaged ? app.getPath('userData') : app.getAppPath(), 'share-debug.log')
+function shareLog(...args: any[]) {
+  try { fs.appendFileSync(SHARE_LOG(), `[${new Date().toISOString()}] [findBot] ${args.join(' ')}\n`) } catch {}
+}
 import { getFileHash } from './storage-service'
 import { vaultService } from './vault-service'
 import { StringSession } from 'telegram/sessions'
@@ -1446,21 +1454,79 @@ export class TelegramService {
   }
 
 
-  async findBotInChannel(): Promise<string | null> {
+  async findExistingBot(): Promise<{ token: string; username: string } | null> {
     if (!this.client || !this.channelId) return null
     try {
-      const participants = await this.client.invoke(
-        new Api.channels.GetParticipants({
-          channel: this.channelId as any,
-          filter: new Api.ChannelParticipantsBots(),
-          offset: 0,
-          limit: 10,
-          hash: 0,
-        })
-      ) as any
-      const bot = participants?.users?.find((u: any) => u.bot)
-      return bot ? (bot.username || null) : null
+      const botFather = await this.client.getEntity('BotFather') as any
+      if (!botFather) return null
+
+      await this.client.sendMessage(botFather, { message: '/mybots', silent: true } as any)
+      let mybotsMsg: any = null
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
+        const m = msgs.find(x => x.message?.includes('Choose a bot from the list below') || x.message?.includes('You have no bots'))
+        if (m) { mybotsMsg = m; break }
+      }
+      if (!mybotsMsg || !mybotsMsg.replyMarkup) return null
+
+      let orphanedBot: string | null = null
+      for (const row of mybotsMsg.replyMarkup.rows) {
+        for (const btn of row.buttons) {
+          if (btn.text.startsWith('@rodjercloud_') && btn.text.endsWith('_bot')) {
+            orphanedBot = btn.text.slice(1)
+            break
+          }
+        }
+        if (orphanedBot) break
+      }
+      if (!orphanedBot) return null
+
+      const token = await this.fetchExistingBotToken(orphanedBot)
+      if (!token) return null
+      await this.addBotToChannel(orphanedBot)
+      return { token, username: orphanedBot }
     } catch {
+      return null
+    }
+  }
+
+  async findBotInChannel(): Promise<string | null> {
+    if (!this.client || !this.channelId) { shareLog('not initialized'); return null }
+    try {
+      shareLog('channelId: ' + String(this.channelId))
+      // Try multiple participant filters
+      const filters = [
+        { name: 'admins', f: new Api.ChannelParticipantsAdmins() },
+        { name: 'recent', f: new Api.ChannelParticipantsRecent() },
+        { name: 'search', f: new Api.ChannelParticipantsSearch('') },
+      ]
+      for (const { name, f } of filters) {
+        shareLog('trying filter: ' + name)
+        try {
+          const participants = await this.client.invoke(
+            new Api.channels.GetParticipants({
+              channel: this.channelId as any,
+              filter: f,
+              offset: 0,
+              limit: 50,
+              hash: 0,
+            })
+          ) as any
+          shareLog(name + ' count: ' + (participants?.count ?? '?') + ' users: ' + (participants?.users?.length ?? 0))
+          const bot = participants?.users?.find((u: any) => u.bot)
+          if (bot) {
+            shareLog('bot found: ' + (bot.username || bot.id?.toString()))
+            return bot.username || null
+          }
+        } catch (e) {
+          shareLog(name + ' error: ' + (e as Error).message)
+        }
+      }
+      shareLog('no bot found with any filter')
+      return null
+    } catch (e) {
+      shareLog('unexpected error: ' + (e as Error).message)
       return null
     }
   }
@@ -1534,48 +1600,14 @@ export class TelegramService {
       if (existingToken) {
         return { token: existingToken, username: existingBot }
       }
-      throw new Error(`Не удалось автоматически получить токен бота @${existingBot}. Пожалуйста, удалите его из канала перед созданием нового.`)
     }
+
+    // Try to reuse any orphaned bot via BotFather
+    const reused = await this.findExistingBot()
+    if (reused) return reused
 
     const botFather = await this.client.getEntity('BotFather') as any
     if (!botFather) throw new Error('Cannot find BotFather')
-
-    if (!existingBot) {
-      try {
-        await this.client!.sendMessage(botFather, { message: '/mybots', silent: true } as any)
-        let mybotsMsg: any = null;
-        for (let i = 0; i < 15; i++) {
-          await new Promise(r => setTimeout(r, 1000))
-          const msgs = await this.client!.getMessages(botFather, { limit: 2 }) as any[]
-          const m = msgs.find(x => x.message?.includes('Choose a bot from the list below') || x.message?.includes('You have no bots'))
-          if (m) { mybotsMsg = m; break; }
-        }
-        
-        let orphanedBot: string | null = null;
-        if (mybotsMsg && mybotsMsg.replyMarkup) {
-          for (const row of mybotsMsg.replyMarkup.rows) {
-            for (const btn of row.buttons) {
-              if (btn.text.startsWith('@rodjercloud_') && btn.text.endsWith('_bot')) {
-                orphanedBot = btn.text.slice(1) // remove @
-                break
-              }
-            }
-            if (orphanedBot) break
-          }
-        }
-        
-        if (orphanedBot) {
-          const token = await this.fetchExistingBotToken(orphanedBot)
-          if (token) {
-            await this.addBotToChannel(orphanedBot)
-            this.cleanupBots(token).catch(() => {})
-            return { token, username: orphanedBot }
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to reuse orphaned bot:', e)
-      }
-    }
 
     const sendAndWait = async (msg: string): Promise<string> => {
       const before = (await this.client!.getMessages(botFather, { limit: 1 })) as any[] | undefined
@@ -1624,7 +1656,7 @@ export class TelegramService {
     throw new Error('Failed to create bot: unable to find unique username')
   }
 
-  private async addBotToChannel(botUsername: string) {
+  async addBotToChannel(botUsername: string) {
     if (!this.client || !this.channelId) throw new Error('Not initialized')
     const botEntity = await this.client.getEntity(botUsername) as any
     if (!botEntity) throw new Error('Cannot find bot: ' + botUsername)
@@ -1667,13 +1699,16 @@ export class TelegramService {
   }
 
   async reAddBotToChannel(botToken: string) {
-    if (!this.client || !this.channelId) throw new Error('Not initialized')
+    if (!this.client || !this.channelId) { console.error('[reAddBot] not initialized'); throw new Error('Not initialized') }
     const botId = botToken.split(':')[0]
+    console.log('[reAddBot] botId:', botId, 'channelId:', String(this.channelId))
 
     let botEntity: any
     try {
       botEntity = await this.client.getEntity(Number(botId)) as any
-    } catch {
+      console.log('[reAddBot] got bot entity:', botEntity?.username || botEntity?.id?.toString())
+    } catch (e) {
+      console.error('[reAddBot] getEntity failed for botId', botId, ':', (e as Error).message)
       return
     }
 
@@ -1684,7 +1719,10 @@ export class TelegramService {
           users: [botEntity],
         } as any)
       )
-    } catch {}
+      console.log('[reAddBot] inviteToChannel succeeded')
+    } catch (e) {
+      console.error('[reAddBot] inviteToChannel failed:', (e as Error).message)
+    }
 
     try {
       await this.client.invoke(
@@ -1705,7 +1743,10 @@ export class TelegramService {
           rank: 'Bot',
         })
       )
-    } catch {}
+      console.log('[reAddBot] editAdmin succeeded')
+    } catch (e) {
+      console.error('[reAddBot] editAdmin failed:', (e as Error).message)
+    }
   }
 
   async createCloudFolder(botUsername?: string) {

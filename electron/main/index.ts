@@ -290,7 +290,8 @@ ipcMain.handle('telegram:reconnect', async () => {
     const sessionData = await storageService.getSession()
     if (!sessionData) return { success: false, error: 'No session found' }
     const result = await telegramService.reconnect(sessionData.session)
-    if (!botService.getToken()) {
+    const savedToken = botService.getToken()
+    if (!savedToken) {
       try {
         const botResult = await telegramService.createBotAndAddToChannel()
         botService.setToken(botResult.token)
@@ -299,8 +300,18 @@ ipcMain.handle('telegram:reconnect', async () => {
         log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
       }
     } else {
-      // Cleanup extra bots if any (keep the active one)
-      await telegramService.cleanupBots(botService.getToken())
+      // Ensure stored bot is admin in the channel
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+        const json = await resp.json()
+        if (json.ok && json.result?.username) {
+          await telegramService.addBotToChannel(json.result.username)
+          log('info', 'Ensured bot @' + json.result.username + ' is admin in channel')
+        }
+      } catch (e) {
+        log('warn', 'Failed to ensure bot is admin: ' + (e as Error).message)
+      }
+      await telegramService.cleanupBots(savedToken)
     }
     await telegramService.createCloudFolder()
     return { success: true, data: result }
@@ -1704,6 +1715,17 @@ ipcMain.handle('autosync:reset-uploaded', async () => {
 // ===== Share / Bot link IPC =====
 ipcMain.handle('share:set-bot-token', async (_, token: string) => {
   try {
+    // Verify token via Bot API and get bot username
+    const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const json = await resp.json()
+    if (!json.ok) throw new Error('Токен недействителен: ' + (json.description || ''))
+    const botUsername = json.result?.username
+    if (!botUsername) throw new Error('Не удалось получить username бота')
+
+    // Add bot to channel as admin
+    log('info', 'Adding bot @' + botUsername + ' to channel with token')
+    await telegramService.addBotToChannel(botUsername)
+
     botService.setToken(token)
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -1725,13 +1747,17 @@ ipcMain.handle('share:generate-link', async (_, messageId: number, channelId: st
 ipcMain.handle('share:ensure-bot', async () => {
   try {
     if (botService.getToken()) return { success: true, data: { created: false } }
-    const existingBot = await telegramService.findBotInChannel()
-    if (existingBot) {
-      return { success: false, error: `Bot @${existingBot} уже есть в канале. Получи токен: @BotFather → /mybots → ${existingBot} → API Token` }
-    }
     const botResult = await telegramService.createBotAndAddToChannel()
     botService.setToken(botResult.token)
     return { success: true, data: { created: true, username: botResult.username } }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('share:reuse-bot', async () => {
+  try {
+    const botResult = await telegramService.createBotAndAddToChannel()
+    botService.setToken(botResult.token)
+    return { success: true, data: { username: botResult.username } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

@@ -70,6 +70,13 @@ export interface ScanProgress {
 
 type ProgressCb = (p: ScanProgress) => void
 
+const DEBUG_LOG = path.join(app.isPackaged ? app.getPath('userData') : app.getAppPath(), 'share-debug.log')
+function logDebug(...args: any[]) {
+  const msg = `[${new Date().toISOString()}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')}\n`
+  try { fs.appendFileSync(DEBUG_LOG, msg) } catch {}
+  console.log(msg.trimEnd())
+}
+
 export class BotService {
   private token: string = ''
   private configPath: string
@@ -90,6 +97,11 @@ export class BotService {
 
   getToken(): string {
     return this.token
+  }
+
+  clearToken() {
+    this.token = ''
+    try { fs.unlinkSync(this.configPath) } catch {}
   }
 
   loadToken(): string {
@@ -238,32 +250,68 @@ export class BotService {
 
     const userId = await telegramService.getUserId()
     const actualChannelId = telegramService.getChannelId()
-    const fromChatId = actualChannelId ? `-100${String(actualChannelId)}` : (channelId.startsWith('-100') ? channelId : `-100${channelId}`)
+    const tokenMask = this.token.slice(0, 8) + '...' + this.token.slice(-4)
+    logDebug('=== generateLink ===')
+    logDebug('token (masked):', tokenMask)
+    logDebug('userId:', String(userId))
+    logDebug('actualChannelId (BigInt):', String(actualChannelId))
+    logDebug('channelId (from renderer):', channelId)
+    logDebug('messageId:', messageId)
 
-    console.log('[share] userId:', String(userId), 'actualChannelId:', String(actualChannelId), 'fromChatId:', fromChatId, 'messageId:', messageId)
+    // Generate possible from_chat_id formats to try
+    const chatIds = new Set<string>()
+    const raw = actualChannelId ? String(actualChannelId) : channelId
+    chatIds.add(raw)                          // as-is from GramJS
+    chatIds.add(`-100${raw.replace(/^-100/, '')}`)  // with single -100
+    if (actualChannelId && channelId) chatIds.add(channelId)
+    if (actualChannelId && channelId) chatIds.add(`-100${channelId}`)
 
-    const sent = await botApiRequest(this.token, 'forwardMessage', {
-      chat_id: Number(userId),
-      from_chat_id: fromChatId,
-      message_id: Number(messageId),
-      disable_notification: true,
-    }).catch(async (e) => {
-      console.error('[share] forwardMessage error:', e.message, 'fromChatId:', fromChatId)
-      console.error('[share] Attempting to re-add bot to channel...')
+    logDebug('fromChatId formats to try:', [...chatIds])
+    let sent: any
+    for (const fcid of chatIds) {
       try {
-        await telegramService.reAddBotToChannel(this.token)
-        console.error('[share] Bot re-added, retrying forward...')
-        return await botApiRequest(this.token, 'forwardMessage', {
+        logDebug('trying forwardMessage with from_chat_id:', fcid)
+        sent = await botApiRequest(this.token, 'forwardMessage', {
           chat_id: Number(userId),
-          from_chat_id: fromChatId,
+          from_chat_id: fcid,
           message_id: Number(messageId),
           disable_notification: true,
         })
-      } catch (e2) {
-        console.error('[share] Re-add failed:', e2.message)
-        throw e
+        logDebug('forwardMessage OK with', fcid)
+        break
+      } catch (e: any) {
+        logDebug('forwardMessage FAILED with', fcid, ':', e.message)
       }
-    })
+    }
+
+    if (!sent) {
+      logDebug('All format attempts failed')
+      // Check if the bot token is valid at all
+      logDebug('Checking bot token validity via getMe...')
+      try {
+        const me = await botApiRequest(this.token, 'getMe')
+        logDebug('bot token valid, bot username: @' + (me.username || 'unknown'))
+      } catch (e: any) {
+        logDebug('bot token INVALID:', e.message)
+        this.clearToken()
+        throw new Error('Сохранённый токен бота недействителен. Нажмите «Поделиться» снова — бот будет создан заново.')
+      }
+
+      // Token is valid - check if the bot can see the channel via getChat
+      logDebug('Checking if bot can access channel via getChat...')
+      for (const fcid of chatIds) {
+        try {
+          const chatInfo = await botApiRequest(this.token, 'getChat', { chat_id: fcid })
+          logDebug('bot CAN see channel with id', fcid, ':', chatInfo.title || chatInfo.type)
+        } catch (e: any) {
+          logDebug('bot CANNOT see channel with id', fcid, ':', e.message)
+        }
+      }
+
+      throw new Error('Бот не имеет доступа к каналу или у вас нет чата с ботом. Напишите боту в Telegram любое сообщение, затем повторите попытку.')
+    }
+
+    logDebug('forwardMessage SUCCESS, sent:', JSON.stringify(sent).slice(0, 200))
 
     const info = extractFileInfo(sent)
     if (!info) throw new Error('No file found in forwarded message')

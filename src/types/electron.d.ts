@@ -90,6 +90,7 @@ declare global {
         setBotToken: (token: string) => Promise<{ success: boolean; error?: string }>
         getBotToken: () => Promise<{ success: boolean; data?: string; error?: string }>
         ensureBot: () => Promise<{ success: boolean; data?: any; error?: string }>
+        reuseBot: () => Promise<{ success: boolean; data?: any; error?: string }>
         downloadFile: (url: string, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       state: {

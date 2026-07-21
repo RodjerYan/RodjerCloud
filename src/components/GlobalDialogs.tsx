@@ -84,7 +84,7 @@ export default function GlobalDialogs() {
               style={{
                 padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
                 background: 'rgba(255,255,255,0.04)', color: 'var(--v3-text)', fontWeight: 500,
-                cursor: 'pointer', fontSize: 13, lineHeight: '20px'
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px', width: 140
               }}
             >
               Отмена
@@ -99,7 +99,7 @@ export default function GlobalDialogs() {
               style={{
                 padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.35)',
                 background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', fontWeight: 600,
-                cursor: 'pointer', fontSize: 13, lineHeight: '20px', position: 'relative', overflow: 'hidden',
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px', width: 140, position: 'relative', overflow: 'hidden',
                 transition: 'transform 0.1s', transform: holdProgress > 0 ? 'scale(0.96)' : 'scale(1)',
                 userSelect: 'none'
               }}
@@ -118,7 +118,7 @@ export default function GlobalDialogs() {
               style={{
                 padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
                 background: 'rgba(255,255,255,0.04)', color: 'var(--v3-text)', fontWeight: 500,
-                cursor: 'pointer', fontSize: 13, lineHeight: '20px'
+                cursor: 'pointer', fontSize: 13, lineHeight: '20px', width: 140
               }}
             >
               ОК

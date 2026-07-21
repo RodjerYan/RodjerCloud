@@ -418,8 +418,15 @@ export default function MyFilesPage() {
 
         if (res.success && res.data) {
           if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
+
+          setFiles(prev => {
+            if (prev.some(f => f.messageId === res.data.messageId)) return prev
+            return [res.data, ...prev]
+          })
+
           if (targetFolderId && res.data.messageId) {
-            window.electronAPI.folders.addFile(targetFolderId, res.data.messageId).catch(console.error)
+            setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
+            await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
           }
         } else {
           toast.error(`Ошибка загрузки: ${res.error || 'неизвестная ошибка'}`)
@@ -428,16 +435,7 @@ export default function MyFilesPage() {
         pendingStore.remove(pendingId)
         if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
 
-        if (res.success && res.data) {
-          setFiles(prev => {
-            if (prev.some(f => f.messageId === res.data.messageId)) return prev
-            return [res.data, ...prev]
-          })
-          if (targetFolderId && res.data.messageId) {
-            setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
-          }
-        }
-        await Promise.all([loadFolders(), load(true)])
+        await loadFolders()
 
         setDropProgress(dp => {
           if (!dp) return null
@@ -453,7 +451,6 @@ export default function MyFilesPage() {
         console.error('Upload failed:', err)
         pendingStore.remove(pendingId)
         loadFolders()
-        load(true)
         setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
       })
     }
