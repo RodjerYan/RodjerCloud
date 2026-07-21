@@ -428,8 +428,16 @@ export default function MyFilesPage() {
         pendingStore.remove(pendingId)
         if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
 
-        loadFolders()
-        load(true)
+        if (res.success && res.data) {
+          setFiles(prev => {
+            if (prev.some(f => f.messageId === res.data.messageId)) return prev
+            return [res.data, ...prev]
+          })
+          if (targetFolderId && res.data.messageId) {
+            setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
+          }
+        }
+        await Promise.all([loadFolders(), load(true)])
 
         setDropProgress(dp => {
           if (!dp) return null
