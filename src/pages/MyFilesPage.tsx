@@ -1067,7 +1067,7 @@ export default function MyFilesPage() {
             <span className="mf-gallery-count">{galleryFiles.length}</span>
           </div>
           <div className="mf-gallery-body">
-            {drillDown === 'Аудио' ? (
+            {drillDown === 'Аудио' ? (<>
               <table className="mf-table">
                 <thead><tr>
                   <th><input type="checkbox" onChange={() => galleryFiles.forEach(f => toggleSelect(f.messageId))} /></th>
@@ -1092,7 +1092,17 @@ export default function MyFilesPage() {
                   ))}
                 </tbody>
               </table>
-            ) : (
+              {galleryFiles.length === 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
+                  {duckAnim ? (
+                    <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                  ) : (
+                    <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
+                  )}
+                  <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Нет файлов</span>
+                </div>
+              )}
+            </>) : (
               <div className="mf-gallery-body">
                 {galleryFiles.length > 0 ? (
                   Object.entries(groupByDay(galleryFiles)).sort(([a], [b]) => +b - +a).map(([year, months]) => (
@@ -1135,7 +1145,16 @@ export default function MyFilesPage() {
                 ) : null}
               </div>
             )}
-            {galleryFiles.length === 0 && drillDown !== 'Аудио' && <div className="mf-empty">Нет файлов</div>}
+            {galleryFiles.length === 0 && drillDown !== 'Аудио' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
+                {duckAnim ? (
+                  <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
+                ) : (
+                  <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
+                )}
+                <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Нет файлов</span>
+              </div>
+            )}
           </div>
         </div>
       ) : !hasFiles && folders.length === 0 && !search ? <div className="mf-empty">Нет файлов</div> : (
