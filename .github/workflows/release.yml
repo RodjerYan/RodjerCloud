@@ -14,10 +14,10 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            build: build:win
+            build: build:ci:win
             glob: '*.exe*'
           - os: macos-latest
-            build: build:mac:arm64
+            build: build:ci:mac:arm64
             glob: '*.dmg*'
 
     runs-on: ${{ matrix.os }}

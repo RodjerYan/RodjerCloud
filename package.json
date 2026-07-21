@@ -12,7 +12,9 @@
     "build:win": "electron-vite build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:mac:arm64": "electron-vite build && electron-builder --mac --arm64",
-    "build:all": "electron-vite build && electron-builder --mac --arm64 --win"
+    "build:all": "electron-vite build && electron-builder --mac --arm64 --win",
+    "build:ci:win": "electron-vite build && electron-builder --win --publish never",
+    "build:ci:mac:arm64": "electron-vite build && electron-builder --mac --arm64 --publish never"
   },
   "dependencies": {
     "@lottiefiles/react-lottie-player": "^3.6.0",
