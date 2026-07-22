@@ -1,6 +1,7 @@
 .dh-root { display: flex; flex-direction: column; gap: 20px; animation: fadeInUp 0.4s ease both; }
-.dh-banner { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 26px 28px;
-  display: flex; justify-content: space-between; align-items: center; backdrop-filter: blur(20px); }
+.dh-banner { background: rgba(17, 20, 37, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 26px 28px;
+  display: flex; justify-content: space-between; align-items: center; backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); }
 .dh-banner h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: -0.4px; }
 .dh-banner p { margin: 6px 0 0; color: var(--text-dim); }
 .dh-v { font-size: var(--text-xs); padding: 3px var(--space-sm); border-radius: 99px; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); vertical-align: middle; }
@@ -9,18 +10,24 @@
 .dh-cta:active { opacity: 0.8; transform: translateY(0); }
 .dh-cta:hover { transform: translateY(-1px); }
 .dh-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.dh-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-md) 18px;
-  display: flex; align-items: center; gap: 14px; backdrop-filter: blur(20px); }
+.dh-card { background: rgba(17, 20, 37, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); padding: var(--space-md) 18px;
+  display: flex; align-items: center; gap: 14px; backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: pointer; }
+.dh-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(124,131,255,0.15), inset 0 1px 0 rgba(255,255,255,0.08); }
 .dh-card-icon { width: 42px; height: 42px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
   display: flex; align-items: center; justify-content: center; }
 .dh-card-label { color: var(--text-dim); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; }
 .dh-card-value { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.3px; margin-top: 2px; }
 .dh-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-md); }
-.dh-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; backdrop-filter: blur(20px); }
+.dh-panel { background: rgba(17, 20, 37, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 18px 20px;
+  backdrop-filter: blur(20px); box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); }
 .dh-panel-head h2 { margin: 0 0 14px; font-size: var(--text-lg); font-weight: 600; }
 .dh-empty { padding: 30px; text-align: center; color: var(--text-dim); }
 .dh-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.dh-recent li { padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md); }
+.dh-recent li { padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md);
+  border: 1px solid rgba(255,255,255,0.04); transition: background 0.2s ease; }
+.dh-recent li:hover { background: rgba(255,255,255,0.06); }
 .dh-recent-name { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dh-recent-meta { font-size: var(--text-xs); color: var(--text-mute); margin-top: var(--space-xs); }
 .dh-quick { background: var(--panel-2); border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg);
@@ -36,7 +43,8 @@
   border: 1px solid rgba(124, 131, 255, 0.25);
   border-radius: 10px;
   padding: 8px 14px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 10px rgba(124,131,255,0.1);
+  backdrop-filter: blur(20px);
 }
 .dh-tooltip-label {
   font-size: 12px;

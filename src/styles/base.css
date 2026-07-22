@@ -32,7 +32,25 @@ body::before {
 @keyframes spin { to { transform: rotate(360deg) } }
 @keyframes shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(200%) } }
 @keyframes meshGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes skeletonShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 .spin { animation: spin 1s linear infinite; }
+
+/* Skeleton loading */
+.skeleton {
+  background: linear-gradient(90deg, rgba(17,20,37,0.8) 25%, rgba(26,29,58,0.8) 50%, rgba(17,20,37,0.8) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+.skeleton-text { height: 14px; margin-bottom: 8px; }
+.skeleton-title { height: 24px; width: 60%; margin-bottom: 12px; }
+.skeleton-card { height: 80px; border-radius: var(--radius-md); }
+
+/* Global hover transitions */
+button, a, .clickable {
+  transition: transform 0.15s ease, opacity 0.15s ease, color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
+}
+button:active, a:active { transform: scale(0.97); }
 
 .page-enter {
   animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
@@ -50,7 +68,7 @@ body::before {
 .splash-root { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .splash-bg { position: absolute; inset: 0; background: conic-gradient(from 230deg at 50% 50%, #1a1640, #2b1248, #1a1640); filter: blur(60px); opacity: 0.6; animation: pulse 4s ease-in-out infinite; }
 .splash-inner { position: relative; text-align: center; animation: fadeInUp 0.6s ease both; }
-.splash-logo-mark { width: 88px; height: 88px; border-radius: 20px; background: #7c83ff; object-fit: cover; filter: drop-shadow(0 20px 60px color-mix(in srgb, var(--accent) 40%, transparent)); }
+.splash-logo-mark { width: 88px; height: 88px; border-radius: 20px; background: transparent; object-fit: contain; filter: drop-shadow(0 20px 60px color-mix(in srgb, var(--accent) 40%, transparent)); }
 .splash-title { font-size: var(--text-3xl); margin: 18px 0 var(--space-xs); letter-spacing: -0.5px; }
 .splash-subtitle { color: var(--text-dim); margin: 0 0 28px; }
 .splash-progress { width: 280px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; margin: 0 auto; }

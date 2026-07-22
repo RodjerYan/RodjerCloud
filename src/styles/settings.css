@@ -111,7 +111,7 @@
 
 /* About Section */
 .se-about-wrapper { text-align: center; padding: 30px 0; }
-.se-logo { width: 80px; height: 80px; border-radius: 22px; margin-bottom: 12px; object-fit: cover; background: var(--accent); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.se-logo { width: 80px; height: 80px; border-radius: 22px; margin-bottom: 12px; object-fit: cover; background: transparent; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .se-app-name { margin: 0 0 4px; font-size: 20px; }
 .se-app-version { color: var(--accent); font-size: 14px; margin-bottom: 16px; font-weight: 500; }
 .se-app-desc { color: var(--text-dim); line-height: 1.5; max-width: 460px; margin: 0 auto 24px; font-size: 14px; }

@@ -1163,7 +1163,23 @@ export default function MyFilesPage() {
             )}
           </div>
         </div>
-      ) : !hasFiles && folders.length === 0 && !search ? <div className="mf-empty">Нет файлов</div> : (
+      ) : !hasFiles && folders.length === 0 && !search ? (
+        <div className="mf-empty-state">
+          <div className="mf-empty-icon">
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="10" y="20" width="60" height="45" rx="8" stroke="rgba(124,131,255,0.3)" strokeWidth="2" fill="rgba(124,131,255,0.05)"/>
+              <path d="M10 28C10 23.5817 13.5817 20 18 20H30L36 14H62C66.4183 14 70 17.5817 70 22V28" stroke="rgba(124,131,255,0.3)" strokeWidth="2" fill="rgba(124,131,255,0.08)"/>
+              <circle cx="40" cy="44" r="8" stroke="rgba(124,131,255,0.4)" strokeWidth="2" strokeDasharray="4 4"/>
+              <path d="M40 38V50M34 44H46" stroke="rgba(124,131,255,0.4)" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          </div>
+          <h3 className="mf-empty-title">Нет файлов</h3>
+          <p className="mf-empty-desc">Загрузите первый файл в облако</p>
+          <button className="mf-empty-btn" onClick={() => navigate('/upload')}>
+            <Upload size={16} /> Загрузить файл
+          </button>
+        </div>
+      ) : (
         <div className="mf-sections">
           {!folderDrill && CATEGORIES.map(cat => {
             const items = grouped[cat]

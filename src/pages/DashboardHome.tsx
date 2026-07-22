@@ -58,18 +58,29 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
       </div>
 
       <div className="dh-stats">
-        <div className="dh-card"><div className="dh-card-icon"><FileText size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Всего файлов</div>
-            <div className="dh-card-value">{loading ? '…' : total}</div></div></div>
-        <div className="dh-card"><div className="dh-card-icon"><HardDrive size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Использовано</div>
-            <div className="dh-card-value">{loading ? '…' : fmtSize(totalSize)}</div></div></div>
-        <div className="dh-card"><div className="dh-card-icon"><TrendingUp size={20} /></div>
-          <div className="dh-card-body"><div className="dh-card-label">За неделю</div>
-            <div className="dh-card-value">{loading ? '…' : weekFiles}</div></div></div>
-        <div className="dh-card"><div className="dh-card-icon"><BarChart3Icon /></div>
-          <div className="dh-card-body"><div className="dh-card-label">Средний размер</div>
-            <div className="dh-card-value">{loading ? '…' : fmtSize(avgSize)}</div></div></div>
+        {loading ? (
+          <>
+            <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Всего файлов</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:40,height:28}}/></div></div></div>
+            <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Использовано</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:60,height:28}}/></div></div></div>
+            <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">За неделю</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:30,height:28}}/></div></div></div>
+            <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Средний размер</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:55,height:28}}/></div></div></div>
+          </>
+        ) : (
+          <>
+            <div className="dh-card"><div className="dh-card-icon"><FileText size={20} /></div>
+              <div className="dh-card-body"><div className="dh-card-label">Всего файлов</div>
+                <div className="dh-card-value">{total}</div></div></div>
+            <div className="dh-card"><div className="dh-card-icon"><HardDrive size={20} /></div>
+              <div className="dh-card-body"><div className="dh-card-label">Использовано</div>
+                <div className="dh-card-value">{fmtSize(totalSize)}</div></div></div>
+            <div className="dh-card"><div className="dh-card-icon"><TrendingUp size={20} /></div>
+              <div className="dh-card-body"><div className="dh-card-label">За неделю</div>
+                <div className="dh-card-value">{weekFiles}</div></div></div>
+            <div className="dh-card"><div className="dh-card-icon"><BarChart3Icon /></div>
+              <div className="dh-card-body"><div className="dh-card-label">Средний размер</div>
+                <div className="dh-card-value">{fmtSize(avgSize)}</div></div></div>
+          </>
+        )}
       </div>
 
       <div className="dh-grid">
