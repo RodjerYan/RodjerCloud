@@ -4,7 +4,7 @@ import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal, flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
-  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle, Check, UploadCloud } from 'lucide-react'
+  Image, Film, Music, FileText, Archive, Folder, Clock, FolderPlus, MoveRight, Pencil, Share2, Upload, AlertCircle, Check, UploadCloud, MoreHorizontal } from 'lucide-react'
 import { v3store } from '../lib/v3store'
 import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
@@ -852,6 +852,12 @@ export default function MyFilesPage() {
     return directFiles + childFolders.reduce((sum, cf) => sum + countFilesRecursive(cf.id), 0)
   }, [files, fileFolders, folders])
 
+  const getFolderFilesRecursive = useCallback((folderId: string): any[] => {
+    const direct = files.filter((f: any) => fileFolders[f.messageId] === folderId)
+    const childFolders = folders.filter(f => f.parentId === folderId)
+    return [...direct, ...childFolders.flatMap(cf => getFolderFilesRecursive(cf.id))]
+  }, [files, fileFolders, folders])
+
   return (
     <div className={"mf-root mf-hide-checks" + (isDragOver ? " drag-over" : "")}
          onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsDragOver(true) }}
@@ -1295,9 +1301,18 @@ export default function MyFilesPage() {
     }).length > 0) && (
                   view === 'grid' ? (
                     <>
-                      {currentLevelFolders.length > 0 && <div className="mf-grid" style={{ marginBottom: 14 }}>
-                      {currentLevelFolders.map(sf => (
-                        <div key={sf.id} className="mf-card magnetic" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
+                      {currentLevelFolders.length > 0 && <div className="mf-folders-grid" style={{ marginBottom: 14 }}>
+                      {currentLevelFolders.map(sf => {
+                        const allFiles = getFolderFilesRecursive(sf.id);
+                        const imgFiles = allFiles.filter((f: any) => /\.(jpg|jpeg|png|gif|webp)$/i.test(f.fileName));
+                        const vidFiles = allFiles.filter((f: any) => /\.(mp4|mov|avi|mkv|webm)$/i.test(f.fileName));
+                        const previewFile = imgFiles[0] || vidFiles[0];
+                        const isPreviewVideo = previewFile && vidFiles.includes(previewFile);
+                        const cascadeFiles = imgFiles.slice(0, 3);
+                        const totalCount = countFilesRecursive(sf.id);
+                        const totalSize = allFiles.reduce((s: number, f: any) => s + (f.fileSize || 0), 0);
+                        return (
+                        <div key={sf.id} className="mf-folder-card magnetic" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
                              draggable={true}
                              onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
                              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
@@ -1324,13 +1339,37 @@ export default function MyFilesPage() {
                              }}
                              onClick={() => setFolderDrill(sf.id)}
                              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
-                          <div className="mf-card-icon" style={{ background: 'linear-gradient(180deg, rgba(60, 60, 160, 0.5), transparent)', color: '#7c83ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Folder size={32} />
+                          <div className="mf-folder-preview">
+                            {previewFile ? (
+                              <>
+                                <div className="mf-folder-cover">
+                                  <FileThumb messageId={previewFile.messageId} fileName={previewFile.fileName} isVideo={!!isPreviewVideo} typeLabel={isPreviewVideo ? 'Видео' : 'Изображения'} />
+                                </div>
+                                <div className="mf-folder-overlay" />
+                                {cascadeFiles.length > 1 && (
+                                  <div className="mf-folder-cascade">
+                                    {cascadeFiles.slice().reverse().map((f: any) => (
+                                      <div key={f.messageId} className="mf-folder-cascade-thumb">
+                                        <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={false} typeLabel="Изображения" />
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="mf-folder-empty">
+                                <div className="mf-folder-empty-icon"><Folder size={24} /></div>
+                              </div>
+                            )}
+                            <button className="mf-folder-menu" onClick={(e) => { e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+                              <MoreHorizontal size={13} />
+                            </button>
                           </div>
-                          <div className="mf-card-name" title={sf.name}>{sf.name}</div>
-                          <div className="mf-card-meta">{countFilesRecursive(sf.id)} файл.</div>
+                          <div className="mf-folder-name" title={sf.name}>{sf.name}</div>
+                          <div className="mf-folder-meta">{totalCount} файл. · {fmtSize(totalSize)}</div>
                         </div>
-                      ))}
+                        );
+                      })}
                       </div>}
                       <div className="mf-grid">
                         {[...currentFiles, ...pendingUploads.filter(p => {
