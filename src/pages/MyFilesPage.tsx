@@ -1358,7 +1358,7 @@ export default function MyFilesPage() {
                               </>
                             ) : (
                               <div className="mf-folder-empty">
-                                <div className="mf-folder-empty-icon"><Folder size={24} /></div>
+                                <div className="mf-folder-empty-icon"><Folder size={28} /></div>
                               </div>
                             )}
                             <button className="mf-folder-menu" onClick={(e) => { e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
