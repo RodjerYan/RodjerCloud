@@ -98,6 +98,7 @@
   object-fit: cover;
   position: relative;
   z-index: 1;
+  background: #7c83ff;
   box-shadow: 0 8px 24px rgba(33, 117, 222, 0.3);
 }
 
