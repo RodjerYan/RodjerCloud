@@ -484,6 +484,18 @@ export default function MyFilesPage() {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [filtered.length])
 
+  const currentFiles = useMemo(() => {
+    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId])
+    if (search) return arr.filter(f => (f.fileName || '').toLowerCase().includes(search.toLowerCase()))
+    return arr
+  }, [files, fileFolders, folderDrill, search])
+
+  const currentFilesIndex = useMemo(() => {
+    const m = new Map<number, number>()
+    currentFiles.forEach((f: any, i: number) => m.set(f.messageId, i))
+    return m
+  }, [currentFiles])
+
   const visibleFiltered = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
 
   const grouped = useMemo(() => {
@@ -1266,8 +1278,6 @@ export default function MyFilesPage() {
             )
           })}
           {(folders.length > 0 || folderDrill || pendingUploads.length > 0) && (() => {
-            const currentLevelFolders = folders.filter(f => (f.parentId || null) === (folderDrill || null));
-            const currentFiles = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId]);
 
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>
@@ -1388,7 +1398,7 @@ export default function MyFilesPage() {
                       })}
                       </div>}
                       <div className="mf-grid">
-                        {[...currentFiles, ...pendingUploads.filter(p => {
+                        {[...currentFiles.slice(0, visibleCount), ...pendingUploads.filter(p => {
                           if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
                           return p.folderId === folderDrill
                         })].map((f: any, index) => {
@@ -1422,7 +1432,7 @@ export default function MyFilesPage() {
                                style={{ viewTransitionName: `card_${f.messageId}` }}
                                effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
                                onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
+                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
                                onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             
@@ -1435,7 +1445,7 @@ export default function MyFilesPage() {
                             <div className="mf-card-actions">
                               <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
+                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
@@ -1483,7 +1493,7 @@ export default function MyFilesPage() {
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                              onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
+                              onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
                               draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                             <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.fileName}</span></td>
@@ -1491,7 +1501,7 @@ export default function MyFilesPage() {
                             <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                             <td>
                               <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFiles.indexOf(f), currentFiles)}><Eye size={14} /></button>}
+                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </td>
