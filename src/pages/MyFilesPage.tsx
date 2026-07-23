@@ -191,16 +191,6 @@ export default function MyFilesPage() {
 
 
   useEffect(() => {
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        loadMore()
-      }
-    }, { rootMargin: '400px' })
-    if (loaderRef.current) observer.observe(loaderRef.current)
-    return () => observer.disconnect()
-  }, [loadMore])
-
-  useEffect(() => {
     
   }, [folderDrill, search, sort])
 
@@ -388,6 +378,16 @@ export default function MyFilesPage() {
     } catch {}
     loadingMoreRef.current = false
   }, [])
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        loadMore()
+      }
+    }, { rootMargin: '400px' })
+    if (loaderRef.current) observer.observe(loaderRef.current)
+    return () => observer.disconnect()
+  }, [loadMore])
 
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
