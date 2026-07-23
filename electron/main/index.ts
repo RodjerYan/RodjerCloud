@@ -104,19 +104,25 @@ async function checkUpdate() {
     const current = app.getVersion()
     const res = await proxyFetch(`/api/latest`)
     const tag = (res.tag_name || '').replace(/^v/, '')
+    log('info', `[update] current=${current} latest=${tag}`)
     if (tag && isNewer(tag, current)) {
       const matchFn = platformAssetPattern()
       const asset = (res.assets || []).find((a: any) => matchFn(a.name))
       const wins = BrowserWindow.getAllWindows()
-      if (wins.length > 0) wins[0].webContents.send('app:update-available', {
-        version: tag,
-        assetId: asset?.id || 0,
-        assetName: asset?.name || '',
-        htmlUrl: res.html_url || '',
-        releaseNotes: (res.body || '').slice(0, 2000),
-      })
+      if (wins.length > 0) {
+        wins[0].webContents.send('app:update-available', {
+          version: tag,
+          assetId: asset?.id || 0,
+          assetName: asset?.name || '',
+          htmlUrl: res.html_url || '',
+          releaseNotes: (res.body || '').slice(0, 2000),
+        })
+        log('info', `[update] sent to renderer: v${tag}`)
+      }
     }
-  } catch {}
+  } catch (e) {
+    log('error', '[update] check failed: ' + (e as Error).message)
+  }
 }
 
 app.whenReady().then(async () => {
@@ -150,7 +156,8 @@ app.whenReady().then(async () => {
     }).catch(() => {})
   }, 10000)
 
-  setTimeout(checkUpdate, 15000)
+  setTimeout(checkUpdate, 10000)
+  setTimeout(checkUpdate, 30000)
   setInterval(checkUpdate, 3600000)
 
   app.on('activate', () => {

@@ -140,4 +140,6 @@
 .se-modal-progress-text { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; font-weight: 500; }
 .se-modal-progress-bar-wrap { height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; }
 .se-modal-progress-bar { height: 100%; background: linear-gradient(90deg, #7c83ff, #b14aff); border-radius: 99px; transition: width 0.3s ease; }
-.se-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.se-modal-actions { display: flex; gap: 10px; justify-content: flex-end; padding-top: 8px; }
+.se-modal-actions .v3-btn { min-width: 100px; justify-content: center; }
+.se-modal-actions .v3-btn.primary { padding: 12px 28px; font-size: 14px; }
