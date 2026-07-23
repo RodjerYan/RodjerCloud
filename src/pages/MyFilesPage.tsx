@@ -1894,7 +1894,6 @@ export default function MyFilesPage() {
         </div>,
         document.body
       )}
-    </div>
       <div ref={loaderRef} style={{ height: 1 }} />
     </div>
   )
