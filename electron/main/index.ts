@@ -113,6 +113,7 @@ async function checkUpdate() {
         assetId: asset?.id || 0,
         assetName: asset?.name || '',
         htmlUrl: res.html_url || '',
+        releaseNotes: (res.body || '').slice(0, 2000),
       })
     }
   } catch {}

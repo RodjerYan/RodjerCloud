@@ -45,7 +45,7 @@ import Titlebar from "./components/Titlebar"
 
 declare global { interface Window { electronAPI: any } }
 
-function AnimatedRoutes({ channelInfo, userInfo, handleLogout }: any) {
+function AnimatedRoutes({ channelInfo, userInfo, handleLogout, updateAvailable }: any) {
   const location = useLocation()
   return (
     <div key={location.pathname} className="page-enter" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -64,7 +64,7 @@ function AnimatedRoutes({ channelInfo, userInfo, handleLogout }: any) {
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/albums" element={<AlbumsPage />} />
         <Route path="/audioplayer" element={<AudioPlayerPage />} />
-        <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} />} />
+        <Route path="/settings" element={<SettingsPage channelInfo={channelInfo} onChangeChannel={handleLogout} updateAvailable={updateAvailable} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
@@ -78,11 +78,16 @@ function App() {
   const [showDuckSplash, setShowDuckSplash] = useState(false)
   const [channelInfo, setChannelInfo] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ firstName: string; lastName?: string; username?: string; photoPath?: string } | null>(null)
-  const [updateData, setUpdateData] = useState<{ version: string; assetId: number; assetName: string; latestVersion: string } | null>(null)
+  const [updateData, setUpdateData] = useState<{ version: string; assetId: number; assetName: string; latestVersion: string; releaseNotes: string } | null>(null)
   const [dlProgress, setDlProgress] = useState(0)
   const [dlPath, setDlPath] = useState('')
   const [dlStatus, setDlStatus] = useState<'idle' | 'downloading' | 'done'>('idle')
   const unsubDlRef = useRef<(() => void) | null>(null)
+  const [bannerVisible, setBannerVisible] = useState(false)
+  const [isDismissing, setIsDismissing] = useState(false)
+  const [showChangelog, setShowChangelog] = useState(false)
+  const dismissTimerRef = useRef<any>(null)
+  const smartTimerRef = useRef<any>(null)
 
   // Magnetic Hover Effect removed per user request
 
@@ -110,16 +115,24 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number; assetName: string }) => {
-      setUpdateData({ version: data.version, assetId: data.assetId, assetName: data.assetName, latestVersion: data.version })
+    const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number; assetName: string; releaseNotes: string }) => {
+      setUpdateData({ version: data.version, assetId: data.assetId, assetName: data.assetName, latestVersion: data.version, releaseNotes: data.releaseNotes || '' })
+      smartTimerRef.current = setTimeout(() => {
+        setBannerVisible(true)
+        dismissTimerRef.current = setTimeout(() => {
+          setIsDismissing(true)
+          setTimeout(() => { setBannerVisible(false); setIsDismissing(false) }, 300)
+        }, 8000)
+      }, 30000)
     })
-    return () => unsub?.()
+    return () => { unsub?.(); clearTimeout(smartTimerRef.current); clearTimeout(dismissTimerRef.current) }
   }, [])
 
   const startDownload = async () => {
     if (!updateData?.assetId || dlStatus === 'downloading') return
     setDlStatus('downloading')
     setDlProgress(0)
+    clearTimeout(dismissTimerRef.current)
     const unsub = window.electronAPI.app.onDownloadProgress((p: { percent: number }) => {
       setDlProgress(p.percent)
     })
@@ -140,6 +153,12 @@ function App() {
   useEffect(() => {
     return () => { unsubDlRef.current?.() }
   }, [])
+
+  const dismissBanner = () => {
+    clearTimeout(dismissTimerRef.current)
+    setIsDismissing(true)
+    setTimeout(() => { setBannerVisible(false); setIsDismissing(false); setUpdateData(null) }, 300)
+  }
 
   const checkSession = async () => {
     try {
@@ -184,28 +203,42 @@ function App() {
     <MemoryRouter initialEntries={["/"]}>
       <Titlebar />
       <div className="v2-shell" style={{ paddingTop: '32px' }}>
-        <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} />
+        <Sidebar channelInfo={channelInfo} userInfo={userInfo} onLogout={handleLogout} updateAvailable={!!updateData} />
         <AudioPlayerProvider>
           <UploadQueueProvider>
             <main className="v2-main" style={{ position: "relative", overflow: "auto" }}>
-              {updateData && dlStatus !== 'done' && (
-                <div className={`update-banner ${dlStatus === 'idle' ? 'clickable' : ''}`} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
+              {updateData && dlStatus !== 'done' && bannerVisible && (
+                <div className={`update-banner ${isDismissing ? 'dismissing' : ''} ${dlStatus === 'idle' ? 'clickable' : ''}`} onClick={() => { if (dlStatus === 'idle') startDownload() }}>
                   <div className="update-banner-header">
-                    <span>Обновление v{updateData.version}</span>
-                    {dlStatus === 'idle' && <span className="update-banner-action">Скачать</span>}
-                    {dlStatus === 'downloading' && <span className="update-banner-progress-text">Загрузка... {dlProgress}%</span>}
-                    <span className="update-banner-close"
-                      onClick={e => { e.stopPropagation(); setUpdateData(null) }}>×</span>
+                    <div className="update-banner-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      <span>v{updateData.version}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {dlStatus === 'idle' && <span className="update-banner-action">Скачать</span>}
+                      {dlStatus === 'downloading' && <span className="update-banner-progress-text">{dlProgress}%</span>}
+                      <span className="update-banner-close" onClick={e => { e.stopPropagation(); dismissBanner() }}>×</span>
+                    </div>
                   </div>
                   {dlStatus === 'downloading' && (
                     <div className="update-banner-bar-wrap">
                       <div className="update-banner-bar" style={{ width: dlProgress + '%' }} />
                     </div>
                   )}
+                  {updateData.releaseNotes && dlStatus === 'idle' && (
+                    <>
+                      <span className="update-banner-changelog-toggle" onClick={e => { e.stopPropagation(); setShowChangelog(!showChangelog) }}>
+                        {showChangelog ? 'Скрыть изменения' : 'Что нового'}
+                      </span>
+                      <div className={`update-banner-changelog ${showChangelog ? 'expanded' : ''}`}>
+                        {updateData.releaseNotes}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               <AggregateProgress />
-              <AnimatedRoutes channelInfo={channelInfo} userInfo={userInfo} handleLogout={handleLogout} />
+              <AnimatedRoutes channelInfo={channelInfo} userInfo={userInfo} handleLogout={handleLogout} updateAvailable={!!updateData} />
             </main>
             <AudioPlayerBar />
           </UploadQueueProvider>

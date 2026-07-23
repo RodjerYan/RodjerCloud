@@ -5,7 +5,7 @@ import confetti from 'canvas-confetti'
 import iconUrl from '../assets/icon.png'
 import { toast } from '../lib/toast'
 
-export default function SettingsPage({ channelInfo, onChangeChannel }: { channelInfo: any; onChangeChannel: () => void }) {
+export default function SettingsPage({ channelInfo, onChangeChannel, updateAvailable }: { channelInfo: any; onChangeChannel: () => void; updateAvailable?: boolean }) {
   const [concurrency, setConcurrency] = useState(2)
   const [autoRename, setAutoRename] = useState(false)
   const [turboMode, setTurboMode] = useState(false)
@@ -277,6 +277,9 @@ export default function SettingsPage({ channelInfo, onChangeChannel }: { channel
             {checkingUpdate ? <Download size={16} /> : <CheckCircle2 size={16} />}
             {checkingUpdate ? 'Проверка обновлений…' : 'Проверить обновления'}
           </button>
+          {updateAvailable && !checkingUpdate && (
+            <div className="se-update-hint">Доступно обновление</div>
+          )}
 
           <div className="se-app-license">Распространяется под лицензией MIT</div>
         </div>

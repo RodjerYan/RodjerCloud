@@ -120,10 +120,12 @@
   70% { box-shadow: 0 0 0 10px rgba(177, 74, 255, 0); }
   100% { box-shadow: 0 0 0 0 rgba(177, 74, 255, 0); }
 }
-.se-update-btn { margin: 0 auto 24px; display: flex; align-items: center; gap: 8px; padding: 12px 24px; font-size: 14px; border-radius: 99px; transition: transform 0.2s, background 0.2s; }
+.se-update-btn { margin: 0 auto 12px; display: flex; align-items: center; gap: 8px; padding: 12px 24px; font-size: 14px; border-radius: 99px; transition: transform 0.2s, background 0.2s; position: relative; }
 .se-update-btn:not(:disabled) { animation: sePulse 2s infinite; }
 .se-update-btn:not(:disabled):hover { transform: scale(1.03); background: linear-gradient(90deg, #8a90ff, #be66ff); }
 .se-update-btn:active { transform: scale(0.97); }
+.se-update-hint { font-size: 12px; color: #ef4444; text-align: center; margin-bottom: 20px; animation: seHintPulse 2s ease-in-out infinite; }
+@keyframes seHintPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 .se-app-license { margin-top: 16px; font-size: 12px; color: var(--text-mute, var(--text-dim)); opacity: 0.5; }
 
 /* Update Modal */

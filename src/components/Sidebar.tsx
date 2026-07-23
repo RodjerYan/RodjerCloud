@@ -4,7 +4,7 @@ import { Home, FolderOpen, Upload, RefreshCw, Settings,
   LogOut, Trash2, Star, Image as ImgIcon,
   Headphones, Cloud } from "lucide-react"
 
-interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void }
+interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void; updateAvailable?: boolean }
 
 const items = [
   { to: "/", label: "Главная", icon: Home, end: true },
@@ -20,7 +20,7 @@ const items = [
   { to: "/trash", label: "Корзина", icon: Trash2 },
 ]
 
-export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
+export default function Sidebar({ channelInfo, userInfo, onLogout, updateAvailable }: Props) {
   const avatarSrc = userInfo?.photoPath ? 'file://' + userInfo.photoPath : null
   return (
     <aside className="v2-sidebar" data-testid="v3-sidebar">
@@ -47,7 +47,10 @@ export default function Sidebar({ channelInfo, userInfo, onLogout }: Props) {
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}
             className={({ isActive }) => "v2-sidebar-link" + (isActive ? " active" : "")}>
-            <Icon size={18} />
+            <div className="v2-sidebar-link-wrap">
+              <Icon size={18} />
+              {to === "/settings" && updateAvailable && <span className="update-badge" />}
+            </div>
             <span>{label}</span>
           </NavLink>
         ))}
