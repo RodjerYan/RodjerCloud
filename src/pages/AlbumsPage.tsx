@@ -288,15 +288,19 @@ export default function AlbumsPage() {
           <h1 className="v3-h1" style={{ margin: 0 }}>{currentAlbum.name}</h1>
           <span className="v3-sub" style={{ marginLeft: 8 }}>{isDuplicates ? `${albumFiles.length} дубликатов` : albumFiles.length}</span>
         </div>
-        {hashing && (
-          <div className="v3-row" style={{ marginBottom: 12, gap: 8 }}>
-            <Loader2 size={16} className="spin" /><span className="v3-sub">Поиск дубликатов… {hashProgress.done}/{hashProgress.total}</span>
-          </div>
-        )}
         <div className="mf-gallery-body">
-          {isDuplicates && !hashing ? (
+          {isDuplicates ? (
             <div className="mf-gallery-body">
-              {(() => {
+              {hashing ? (
+                <div style={{ textAlign: 'center', padding: 60 }}>
+                  <Loader2 size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 16 }} />
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Поиск дубликатов…</div>
+                  <div className="v3-sub">{hashProgress.done} из {hashProgress.total} файлов</div>
+                  <div style={{ width: 200, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 99, margin: '16px auto 0', overflow: 'hidden' }}>
+                    <div style={{ width: hashProgress.total > 0 ? (hashProgress.done / hashProgress.total) * 100 : 0 + '%', height: '100%', background: 'var(--accent)', borderRadius: 99, transition: 'width 0.3s' }} />
+                  </div>
+                </div>
+              ) : (() => {
                 const groups: [string, any[]][] = []
                 hashGroups.forEach((group, hash) => { if (group.length > 1) groups.push([hash, group]) })
                 if (groups.length === 0) {
@@ -305,6 +309,7 @@ export default function AlbumsPage() {
                       <div className="v3-sub" style={{ marginBottom: 12 }}>Дубликаты ещё не найдены</div>
                       <button className="v3-btn primary" onClick={async () => {
                         setHashing(true)
+                        setHashProgress({ done: 0, total: 0 })
                         const res = await window.electronAPI.bot.scanDuplicates()
                         if (res.success) {
                           const r = await window.electronAPI.bot.getHashDb()

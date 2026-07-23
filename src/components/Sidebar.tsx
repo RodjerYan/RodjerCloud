@@ -2,7 +2,8 @@ import React from "react"
 import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, Settings,
   LogOut, Trash2, Star, Image as ImgIcon,
-  Headphones, Cloud } from "lucide-react"
+  Headphones, Cloud, ArrowRight } from "lucide-react"
+import '../styles/logout-btn.css'
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void; updateAvailable?: boolean }
 
@@ -61,7 +62,12 @@ export default function Sidebar({ channelInfo, userInfo, onLogout, updateAvailab
           <div className="v2-sidebar-channel-sub">Подключено</div>
         </div>
         <button className="v2-sidebar-logout" onClick={onLogout} data-testid="logout-btn">
-          <LogOut size={16} /><span>Выйти</span>
+          <div className="v2-sidebar-logout-bg" />
+          <span className="v2-sidebar-logout-text">Выйти</span>
+          <div className="v2-sidebar-logout-icon-wrap">
+            <span>Выйти</span>
+            <ArrowRight size={16} />
+          </div>
         </button>
       </div>
     </aside>

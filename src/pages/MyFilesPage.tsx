@@ -13,6 +13,7 @@ import { toast } from '../lib/toast'
 import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
 const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 import { FileThumb } from '../components/FileThumb'
+import { TiltCard } from '../components/TiltCard'
 import '../styles/duplicate-modal.css'
 
 function typeOf(name: string): string {
@@ -45,8 +46,8 @@ const CAT_COLOR: Record<string, string> = {
 import { pendingStore, type PendingUpload } from '../lib/PendingUploadStore'
 
 const matchVirtualFolder = (fileName: string, folderId: string) => {
-  if (folderId === '__type_Изображения') return !!fileName.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg)$/i)
-  if (folderId === '__type_Видео') return !!fileName.match(/\.(mp4|mov|avi|mkv|webm)$/i)
+  if (folderId === '__type_Изображения') return !!fileName.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg|avif)$/i)
+  if (folderId === '__type_Видео') return !!fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
   if (folderId === '__type_Аудио') return !!fileName.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)
   if (folderId === '__type_Документы') return !!fileName.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|djvu|epub|fb2)$/i)
   if (folderId === '__type_Архивы') return !!fileName.match(/\.(zip|rar|7z|tar|gz)$/i)
@@ -1122,9 +1123,9 @@ export default function MyFilesPage() {
                               <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
                               <div className="mf-gm-items">
                                 {items.map(f => (
-                                  <div key={f.messageId} data-mid={f.messageId} className={'mf-gm-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                                    onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                                    draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
+                                  <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                    effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                                    onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                                     onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                                     <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                     <div className="mf-gm-icon" data-type={drillDown}>
@@ -1139,7 +1140,7 @@ export default function MyFilesPage() {
                                       <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={13} /></button>
                                       <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button>
                                     </div>
-                                  </div>
+                                  </TiltCard>
                                 ))}
                               </div>
                             </div>
@@ -1204,10 +1205,10 @@ export default function MyFilesPage() {
                     view === 'grid' ? (
                       <div className="mf-grid">
                         {items.map((f) => (
-                          <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                              style={{ viewTransitionName: `card_${f.messageId}` }}
-                             onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                             draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
+                             effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                             onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
@@ -1221,7 +1222,7 @@ export default function MyFilesPage() {
                               <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
-                          </div>
+                          </TiltCard>
                         ))}
                       </div>
                     ) : (
@@ -1328,12 +1329,13 @@ export default function MyFilesPage() {
                         const totalCount = countFilesRecursive(sf.id);
                         const totalSize = allFiles.reduce((s: number, f: any) => s + (f.fileSize || 0), 0);
                         return (
-                        <div key={sf.id} className="mf-folder-card magnetic" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
+                        <TiltCard key={sf.id} className="mf-folder-card" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
+                             effect="evade" scale={1.03} tiltLimit={12} spotlight={true}
                              draggable={true}
-                             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
-                             onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
-                             onDragLeave={(e) => { e.currentTarget.style.outline = 'none' }}
-                             onDrop={async (e) => {
+                             onDragStart={(e: any) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
+                             onDragOver={(e: any) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
+                             onDragLeave={(e: any) => { e.currentTarget.style.outline = 'none' }}
+                             onDrop={async (e: any) => {
                                e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
                                e.currentTarget.style.outline = 'none';
                                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -1354,7 +1356,7 @@ export default function MyFilesPage() {
                                } catch {}
                              }}
                              onClick={() => setFolderDrill(sf.id)}
-                             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+                             onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                           <div className="mf-folder-preview">
                             {previewFile ? (
                               <>
@@ -1383,7 +1385,7 @@ export default function MyFilesPage() {
                           </div>
                           <div className="mf-folder-name" title={sf.name}>{sf.name}</div>
                           <div className="mf-folder-meta">{totalCount} файл. · {fmtSize(totalSize)}</div>
-                        </div>
+                        </TiltCard>
                         );
                       })}
                       </div>}
@@ -1415,15 +1417,15 @@ export default function MyFilesPage() {
                               </div>
                             )
                           }
-                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
+                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
+                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
                           return (
-                          <div key={f.messageId} data-mid={f.messageId} className={'mf-card magnetic' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                                style={{ viewTransitionName: `card_${f.messageId}` }}
-                            onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                            onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
-                            draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
-                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                               effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                               onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFiles.indexOf(f), currentFiles) }}
+                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             
                             <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
@@ -1439,7 +1441,7 @@ export default function MyFilesPage() {
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </div>
-                          </div>
+                          </TiltCard>
                           )
                         })}
                       </div>
@@ -1477,8 +1479,8 @@ export default function MyFilesPage() {
                           </tr>
                         ))}
                         {currentFiles.slice().map(f => {
-                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv)$/i)
+                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
+                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
                           return (
                           <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                               style={{ viewTransitionName: `card_${f.messageId}` }}

@@ -58,7 +58,7 @@ button:active, a:active { transform: scale(0.97); }
 
 /* App shell */
 .v2-shell { display: flex; height: 100vh; width: 100%; position: relative; z-index: 1; }
-.v2-main { flex: 1; overflow: auto; padding: 28px var(--space-xl); scrollbar-width: none; }
+.v2-main { flex: 1; overflow: auto; padding: 16px var(--space-xl); scrollbar-width: none; }
 .v2-main::-webkit-scrollbar { display: none; }
 
 /* Page Layouts */
