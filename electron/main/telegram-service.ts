@@ -333,7 +333,7 @@ export class TelegramService {
     if (!this.client) throw new Error('Client not initialized')
 
     try {
-      const dialogs = await this.client.getDialogs({ limit: 2000 })
+      const dialogs = await this.client.getDialogs({ limit: 200 })
       const matches: any[] = []
       for (const dialog of dialogs) {
         const entity = dialog.entity as any
@@ -389,7 +389,7 @@ export class TelegramService {
     this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5 })
     await this.client.connect()
 
-    const dialogs = await this.client.getDialogs({ limit: 2000 })
+    const dialogs = await this.client.getDialogs({ limit: 200 })
     const matches: any[] = []
     for (const dialog of dialogs) {
       const entity = dialog.entity as any
@@ -720,13 +720,16 @@ export class TelegramService {
     const messages: any[] = []
     let offsetId = 0
     const BATCH = 200
-    while (true) {
+    const MAX_MESSAGES = 10000
+    let scanned = 0
+    while (scanned < MAX_MESSAGES) {
       const batch = await this.client.getMessages(this.channelId as any, {
         limit: BATCH,
         ...(offsetId ? { offsetId } : {}),
       })
       if (batch.length === 0) break
       messages.push(...batch)
+      scanned += batch.length
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
     }
@@ -763,19 +766,22 @@ export class TelegramService {
 
   async listTrash() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const messages: any[] = []
-    let offsetId = 0
-    const BATCH = 200
-    while (true) {
-      const batch = await this.client.getMessages(this.channelId as any, {
-        limit: BATCH,
-        ...(offsetId ? { offsetId } : {}),
-      })
-      if (batch.length === 0) break
-      messages.push(...batch)
-      if (batch.length < BATCH) break
-      offsetId = this.msgId(batch[batch.length - 1])
-    }
+      const messages: any[] = []
+      let offsetId = 0
+      const BATCH = 200
+      const MAX_SCAN = 5000
+      let scanned = 0
+      while (scanned < MAX_SCAN) {
+        const batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+        if (batch.length === 0) break
+        messages.push(...batch)
+        scanned += batch.length
+        if (batch.length < BATCH) break
+        offsetId = this.msgId(batch[batch.length - 1])
+      }
     return messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
@@ -1291,14 +1297,17 @@ export class TelegramService {
     let offsetId = 0
     let foundSyncMsg: any = null
     const BATCH = 100
+    const MAX_SCAN = 3000
+    let scanned = 0
     const textMsgs: any[] = []
 
-    while (true) {
+    while (scanned < MAX_SCAN) {
       const batch = await this.client.getMessages(this.channelId as any, {
         limit: BATCH,
         ...(offsetId ? { offsetId } : {}),
       })
       if (batch.length === 0) break
+      scanned += batch.length
 
       for (const m of batch) {
         if (m.message && !m.file) {

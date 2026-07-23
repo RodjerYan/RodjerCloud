@@ -1,17 +1,15 @@
-## Что нового в v1.0.204
+## Что нового в v1.0.205
 
-- 3D TiltCard эффект для папок и файлов — наклон и spotlight при наведении курсора
-- Кнопка «Выйти» перерисована в стиле InteractiveHoverButton — текст уезжает, появляется стрелка, фон расширяется
-- Кнопка «Выйти» — тёмно-синий фон, красный при наведении
-- Уменьшены отступы между поиском и списком файлов
-- Исправлено отображение страницы дубликатов во время сканирования
+- Исправлена проблема зависания при загрузке файлов с большим количеством фото (>1000)
+- Добавлены лимиты на сканирование каналов Telegram (max 10000 сообщений для listFiles, 3000 для sync)
+- Уменьшен лимит загрузки диалогов с 2000 до 200 для ускорения переподключения
+- Ограничена очистка корзины до 5000 сообщений
 
 ---
 
-## What's new in v1.0.204
+## What's new in v1.0.205
 
-- 3D TiltCard effect for folders and files — tilt and spotlight on cursor hover
-- "Logout" button redesigned in InteractiveHoverButton style — text slides out, arrow appears, background expands
-- "Logout" button — dark blue background, red on hover
-- Reduced spacing between search bar and file list
-- Fixed duplicate page display during scanning
+- Fixed app hanging when loading files with large photo collections (>1000)
+- Added scan limits for Telegram channels (max 10000 messages for listFiles, 3000 for sync)
+- Reduced dialog loading limit from 2000 to 200 for faster reconnection
+- Limited trash cleanup to 5000 messages
