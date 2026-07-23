@@ -57,8 +57,6 @@ const matchVirtualFolder = (fileName: string, folderId: string) => {
 export default function MyFilesPage() {
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
-  
-  const loaderRef = useRef<HTMLDivElement>(null)
 
   const [files, setFiles] = useState<any[]>([])
   const locallyDeletedIds = useRef<Set<number>>(new Set())
@@ -326,19 +324,11 @@ export default function MyFilesPage() {
     }
   }
 
-  const nextOffsetRef = useRef<number | null>(0)
-  const loadingMoreRef = useRef(false)
-  const allLoadedRef = useRef(false)
-
-  const PAGE_SIZE = 200
-
   const load = async (silent = false) => {
     if (!silent) setLoading(true)
     setLoadError(null)
-    nextOffsetRef.current = 0
-    allLoadedRef.current = false
     try {
-      const r = await window.electronAPI.telegram.listFilesPaginated(PAGE_SIZE, 0)
+      const r = await window.electronAPI.telegram.listFiles()
       if (r.success) {
         const processedFiles = (r.data || [])
           .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
@@ -348,8 +338,6 @@ export default function MyFilesPage() {
             return f
           })
         setFiles(processedFiles)
-        nextOffsetRef.current = r.nextOffsetId
-        if (r.nextOffsetId === null) allLoadedRef.current = true
       }
       else setLoadError(r.error || 'Не удалось загрузить файлы')
     } catch (e: any) {
@@ -357,37 +345,6 @@ export default function MyFilesPage() {
     }
     if (!silent) setLoading(false)
   }
-
-  const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current || allLoadedRef.current || nextOffsetRef.current === null) return
-    loadingMoreRef.current = true
-    try {
-      const r = await window.electronAPI.telegram.listFilesPaginated(PAGE_SIZE, nextOffsetRef.current)
-      if (r.success && r.data) {
-        const newFiles = r.data
-          .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
-          .map((f: any) => {
-            const meta = v3store.metaFor(f.messageId)
-            if (meta?.displayName) return { ...f, fileName: meta.displayName }
-            return f
-          })
-        if (newFiles.length > 0) setFiles(prev => [...prev, ...newFiles])
-        nextOffsetRef.current = r.nextOffsetId
-        if (r.nextOffsetId === null) allLoadedRef.current = true
-      }
-    } catch {}
-    loadingMoreRef.current = false
-  }, [])
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        loadMore()
-      }
-    }, { rootMargin: '400px' })
-    if (loaderRef.current) observer.observe(loaderRef.current)
-    return () => observer.disconnect()
-  }, [loadMore])
 
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
@@ -1894,7 +1851,6 @@ export default function MyFilesPage() {
         </div>,
         document.body
       )}
-      <div ref={loaderRef} style={{ height: 1 }} />
     </div>
   )
 }
