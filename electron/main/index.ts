@@ -514,6 +514,13 @@ ipcMain.handle('telegram:list-files', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:list-files-paginated', async (_, limit: number, offsetId: number) => {
+  try {
+    const result = await telegramService.listFilesPaginated(limit || 200, offsetId || 0)
+    return { success: true, data: result.files, nextOffsetId: result.nextOffsetId }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: string) => {
   try {
     const prefs = await readPrefs()

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('telegram:bulk-progress', listener)
     },
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
+    listFilesPaginated: (limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-files-paginated', limit, offsetId),
     downloadFile: (messageId: number, fileName: string) =>
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
     downloadThumbnail: (messageId: number, fileName?: string) =>

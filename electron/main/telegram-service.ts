@@ -715,6 +715,64 @@ export class TelegramService {
     return 0
   }
 
+  private parseFileMessage(m: any) {
+    const caption = m.message || ''
+    const createdMatch = caption.match(/Created:\s*(.+)/)
+    const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
+    const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+    const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
+    return {
+      messageId: this.msgId(m),
+      fileName: m.file?.name || 'Unknown',
+      fileSize: this.toNum(m.file?.size),
+      mimeType: m.file?.mimeType || 'application/octet-stream',
+      uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
+      originalDate: originalDate || undefined,
+      caption,
+      chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+      isEncrypted: !!vaultMatch,
+      isMultipart: !!multipartMatch,
+      multipartIds: multipartMatch ? multipartMatch[1].split(',').map(Number) : [],
+    }
+  }
+
+  private isFileVisible(m: any) {
+    if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+    const msgId = this.msgId(m)
+    if (this.localTrashedIds.has(msgId)) return false
+    if (this.localRestoredIds.has(msgId)) return true
+    const caption: string = m.message || ''
+    return !caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
+  }
+
+  async listFilesPaginated(limit = 200, offsetId = 0): Promise<{ files: any[]; nextOffsetId: number | null }> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const files: any[] = []
+    let currentOffsetId = offsetId
+    let remaining = limit + Math.floor(limit * 0.3)
+    let safety = 0
+    while (remaining > 0 && safety < 20) {
+      safety++
+      const batch = await this.client.getMessages(this.channelId as any, {
+        limit: Math.min(remaining + 50, 200),
+        ...(currentOffsetId ? { offsetId: currentOffsetId } : {}),
+      })
+      if (batch.length === 0) break
+      for (const m of batch) {
+        if (this.isFileVisible(m)) {
+          files.push(this.parseFileMessage(m))
+          if (files.length >= limit) break
+        }
+      }
+      if (files.length >= limit) break
+      remaining -= batch.length
+      currentOffsetId = this.msgId(batch[batch.length - 1])
+      if (batch.length < 200) break
+    }
+    const nextOffsetId = files.length >= limit && currentOffsetId ? currentOffsetId : null
+    return { files, nextOffsetId }
+  }
+
   async listFiles() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages: any[] = []
