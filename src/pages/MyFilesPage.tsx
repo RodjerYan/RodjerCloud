@@ -59,6 +59,7 @@ export default function MyFilesPage() {
   const [favs, setFavs] = useState<any[]>([])
 
   const [files, setFiles] = useState<any[]>([])
+  const [visibleCount, setVisibleCount] = useState(20)
   const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -189,7 +190,7 @@ export default function MyFilesPage() {
 
 
   useEffect(() => {
-    
+    setVisibleCount(20)
   }, [folderDrill, search, sort])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
@@ -452,7 +453,19 @@ export default function MyFilesPage() {
     await uploadDroppedFiles(pick.data.map((f: any) => ({ filePath: f.filePath, fileName: f.fileName })), folderId)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); loadFolders() }, [])
+
+  useEffect(() => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 200) {
+        setVisibleCount(prev => Math.min(prev + 20, filtered.length))
+      }
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [filtered.length])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
@@ -471,28 +484,30 @@ export default function MyFilesPage() {
     return arr
   }, [files, search, sort])
 
+  const visibleFiltered = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
-    filtered.forEach(f => {
+    visibleFiltered.forEach(f => {
       const fd = f.uploadedAt || fileDate(f)
       if (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400) map['Недавние']?.push(f)
       
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
-  }, [filtered, now, fileFolders])
+  }, [visibleFiltered, now, fileFolders])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
     if (drillDown === 'Недавние') {
-      return filtered.filter(f => {
+      return visibleFiltered.filter(f => {
         const fd = f.uploadedAt || fileDate(f)
         return (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400)
       })
     }
-    return filtered.filter(f => typeOf(f.fileName) === drillDown)
-  }, [drillDown, filtered, now, fileFolders])
+    return visibleFiltered.filter(f => typeOf(f.fileName) === drillDown)
+  }, [drillDown, visibleFiltered, now, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
@@ -971,6 +986,12 @@ export default function MyFilesPage() {
           <Search size={16} />
           <input placeholder="Поиск файлов…" value={search} onChange={e => { setSearch(e.target.value) }} />
         </div>
+
+        {filtered.length > 20 && (
+          <span style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', marginLeft: 8 }}>
+            {visibleCount >= filtered.length ? filtered.length : `1–${visibleCount}`} из {filtered.length}
+          </span>
+        )}
 
         <button className="v3-btn ghost" onClick={createFolder} title="Создать папку" style={{ padding: '8px 10px', borderColor: 'transparent' }}><FolderPlus size={16} /></button>
       </div>
