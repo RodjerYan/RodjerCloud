@@ -1,17 +1,19 @@
-## Что нового в v1.0.201
+## Что нового в v1.0.202
 
-- Исправлена ошибка: программа не видела новую версию обновления
-- Улучшен сайдбар: компактные кнопки, уменьшена ширина
-- Новый баннер обновлений в правом нижнем углу (glassmorphism pill)
-- Автоскрытие баннера через 8 сек, раскрывающийся changelog
-- Badge обновления на иконке «Настройки»
+- Полностью переработанные кнопки: глубокие цвета, мягкие тени, плавный scale без прыжков
+- Убрана белёсая полоска border — теперь чистый dark glass стиль
+- Кнопки: primary (фиолетовый gradient), secondary (тёмный), danger (красный), ghost
+- Плавное нажатие scale(0.97) за 60ms без дёрганий
+- Focus-visible ring для клавиатурной навигации
+- Disabled и loading состояния
 
 ---
 
-## What's new in v1.0.201
+## What's new in v1.0.202
 
-- Fixed: app not detecting new update version
-- Improved sidebar: compact buttons, reduced width
-- New update banner in bottom-right corner (glassmorphism pill)
-- Auto-dismiss banner after 8s, expandable changelog
-- Update badge on Settings icon
+- Fully redesigned buttons: deep colors, soft shadows, smooth scale without jumping
+- Removed whitish border — clean dark glass style
+- Button variants: primary (purple gradient), secondary (dark), danger (red), ghost
+- Smooth press scale(0.97) in 60ms without jerking
+- Focus-visible ring for keyboard navigation
+- Disabled and loading states
