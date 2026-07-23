@@ -324,6 +324,8 @@ export default function MyFilesPage() {
     }
   }
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = async (silent = false) => {
     if (!silent) setLoading(true)
     setLoadError(null)
@@ -450,19 +452,7 @@ export default function MyFilesPage() {
     await uploadDroppedFiles(pick.data.map((f: any) => ({ filePath: f.filePath, fileName: f.fileName })), folderId)
   }
 
-  useEffect(() => { load(); loadFoldersFromCloud() }, [])
-
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>
-    const start = () => { interval = setInterval(() => loadFoldersFromCloud(), 30000) }
-    const onVisibility = () => {
-      if (document.hidden) clearInterval(interval)
-      else { loadFoldersFromCloud(); start() }
-    }
-    start()
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [])
+  useEffect(() => { load() }, [])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {

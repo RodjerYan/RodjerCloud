@@ -790,6 +790,7 @@ export class TelegramService {
       scanned += batch.length
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
+      await new Promise(r => setTimeout(r, 300))
     }
     return messages
       .filter((m: any) => {

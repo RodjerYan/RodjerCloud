@@ -149,12 +149,12 @@ app.whenReady().then(async () => {
   } catch {}
   startVideoStreamServer(telegramService)
 
-  // Background duplicate scan at startup
-  setTimeout(() => {
-    botService.scanChannel(telegramService, (p) => {
-      mainWindow?.webContents.send('bot:scan-progress', p)
-    }).catch(() => {})
-  }, 10000)
+  // Background duplicate scan deferred — runs on first file list instead
+  // setTimeout(() => {
+  //   botService.scanChannel(telegramService, (p) => {
+  //     mainWindow?.webContents.send('bot:scan-progress', p)
+  //   }).catch(() => {})
+  // }, 10000)
 
   setTimeout(checkUpdate, 10000)
   setTimeout(checkUpdate, 30000)
