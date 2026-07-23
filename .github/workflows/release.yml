@@ -51,16 +51,18 @@ jobs:
 
       - name: Create or update release
         run: |
+          NOTES=$(cat RELEASE_NOTES.md 2>/dev/null || echo "Автоматическая сборка")
           if gh release view "${{ github.ref_name }}" --json tagName > /dev/null 2>&1; then
             gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.exe" --yes 2>/dev/null || true
             gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.exe.blockmap" --yes 2>/dev/null || true
             gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.dmg" --yes 2>/dev/null || true
             gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.dmg.blockmap" --yes 2>/dev/null || true
             gh release upload "${{ github.ref_name }}" *.exe *.exe.blockmap *.dmg *.dmg.blockmap --clobber || true
+            gh release edit "${{ github.ref_name }}" --notes "$NOTES" || true
           else
             gh release create "${{ github.ref_name }}" *.exe *.exe.blockmap *.dmg *.dmg.blockmap \
               --title "${{ github.ref_name }}" \
-              --notes "Автоматическая сборка" || true
+              --notes "$NOTES" || true
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
