@@ -22,7 +22,7 @@ const items = [
 ]
 
 export default function Sidebar({ channelInfo, userInfo, onLogout, updateAvailable }: Props) {
-  const avatarSrc = userInfo?.photoPath ? 'file://' + userInfo.photoPath : null
+  const avatarSrc = userInfo?.photoPath ? 'local-file://' + userInfo.photoPath : null
   return (
     <aside className="v2-sidebar" data-testid="v3-sidebar">
       <div className="v2-sidebar-profile">

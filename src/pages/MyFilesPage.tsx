@@ -455,18 +455,6 @@ export default function MyFilesPage() {
 
   useEffect(() => { load(); loadFolders() }, [])
 
-  useEffect(() => {
-    const container = document.querySelector('.v2-main')
-    if (!container) return
-    const handleScroll = () => {
-      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 200) {
-        setVisibleCount(prev => Math.min(prev + 20, filtered.length))
-      }
-    }
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [filtered.length])
-
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
     const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60000)
@@ -483,6 +471,18 @@ export default function MyFilesPage() {
     })
     return arr
   }, [files, search, sort])
+
+  useEffect(() => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 200) {
+        setVisibleCount(prev => Math.min(prev + 20, filtered.length))
+      }
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [filtered.length])
 
   const visibleFiltered = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
 

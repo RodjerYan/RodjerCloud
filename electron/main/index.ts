@@ -126,6 +126,11 @@ async function checkUpdate() {
 }
 
 app.whenReady().then(async () => {
+  protocol.handle('local-file', (request) => {
+    const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
+    return net.fetch('file://' + filePath)
+  })
+
   createWindow()
 
   autoSyncService.loadTracker()
@@ -509,7 +514,8 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
 
 ipcMain.handle('telegram:list-files', async () => {
   try {
-    const files = await telegramService.listFiles()
+    const files = await telegramService.listFilesCached()
+    telegramService.syncFilesInBackground().catch(() => {})
     return { success: true, data: files }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -1612,7 +1618,7 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
       }
       finalPath = jpgPath
     }
-    return { success: true, data: 'file:///' + encodeURI(finalPath.replace(/\\/g, '/').replace(/^\//, '')) }
+    return { success: true, data: 'local-file://' + encodeURI(finalPath.replace(/\\/g, '/')) }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

@@ -18,6 +18,8 @@ import zlib from 'zlib'
 import { app, ipcMain, nativeImage } from 'electron'
 
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
+const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
+
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
@@ -60,6 +62,8 @@ export class TelegramService {
 
   private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
   private processingHeavyQueue = false
+  private fileCache: any[] = []
+  private syncingFiles = false
 
   constructor() {
     this.loadTrashState()
@@ -394,26 +398,18 @@ export class TelegramService {
     for (const dialog of dialogs) {
       const entity = dialog.entity as any
       if (entity?.title && typeof entity.title === 'string' && entity.title === CHANNEL_NAME) {
-        matches.push(entity)
+        matches.push({ entity, lastDate: dialog.date || 0 })
       }
     }
     if (matches.length > 0) {
-      let activeChannel = matches[0]
-      let latestDate = 0
-      for (const match of matches) {
-        try {
-          const msgs = await this.client.getMessages(match.id, { limit: 1 })
-          const date = msgs.length > 0 ? msgs[0].date : 0
-          if (date >= latestDate) {
-            latestDate = date
-            activeChannel = match
-          }
-        } catch (e) {}
+      let activeMatch = matches[0]
+      for (const m of matches) {
+        if (m.lastDate >= activeMatch.lastDate) activeMatch = m
       }
-      this.channelId = BigInt(activeChannel.id.toString())
+      this.channelId = BigInt(activeMatch.entity.id.toString())
       return {
         channelId: this.channelId.toString(),
-        channelName: activeChannel.title,
+        channelName: activeMatch.entity.title,
       }
     }
     return await this.createPrivateChannel()
@@ -888,6 +884,39 @@ export class TelegramService {
         if (Array.isArray(data.restored)) this.localRestoredIds = new Set(data.restored)
       }
     } catch(e) { console.error('Failed to load trash state', e) }
+  }
+
+  private loadFileCache(): any[] {
+    try {
+      if (fs.existsSync(FILE_CACHE_PATH)) {
+        const data = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
+        if (Array.isArray(data)) { this.fileCache = data; return data }
+      }
+    } catch {}
+    return []
+  }
+
+  private saveFileCache(files: any[]) {
+    try { fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(files), 'utf-8') } catch {}
+  }
+
+  async listFilesCached(): Promise<any[]> {
+    const cached = this.loadFileCache()
+    if (cached.length > 0) return cached
+    const files = await this.listFiles()
+    this.saveFileCache(files)
+    return files
+  }
+
+  async syncFilesInBackground(): Promise<void> {
+    if (this.syncingFiles || !this.client || !this.channelId) return
+    this.syncingFiles = true
+    try {
+      const files = await this.listFiles()
+      this.saveFileCache(files)
+      this.fileCache = files
+    } catch {}
+    this.syncingFiles = false
   }
 
   async trashFile(messageId: number) {
