@@ -6,6 +6,7 @@ import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2,
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { toast } from '../lib/toast'
+import { BulkProgressModal } from '../components/BulkProgressModal'
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -25,6 +26,7 @@ export default function TrashPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
 
@@ -296,35 +298,50 @@ export default function TrashPage() {
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
     const ids = Array.from(selected)
-    const filesToRestore = files.filter(f => ids.includes(f.messageId))
-    const applyRemove = () => {
-      flushSync(() => {
-        setFiles(prev => prev.filter(f => !ids.includes(f.messageId)))
-        clearSelection()
-      })
-    }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    const selectedFiles = files.filter(f => ids.includes(f.messageId))
+    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
+    setProgressModal({ title: 'Удаление навсегда', items, current: 0, total: ids.length, visible: true })
 
-    let allSuccess = true
-    for (const id of ids) {
+    clearSelection()
+    let successCount = 0
+    let errorCount = 0
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]
+      setProgressModal(prev => {
+        if (!prev) return prev
+        const newItems = prev.items.map((it, idx) => {
+          if (idx < i) return { ...it, status: 'done' as const }
+          if (idx === i) return { ...it, status: 'active' as const }
+          return it
+        })
+        return { ...prev, items: newItems, current: i }
+      })
       const r = await window.electronAPI.telegram.permDeleteFile(id)
-      if (!r.success) allSuccess = false
-    }
-    if (allSuccess) {
-      toast.success(`Удалено навсегда ${ids.length} файлов`)
-    } else {
-      toast.error('Ошибка удаления некоторых файлов')
-      const revert = () => {
-        flushSync(() => {
-          setFiles(prev => {
-            const currentIds = new Set(prev.map(p => p.messageId))
-            const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
-            return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
-          })
+      if (r.success) {
+        successCount++
+        setFiles(prev => prev.filter(f => f.messageId !== id))
+        setProgressModal(prev => {
+          if (!prev) return prev
+          const newItems = prev.items.map((it, idx) => idx === i ? { ...it, status: 'done' as const } : it)
+          return { ...prev, items: newItems, current: i + 1 }
+        })
+      } else {
+        errorCount++
+        setProgressModal(prev => {
+          if (!prev) return prev
+          const newItems = prev.items.map((it, idx) => idx === i ? { ...it, status: 'error' as const } : it)
+          return { ...prev, items: newItems, current: i + 1 }
         })
       }
-      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
     }
+
+    setProgressModal(prev => {
+      if (!prev) return prev
+      return { ...prev, current: prev.total, onClose: () => setProgressModal(null) }
+    })
+    if (errorCount > 0) toast.error(`Удалено ${successCount}, ошибок ${errorCount}`)
+    else toast.success(`Удалено навсегда ${successCount} файлов`)
   }
 
   const handleBulkDownload = async () => {
@@ -557,6 +574,16 @@ export default function TrashPage() {
           height: Math.abs(selectionBox.endY - selectionBox.startY),
         }} />
       , document.body)}
+      {progressModal && (
+        <BulkProgressModal
+          title={progressModal.title}
+          items={progressModal.items}
+          current={progressModal.current}
+          total={progressModal.total}
+          visible={progressModal.visible}
+          onClose={progressModal.onClose}
+        />
+      )}
     </div>
   )
 }

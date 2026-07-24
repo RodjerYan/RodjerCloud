@@ -14,6 +14,7 @@ import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
 const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 import { FileThumb } from '../components/FileThumb'
 import { TiltCard } from '../components/TiltCard'
+import { BulkProgressModal } from '../components/BulkProgressModal'
 import '../styles/duplicate-modal.css'
 
 function typeOf(name: string): string {
@@ -72,6 +73,7 @@ export default function MyFilesPage() {
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
   const [drillDown, setDrillDown] = useState<string | null>(null)
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [folders, setFolders] = useState<any[]>([])
   const [fileFolders, setFileFolders] = useState<Record<number, string>>({})
   const [folderDrill, setFolderDrill] = useState<string | null>(null)
@@ -717,6 +719,7 @@ export default function MyFilesPage() {
     if (selected.size === 0) return
     if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`, true))) return
     const ids = Array.from(selected)
+    const selectedFiles = files.filter(f => ids.includes(f.messageId))
     
     let x = 0.5, y = 0.5
     if (e) {
@@ -732,39 +735,54 @@ export default function MyFilesPage() {
       zIndex: 9999
     })
 
-    setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.add(id)); return s })
-    toast.info('Перемещение в корзину…')
-    
-    const filesToRestore = files.filter(f => ids.includes(f.messageId))
-    
-    const applyRemove = () => {
-      ids.forEach(id => locallyDeletedIds.current.add(id))
-      flushSync(() => {
-        setFiles(prev => prev.filter(x => !ids.includes(x.messageId)))
-        setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
-        clearSelection()
-      })
-    }
+    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
+    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true })
 
-    applyRemove()
+    const filesToRestore = [...selectedFiles]
+    let processed = 0
+    let hadError = false
+
+    const onProgress = (data: { kind: string; index: number; total: number }) => {
+      if (data.kind !== 'delete') return
+      processed = data.index
+      setProgressModal(prev => {
+        if (!prev) return prev
+        const newItems = prev.items.map((it, i) => {
+          if (i < data.index) return { ...it, status: 'done' as const }
+          if (i === data.index - 1) return { ...it, status: 'done' as const }
+          if (i === data.index) return { ...it, status: 'active' as const }
+          return it
+        })
+        return { ...prev, items: newItems, current: data.index }
+      })
+      if (processed <= ids.length) {
+        const fid = ids[processed - 1]
+        locallyDeletedIds.current.add(fid)
+        setFiles(prev => prev.filter(x => x.messageId !== fid))
+      }
+    }
+    const unsub = window.electronAPI.telegram.onBulkProgress(onProgress)
+
+    clearSelection()
 
     const r = await window.electronAPI.telegram.bulkDelete(ids)
+    unsub()
+
     if (r.success) {
-      toast.success('Успешно удалено')
+      setProgressModal(prev => {
+        if (!prev) return prev
+        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total, onClose: () => setProgressModal(null) }
+      })
     } else {
-      toast.error('Ошибка массового удаления, отмена')
-      const revert = () => {
-        ids.forEach(id => locallyDeletedIds.current.delete(id))
-        flushSync(() => {
-          setFiles(prev => {
-            const currentIds = new Set(prev.map(p => p.messageId))
-            const missing = filesToRestore.filter(ftr => !currentIds.has(ftr.messageId))
-            return [...prev, ...missing].sort((a, b) => (b.messageId - a.messageId))
-          })
-          setDeletingIds(prev => { const s = new Set(prev); ids.forEach(id => s.delete(id)); return s })
+      hadError = true
+      setProgressModal(prev => {
+        if (!prev) return prev
+        const newItems = prev.items.map((it, i) => {
+          const result = r.data?.[i]
+          return { ...it, status: result?.success ? 'done' as const : 'error' as const }
         })
-      }
-        revert()
+        return { ...prev, items: newItems, current: prev.total, onClose: () => setProgressModal(null) }
+      })
     }
   }
   const bulkDownload = async () => {
@@ -1872,6 +1890,16 @@ export default function MyFilesPage() {
           )}
         </div>,
         document.body
+      )}
+      {progressModal && (
+        <BulkProgressModal
+          title={progressModal.title}
+          items={progressModal.items}
+          current={progressModal.current}
+          total={progressModal.total}
+          visible={progressModal.visible}
+          onClose={progressModal.onClose}
+        />
       )}
     </div>
   )

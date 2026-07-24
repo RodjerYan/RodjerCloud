@@ -74,7 +74,7 @@ export default function ContentPage() {
         if (res.data.mimeType.startsWith('image/')) {
           const urlRes = await window.electronAPI.file.readDataUrl(res.data.filePath)
           if (urlRes.success) setPreviewUrl(urlRes.data)
-          else setPreviewUrl('local-file://' + encodeURI(res.data.filePath.replace(/\\/g, '/')))
+          else setPreviewUrl('local-file://' + encodeURI(res.data.filePath.replace(/\\/g, '/').replace(/^([A-Z]:)/, '/$1')))
         } else {
           const urlRes = await window.electronAPI.file.getLocalUrl(res.data.filePath)
           if (urlRes.success) setPreviewUrl(urlRes.data)

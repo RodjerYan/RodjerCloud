@@ -946,8 +946,23 @@ export class TelegramService {
           }
         }
       }
-    } catch (e) {
-      console.warn('Telegram API rejected edit for trash, falling back to local memory:', e)
+    } catch (e: any) {
+      if (e?.message?.includes('FLOOD_WAIT') || e?.errorMessage?.includes('FLOOD_WAIT')) {
+        const waitSec = parseInt((e.message || e.errorMessage || '').match(/\d+/)?.[0] || '15')
+        console.warn(`FloodWaitError, waiting ${waitSec}s before retry`)
+        await new Promise(r => setTimeout(r, (waitSec + 2) * 1000))
+        try {
+          const msgs2 = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+          if (msgs2 && msgs2.length > 0) {
+            const m2 = msgs2[0]
+            const cap2 = m2.message || ''
+            const newCap2 = cap2.includes(this.TRASH_MARKER) ? cap2 : cap2 + `\n${this.TRASH_MARKER}${Date.now()}`
+            await this.client.editMessage(this.channelId as any, { message: messageId, text: newCap2 })
+          }
+        } catch (e2) { console.warn('Retry after FloodWait also failed:', e2) }
+      } else {
+        console.warn('Telegram API rejected edit for trash, falling back to local memory:', e)
+      }
     }
   }
 

@@ -128,7 +128,10 @@ async function checkUpdate() {
 app.whenReady().then(async () => {
   protocol.handle('local-file', (request) => {
     const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
-    return net.fetch('file://' + filePath)
+    const fileUrl = process.platform === 'win32'
+      ? 'file:///' + filePath.replace(/^\//, '')
+      : 'file://' + filePath
+    return net.fetch(fileUrl)
   })
 
   createWindow()
@@ -700,6 +703,7 @@ ipcMain.handle('telegram:bulk-delete', async (event, messageIds: number[]) => {
     try { await telegramService.trashFile(messageIds[i]); results.push({ success: true }) }
     catch (e) { results.push({ success: false, error: (e as Error).message }) }
     event.sender.send('telegram:bulk-progress', { kind: 'delete', index: i + 1, total: messageIds.length })
+    if (i < messageIds.length - 1) await new Promise(r => setTimeout(r, 400))
   }
   return { success: true, data: results }
 })
@@ -1618,7 +1622,7 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
       }
       finalPath = jpgPath
     }
-    return { success: true, data: 'local-file://' + encodeURI(finalPath.replace(/\\/g, '/')) }
+    return { success: true, data: 'local-file://' + encodeURI(finalPath.replace(/\\/g, '/').replace(/^([A-Z]:)/, '/$1')) }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
