@@ -22,6 +22,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const queueRef = useRef<UploadFileItem[]>([])
+  queueRef.current = uploadQueue
 
   const resolvePath = (file: File): string => {
     const api: any = (window as any).electronAPI
@@ -109,16 +111,16 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       })
     })
 
-    // Upload files one by one
-    for (let i = 0; i < uploadQueue.length; i++) {
-      const item = uploadQueue[i]
-      if (item.status === 'error') continue
+    // Upload files one by one — use queueRef so new files added mid-upload are picked up
+    let idx = 0
+    while (idx < queueRef.current.length) {
+      const item = queueRef.current[idx]
+      if (item.status === 'error' || item.status === 'completed') { idx++; continue }
 
       // Mark as uploading
       setUploadQueue(prev => {
         const updated = [...prev]
-        updated[i].status = 'uploading'
-        updated[i].progress = 0
+        if (updated[idx]) { updated[idx].status = 'uploading'; updated[idx].progress = 0 }
         return updated
       })
 
@@ -133,11 +135,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       if (!filePath) {
         setUploadQueue(prev => {
           const updated = [...prev]
-          updated[i].status = 'error'
-          updated[i].error = 'Не удалось получить путь к файлу'
+          if (updated[idx]) { updated[idx].status = 'error'; updated[idx].error = 'Не удалось получить путь к файлу' }
           return updated
         })
-        continue
+        idx++; continue
       }
 
       try {
@@ -145,26 +146,24 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         if (result.success) {
           setUploadQueue(prev => {
             const updated = [...prev]
-            updated[i].status = 'completed'
-            updated[i].progress = 100
+            if (updated[idx]) { updated[idx].status = 'completed'; updated[idx].progress = 100 }
             return updated
           })
         } else {
           setUploadQueue(prev => {
             const updated = [...prev]
-            updated[i].status = 'error'
-            updated[i].error = result.error || 'Ошибка загрузки'
+            if (updated[idx]) { updated[idx].status = 'error'; updated[idx].error = result.error || 'Ошибка загрузки' }
             return updated
           })
         }
       } catch (error) {
         setUploadQueue(prev => {
           const updated = [...prev]
-          updated[i].status = 'error'
-          updated[i].error = (error as Error).message
+          if (updated[idx]) { updated[idx].status = 'error'; updated[idx].error = (error as Error).message }
           return updated
         })
       }
+      idx++
     }
 
     // Cleanup
@@ -195,9 +194,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   }
 
   const pendingCount = uploadQueue.filter(item => item.status === 'pending').length
-  const totalProgress = uploadQueue.length > 0
-    ? Math.floor(uploadQueue.reduce((sum, item) => sum + item.progress, 0) / uploadQueue.length)
-    : 0
+  const totalBytes = uploadQueue.reduce((sum, item) => sum + (item.file?.size || 0), 0)
+  const sentBytes = uploadQueue.reduce((sum, item) => {
+    if (item.status === 'completed') return sum + (item.file?.size || 0)
+    if (item.status === 'uploading') return sum + ((item.file?.size || 0) * item.progress / 100)
+    return sum
+  }, 0)
+  const totalProgress = totalBytes > 0 ? Math.min(100, Math.floor((sentBytes / totalBytes) * 100)) : 0
 
   return (
     <div className="upload-section glass-card">

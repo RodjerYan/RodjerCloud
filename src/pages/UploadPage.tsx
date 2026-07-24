@@ -204,7 +204,7 @@ export default function UploadPage() {
                       <span className="up-warn"><AlertTriangle size={12} /> Exceeds Telegram 2GB limit</span>
                     )}
                   </div>
-                  <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status}{q.error ? ' - ' + q.error : ''}</div>
+                  <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status === 'done' ? 'готово' : q.status === 'uploading' ? 'загрузка' : q.status === 'waiting' ? 'ожидание' : q.status === 'failed' ? 'ошибка' : q.status}{q.error ? ' - ' + q.error : ''}</div>
                 </div>
                 <div className="up-item-progress">
                   {q.status === 'uploading' && <Loader2 size={16} className="spin" />}
