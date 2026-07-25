@@ -307,21 +307,7 @@ export default function AlbumsPage() {
                   return (
                     <div style={{ textAlign: 'center', padding: 40 }}>
                       <div className="v3-sub" style={{ marginBottom: 12 }}>Дубликаты ещё не найдены</div>
-                      <button className="v3-btn primary" onClick={async () => {
-                        setHashing(true)
-                        setHashProgress({ done: 0, total: 0 })
-                        const res = await window.electronAPI.bot.scanDuplicates()
-                        if (res.success) {
-                          const r = await window.electronAPI.bot.getHashDb()
-                          if (r.success && r.data) {
-                            for (const e of r.data) {
-                              if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
-                            }
-                            setHashTrigger(prev => prev + 1)
-                          }
-                        }
-                        setHashing(false)
-                      }}>Сканировать сейчас</button>
+                      <button className="v3-btn primary" onClick={() => computeHashes(allFiles)}>Сканировать сейчас</button>
                     </div>
                   )
                 }
