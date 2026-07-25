@@ -81,9 +81,16 @@ export default function AlbumsPage() {
     : null
 
   const computeHashes = useCallback(async (files: any[]) => {
-    let done = 0; const total = files.length
+    let source = files
+    if (source.length === 0) {
+      const r = await window.electronAPI.telegram.listFiles()
+      if (r?.success && r.data) { source = r.data; setAllFiles(r.data) }
+    }
+    const mediaFiles = source.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+    let done = 0; const total = mediaFiles.length
+    if (total === 0) { setHashTrigger(prev => prev + 1); return }
     setHashProgress({ done, total }); setHashing(true)
-    for (const f of files) {
+    for (const f of mediaFiles) {
       const existing = v3store.metaFor(f.messageId)
       if (existing?.hash) { done++; setHashProgress({ done, total }); continue }
       try {
@@ -92,7 +99,7 @@ export default function AlbumsPage() {
       } catch {}
       done++; setHashProgress({ done, total })
     }
-    setHashing(false); setAlbums(v3store.getAlbums())
+    setHashing(false); setAlbums(v3store.getAlbums()); setHashTrigger(prev => prev + 1)
   }, [])
 
   const hashGroups = useMemo(() => {
@@ -127,16 +134,14 @@ export default function AlbumsPage() {
       window.electronAPI.telegram.listFiles().then((r: any) => { if (r?.success) setAllFiles(r.data || []) })
       const isDuplicates = SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates
       if (isDuplicates) {
-        setHashing(true)
         window.electronAPI.bot.getHashDb().then((r: any) => {
-          if (r.success && r.data) {
+          if (r?.success && r?.data) {
             for (const e of r.data) {
               if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
             }
             setHashTrigger(prev => prev + 1)
           }
-          setHashing(false)
-        })
+        }).catch(() => {})
       }
     }
   }, [openAlbum])
@@ -307,7 +312,7 @@ export default function AlbumsPage() {
                   return (
                     <div style={{ textAlign: 'center', padding: 40 }}>
                       <div className="v3-sub" style={{ marginBottom: 12 }}>Дубликаты ещё не найдены</div>
-                      <button className="v3-btn primary" onClick={() => computeHashes(allFiles)}>Сканировать сейчас</button>
+                      <button className="v3-btn primary" onClick={() => { toast.info('Запуск сканирования...'); computeHashes(allFiles) }}>Сканировать сейчас</button>
                     </div>
                   )
                 }
