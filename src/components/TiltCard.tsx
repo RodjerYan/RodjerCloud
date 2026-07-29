@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 
 export interface TiltCardProps {
   tiltLimit?: number

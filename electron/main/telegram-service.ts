@@ -1,14 +1,4 @@
 import { TelegramClient } from 'telegram'
-import * as fs from 'fs'
-import * as path from 'path'
-import { app } from 'electron'
-
-const SHARE_LOG = () => path.join(app.isPackaged ? app.getPath('userData') : app.getAppPath(), 'share-debug.log')
-function shareLog(...args: any[]) {
-  try { fs.appendFileSync(SHARE_LOG(), `[${new Date().toISOString()}] [findBot] ${args.join(' ')}\n`) } catch {}
-}
-import { getFileHash } from './storage-service'
-import { vaultService } from './vault-service'
 import { StringSession } from 'telegram/sessions'
 import { Api } from 'telegram/tl'
 import fs from 'fs'
@@ -16,6 +6,12 @@ import path from 'path'
 import crypto from 'crypto'
 import zlib from 'zlib'
 import { app, ipcMain, nativeImage } from 'electron'
+import { vaultService } from './vault-service'
+
+const SHARE_LOG = () => path.join(app.isPackaged ? app.getPath('userData') : app.getAppPath(), 'share-debug.log')
+function shareLog(...args: unknown[]) {
+  try { fs.appendFileSync(SHARE_LOG(), `[${new Date().toISOString()}] [findBot] ${args.join(' ')}\n`) } catch {}
+}
 
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
@@ -81,7 +77,7 @@ export class TelegramService {
         await this.performDownload(task.message, tmpPath)
         
         if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
-          let outputBuffer = fs.readFileSync(tmpPath)
+          let outputBuffer: Buffer = fs.readFileSync(tmpPath)
           
           if (process.platform === 'darwin') {
             const { execFileSync } = require('child_process')
@@ -110,24 +106,24 @@ export class TelegramService {
                 }
                 run();
               `, { eval: true, workerData: outputBuffer })
-              worker.on('message', msg => {
-                if (msg.success) resolve(Buffer.from(msg.buffer))
+              worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                if (msg.success) resolve(Buffer.from(msg.buffer!))
                 else reject(new Error(msg.error))
               })
               worker.on('error', reject)
-              worker.on('exit', code => {
+              worker.on('exit', (code: number | null) => {
                 if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
               })
             })
-            const img = nativeImage.createFromBuffer(outBuf)
-            outputBuffer = img.resize({ width: 320 }).toJPEG(80)
+            const img = nativeImage.createFromBuffer(outBuf as Buffer)
+            outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
           }
           
           fs.writeFileSync(task.cachePath, outputBuffer)
           try { fs.unlinkSync(tmpPath) } catch {}
           
           const { BrowserWindow } = require('electron')
-          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }))
+          BrowserWindow.getAllWindows().forEach((w: { webContents: { send: (channel: string, data: unknown) => void } }) => w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }))
         }
       } catch (e) {
         console.error('Heavy thumb queue error:', e)
@@ -204,14 +200,14 @@ export class TelegramService {
         const pwd = await this.passwordDef.promise
         return pwd
       },
-      onError: (err: any) => {
+      onError: (err: { errorMessage?: string; message?: string }) => {
         console.error('[telegram.start onError]', err?.errorMessage || err?.message || err)
         const isPhoneLoop = !(this.codeRequested as any)?._done
         if (isPhoneLoop) {
           this.authError = new Error(err?.errorMessage || err?.message || String(err))
           this.authResolved = true
         }
-        return isPhoneLoop
+        return
       },
     })
       .then(() => {
@@ -319,7 +315,7 @@ export class TelegramService {
       const iconPath = path.join(app.getAppPath(), 'resources', 'icon-256.png')
       if (!fs.existsSync(iconPath)) return
       const uploaded = await this.client.uploadFile({
-        file: iconPath,
+        file: { file: iconPath, mimeType: 'image/png' } as any,
         workers: 1,
       })
       await this.client.invoke(
@@ -508,7 +504,7 @@ export class TelegramService {
       } else if (ext === '.heic' || ext === '.heif') {
         try {
           const inputBuffer = fs.readFileSync(filePath)
-          let outputBuffer = inputBuffer
+          let outputBuffer: Buffer = inputBuffer
           if (process.platform === 'darwin') {
             const { execFileSync } = require('child_process')
             const tempDir = app.getPath('temp')
@@ -533,17 +529,17 @@ export class TelegramService {
                 }
                 run();
               `, { eval: true, workerData: inputBuffer })
-              worker.on('message', msg => {
-                if (msg.success) resolve(Buffer.from(msg.buffer))
+              worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                if (msg.success) resolve(Buffer.from(msg.buffer!))
                 else reject(new Error(msg.error))
               })
               worker.on('error', reject)
-              worker.on('exit', code => {
+              worker.on('exit', (code: number | null) => {
                 if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
               })
             })
-            const img = nativeImage.createFromBuffer(outBuf)
-            outputBuffer = img.resize({ width: 320 }).toJPEG(80)
+            const img = nativeImage.createFromBuffer(outBuf as Buffer)
+            outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
           }
           thumbBuffer = outputBuffer
           ;(thumbBuffer as any).name = 'thumb.jpg'
@@ -1132,9 +1128,9 @@ export class TelegramService {
           
           const readStream = fs.createReadStream(partPath)
           const writeStream = fs.createWriteStream(finalTargetPath, { flags: 'a' })
-          await new Promise((resolve, reject) => {
+          await new Promise<void>((resolve, reject) => {
             readStream.pipe(writeStream)
-            readStream.on('end', resolve)
+            readStream.on('end', () => resolve())
             readStream.on('error', reject)
             writeStream.on('error', reject)
           })
@@ -1500,7 +1496,7 @@ export class TelegramService {
   async forwardMessages(toPeer: bigint, messageIds: number[], fromPeer: bigint) {
     if (!this.client) throw new Error('Client not initialized')
     const ids = [...messageIds]
-    await this.client.forwardMessages(fromPeer, { messages: ids, toPeer })
+    await (this.client as any).forwardMessages(fromPeer, { messages: ids, toPeer })
   }
 
   async getUserId(): Promise<bigint> {
@@ -1611,7 +1607,7 @@ export class TelegramService {
       const filters = [
         { name: 'admins', f: new Api.ChannelParticipantsAdmins() },
         { name: 'recent', f: new Api.ChannelParticipantsRecent() },
-        { name: 'search', f: new Api.ChannelParticipantsSearch('') },
+        { name: 'search', f: new Api.ChannelParticipantsSearch({ q: '' }) },
       ]
       for (const { name, f } of filters) {
         shareLog('trying filter: ' + name)
@@ -1622,7 +1618,7 @@ export class TelegramService {
               filter: f,
               offset: 0,
               limit: 50,
-              hash: 0,
+              hash: 0 as any,
             })
           ) as any
           shareLog(name + ' count: ' + (participants?.count ?? '?') + ' users: ' + (participants?.users?.length ?? 0))
@@ -1658,7 +1654,7 @@ export class TelegramService {
           filter: new Api.ChannelParticipantsBots(),
           offset: 0,
           limit: 200,
-          hash: 0,
+          hash: 0 as any,
         })
       ) as any
       const bots = participants?.users?.filter((u: any) => u.bot) || []
@@ -1873,9 +1869,9 @@ export class TelegramService {
       )
       if (existing) return
 
-      const channelEntity = await this.client.getEntity(this.channelId) as any
+      const channelEntity = await this.client.getEntity(this.channelId as unknown as string) as any
       const channelPeer = new Api.InputPeerChannel({
-        channelId: this.channelId,
+        channelId: this.channelId as any,
         accessHash: channelEntity.accessHash,
       })
 
@@ -1884,7 +1880,7 @@ export class TelegramService {
         try {
           const botEntity = await this.client.getEntity(botUsername) as any
           botPeer = new Api.InputPeerUser({
-            userId: botEntity.id,
+            userId: botEntity.id as any,
             accessHash: botEntity.accessHash,
           })
         } catch {}
@@ -1897,14 +1893,14 @@ export class TelegramService {
               filter: new Api.ChannelParticipantsBots(),
               offset: 0,
               limit: 200,
-              hash: 0,
+              hash: 0 as any,
             })
           ) as any
           const bot = participants?.users?.find((u: any) => u.bot)
           if (bot) {
             botPeer = new Api.InputPeerUser({
-              userId: BigInt(bot.id.toString()),
-              accessHash: bot.accessHash || 0,
+              userId: BigInt(bot.id.toString()) as any,
+              accessHash: (bot.accessHash || 0) as any,
             })
           }
         } catch {}

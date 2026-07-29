@@ -50,9 +50,14 @@ export default function AggregateProgress() {
           <Activity size={14}/>
           <div className="label">Загрузка <span className="v3-num">{doneFiles}</span> из <span className="v3-num">{totalFiles}</span> · всего <span className="v3-num">{overall}%</span></div>
           <div style={{ marginLeft: "auto" }} className="v3-row v3-sub v3-num">
-            <span>{fmtBytes(speed)}/s</span>
-            <span>·</span>
-            <span>Осталось {fmtTime(eta)}</span>
+            {speed > 0 && (
+              <>
+                <span>{fmtBytes(speed)}/s</span>
+                <span>·</span>
+                <span>Осталось {fmtTime(eta)}</span>
+              </>
+            )}
+            {speed === 0 && <span>Подсчёт…</span>}
           </div>
         </div>
         <div className="v3-progress"><div className="v3-progress-bar" style={{ width: overall + "%" }}/></div>

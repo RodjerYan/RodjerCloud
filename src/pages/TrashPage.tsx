@@ -101,8 +101,8 @@ export default function TrashPage() {
       initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
       setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
     }
-    container.addEventListener('mousedown', handleGlobalMouseDown)
-    return () => container.removeEventListener('mousedown', handleGlobalMouseDown)
+    container.addEventListener('mousedown', handleGlobalMouseDown as EventListener)
+    return () => container.removeEventListener('mousedown', handleGlobalMouseDown as EventListener)
   }, [])
 
   useEffect(() => {
@@ -147,7 +147,7 @@ export default function TrashPage() {
 
   useEffect(() => {
     if (!ctxMenu) return
-    const close = (e: MouseEvent) => {
+    const close = (e: Event) => {
       if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
       setCtxMenu(null)
     }
@@ -254,6 +254,7 @@ export default function TrashPage() {
 
   const handleBulkRestore = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
+    if (!(await appConfirm(`Восстановить ${selected.size} файлов?`))) return
     let x = 0.5, y = 0.5
     if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })

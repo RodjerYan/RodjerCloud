@@ -117,7 +117,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     setArchiveInfo({ percent: 0, phase: 'compressing' })
     setArchivePhases(new Set(['compressing']))
 
-    const off = window.electronAPI.folders.onArchiveProgress((d) => {
+    const off = window.electronAPI.folders.onArchiveProgress((d: { percent: number; phase: string; sent?: number; total?: number }) => {
       setArchiveInfo(prev => ({ ...prev, percent: d.percent, phase: d.phase, sent: d.sent, total: d.total }))
       setArchivePhases(prev => { const n = new Set(prev); n.add(d.phase); return n })
       if (d.phase === 'uploading' && uploadStart.current === 0) uploadStart.current = Date.now()

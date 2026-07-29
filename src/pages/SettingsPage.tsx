@@ -88,7 +88,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
     if (!updateModal?.assetId) { toast.error('Ошибка: файл обновления не найден'); return }
     setDownloading(true)
     setDownloadProgress(0)
-    const unsub = window.electronAPI.app.onDownloadProgress((p) => {
+    const unsub = window.electronAPI.app.onDownloadProgress((p: { percent: number }) => {
       setDownloadProgress(p.percent)
     })
     const r = await window.electronAPI.app.downloadUpdate(updateModal.assetId)
@@ -332,8 +332,8 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
       )}
 
       {showPwdPrompt && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="v3-card" style={{ padding: 24, width: 400, maxWidth: '90%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowPwdPrompt(false)}>
+          <div className="v3-card" style={{ padding: 24, width: 400, maxWidth: '90%', display: 'flex', flexDirection: 'column', gap: 16 }} onClick={e => e.stopPropagation()}>
             <h3 style={{ margin: 0 }}>{checkingOldPwd ? 'Подтверждение пароля' : 'Изменение мастер-пароля'}</h3>
             <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)' }}>
               {checkingOldPwd 

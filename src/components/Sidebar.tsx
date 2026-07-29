@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom"
 import { Home, FolderOpen, Upload, RefreshCw, Settings,
   LogOut, Trash2, Star, Image as ImgIcon,
   Headphones, Cloud, ArrowRight } from "lucide-react"
+import { appConfirm } from "../lib/dialogs"
 import '../styles/logout-btn.css'
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void; updateAvailable?: boolean }
@@ -61,7 +62,7 @@ export default function Sidebar({ channelInfo, userInfo, onLogout, updateAvailab
           <div className="v2-sidebar-channel-name">{channelInfo?.channelName || "Канал"}</div>
           <div className="v2-sidebar-channel-sub">Подключено</div>
         </div>
-        <button className="v2-sidebar-logout" onClick={onLogout} data-testid="logout-btn">
+        <button className="v2-sidebar-logout" onClick={async () => { if (await appConfirm('Выйти из аккаунта?')) onLogout() }} data-testid="logout-btn">
           <div className="v2-sidebar-logout-bg" />
           <span className="v2-sidebar-logout-text">Выйти</span>
           <div className="v2-sidebar-logout-icon-wrap">

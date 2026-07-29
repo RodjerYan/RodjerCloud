@@ -94,7 +94,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
                 <YAxis stroke="#9ca3c4" fontSize={12} allowDecimals={false} width={36} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(124,131,255,0.08)' }} />
                 <Bar dataKey="value" fill="url(#dhBarGrad)" radius={[6, 6, 0, 0]}
-                  activeBar={{ fill: 'url(#dhBarGradActive)', radius: [6, 6, 0, 0] }}>
+                  activeBar={{ fill: 'url(#dhBarGradActive)', radius: [6, 6, 0, 0] } as any}>
                   <LabelList dataKey="value" position="top" fill="#e2e4f0" fontSize={13} fontWeight={600} />
                 </Bar>
                 <defs><linearGradient id="dhBarGrad" x1="0" x2="0" y1="0" y2="1">

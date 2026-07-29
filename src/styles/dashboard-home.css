@@ -12,9 +12,8 @@
 .dh-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .dh-card { background: rgba(17, 20, 37, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-md); padding: var(--space-md) 18px;
   display: flex; align-items: center; gap: 14px; backdrop-filter: blur(20px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-  transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: pointer; }
-.dh-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(124,131,255,0.15), inset 0 1px 0 rgba(255,255,255,0.08); }
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); }
+.dh-card:hover { box-shadow: 0 12px 40px rgba(124,131,255,0.1), inset 0 1px 0 rgba(255,255,255,0.08); }
 .dh-card-icon { width: 42px; height: 42px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
   display: flex; align-items: center; justify-content: center; }
 .dh-card-label { color: var(--text-dim); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; }

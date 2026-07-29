@@ -5,7 +5,7 @@ export default function SplashScreen() {
   const [ver, setVer] = useState('')
   useEffect(() => {
     try {
-      window.electronAPI?.app?.getVersion?.().then(r => {
+      window.electronAPI?.app?.getVersion?.().then((r: { success: boolean; data?: string }) => {
         if (r?.success && r?.data) setVer(r.data)
       })
     } catch(e) {

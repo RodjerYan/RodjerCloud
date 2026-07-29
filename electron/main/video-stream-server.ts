@@ -66,7 +66,7 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
       if (multipartMatch) {
         const partIds = multipartMatch[1].split(',').map(Number)
         // Fetch all part messages
-        const partMessages = await Promise.all(partIds.map(id => client.getMessages(channelId as any, { ids: [id] })))
+        const partMessages = await Promise.all(partIds.map((id: number) => client.getMessages(channelId as any, { ids: [id] })))
         
         // Base message is part 1
         parts.push({ id: baseMessage.id, msg: baseMessage, size: Number(baseMessage.file.size), start: 0, end: 0 })
@@ -160,11 +160,12 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
                // Get last 16 bytes of the previous part
                const prevPart = parts.find(x => x.end === p.start - 1)
                if (prevPart) {
-                  let prevIvIter = client.iterDownload({
-                    file: prevPart.msg.media,
-                    offset: bigInt(prevPart.size - 16),
-                    limit: 16
-                  })
+                   let prevIvIter = client.iterDownload({
+                     file: prevPart.msg.media,
+                     offset: bigInt(prevPart.size - 16),
+                     limit: 16,
+                     requestSize: 16,
+                   })
                   for await (const chunk of prevIvIter) {
                     iv = Buffer.from(chunk)
                     break
@@ -174,7 +175,8 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
                let prevIvIter = client.iterDownload({
                  file: p.msg.media,
                  offset: bigInt(streamOffset - 16),
-                 limit: 16
+                 limit: 16,
+                 requestSize: 16,
                })
                for await (const chunk of prevIvIter) {
                  iv = Buffer.from(chunk).subarray(0, 16)
@@ -196,6 +198,7 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
         const iter = client.iterDownload({
           file: p.msg.media,
           offset: bigInt(streamOffset),
+          requestSize: chunkSize,
         })
 
         for await (let chunk of iter) {

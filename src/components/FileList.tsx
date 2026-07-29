@@ -9,6 +9,7 @@ interface File {
   uploadedAt: number
   caption: string
   isEncrypted?: boolean
+  originalDate?: number
 }
 
 interface FileListProps {

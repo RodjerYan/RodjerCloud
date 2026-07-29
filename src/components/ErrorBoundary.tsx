@@ -26,6 +26,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             <h2 style={{ color:'#f55',marginBottom:12 }}>Критическая ошибка</h2>
             <pre style={{ whiteSpace:'pre-wrap',fontSize:13,lineHeight:1.5,color:'#aaa' }}>{this.state.error?.message}</pre>
             <pre style={{ whiteSpace:'pre-wrap',fontSize:11,lineHeight:1.4,color:'#666',marginTop:12 }}>{this.state.error?.stack}</pre>
+            <div style={{ marginTop:20, display:'flex', gap:12 }}>
+              <button onClick={() => this.setState({ hasError: false, error: null })} style={{ padding:'8px 20px',background:'#7c83ff',color:'#fff',border:'none',borderRadius:8,cursor:'pointer',fontSize:13 }}>Повторить</button>
+              <button onClick={() => window.location.reload()} style={{ padding:'8px 20px',background:'rgba(255,255,255,0.08)',color:'#aaa',border:'none',borderRadius:8,cursor:'pointer',fontSize:13 }}>Перезагрузить</button>
+            </div>
           </div>
         </div>
       )

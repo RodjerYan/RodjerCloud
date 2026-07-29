@@ -112,7 +112,7 @@ export default function ContentPage() {
           <h1 className="v2-h1">Контент</h1>
         </div>
         
-        <form onSubmit={handleSearch} className="content-search-bar" style={{ display: 'flex', gap: 12, position: 'relative', WebkitAppRegion: 'no-drag' as any }}>
+        <form onSubmit={handleSearch} className="content-search-bar" style={{ display: 'flex', gap: 12, position: 'relative', WebkitAppRegion: 'no-drag' as any } as React.CSSProperties}>
           <Search size={20} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)', pointerEvents: 'none' }} />
           <input 
             type="text" 

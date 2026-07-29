@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react"
 import { Link2, Copy, X, QrCode } from "lucide-react"
 import { v3store, type SharedLink } from "../lib/v3store"
+import { appConfirm } from "../lib/dialogs"
 
 export default function SharedPage() {
   const [items, setItems] = useState<SharedLink[]>(v3store.getShared())
@@ -27,7 +28,7 @@ export default function SharedPage() {
                 </div>
               </div>
               <button className="v3-btn" onClick={() => copy(s)} data-testid="share-copy"><Copy size={14}/> Копировать</button>
-              <button className="v3-btn" onClick={() => { v3store.removeShared(s.id); setItems(v3store.getShared()) }} data-testid="share-revoke"><X size={14}/> Отозвать</button>
+              <button className="v3-btn" onClick={async () => { if (await appConfirm('Отозвать ссылку?')) { v3store.removeShared(s.id); setItems(v3store.getShared()) }}} data-testid="share-revoke"><X size={14}/> Отозвать</button>
               <button className="v3-btn" title="QR"><QrCode size={14}/></button>
             </div>
           ))

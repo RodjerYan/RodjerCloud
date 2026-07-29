@@ -1604,12 +1604,12 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
                   }
                   run();
                 `, { eval: true, workerData: inputBuffer })
-                worker.on('message', msg => {
-                  if (msg.success) resolve(Buffer.from(msg.buffer))
+                worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                  if (msg.success) resolve(Buffer.from(msg.buffer!))
                   else reject(new Error(msg.error))
                 })
                 worker.on('error', reject)
-                worker.on('exit', code => {
+                worker.on('exit', (code: number | null) => {
                   if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
                 })
               })

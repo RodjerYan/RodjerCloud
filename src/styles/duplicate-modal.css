@@ -11,7 +11,7 @@
   transition: transform 0.15s ease-out, box-shadow 0.2s ease-out, background 0.2s ease;
   will-change: transform;
 }
-.btn-premium:hover { }
+.btn-premium:hover { filter: brightness(1.1); }
 .btn-premium:active { transform: scale(0.97); transition-duration: 0.06s; }
 .btn-premium:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
 .btn-premium:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }

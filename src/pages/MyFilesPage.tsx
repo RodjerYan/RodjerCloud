@@ -166,8 +166,8 @@ export default function MyFilesPage() {
       initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
       setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
     }
-    container.addEventListener('mousedown', handleGlobalMouseDown)
-    return () => container.removeEventListener('mousedown', handleGlobalMouseDown)
+    container.addEventListener('mousedown', handleGlobalMouseDown as EventListener)
+    return () => container.removeEventListener('mousedown', handleGlobalMouseDown as EventListener)
   }, [])
 
   useEffect(() => {
@@ -220,7 +220,7 @@ export default function MyFilesPage() {
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
     
-    if (!(await appConfirm('Удалить папку в корзину?', true))) return
+    if (!(await appConfirm('Удалить папку в корзину?'))) return
 
     let x = 0.5, y = 0.5
     if (targetElement) {
@@ -559,7 +559,7 @@ export default function MyFilesPage() {
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
 
-    if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?', true))) return
+    if (!(await appConfirm('Переместить ' + f.fileName + ' в корзину?'))) return
     
     let x = 0.5, y = 0.5
     if (targetElement) {
@@ -683,7 +683,7 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     if (!ctxMenu) return
-    const close = (e: MouseEvent) => {
+    const close = (e: Event) => {
       if ((e.target as HTMLElement)?.closest?.('.mf-ctx')) return
       setCtxMenu(null)
     }
@@ -717,7 +717,7 @@ export default function MyFilesPage() {
   }, [preview, navPreview])
   const bulkDelete = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`, true))) return
+    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
     const ids = Array.from(selected)
     const selectedFiles = files.filter(f => ids.includes(f.messageId))
     
@@ -1024,6 +1024,11 @@ export default function MyFilesPage() {
           </span>
         )}
 
+        <div className="mf-view-toggle">
+          <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')} title="Сетка"><Grid size={16} /></button>
+          <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} title="Список"><ListIcon size={16} /></button>
+        </div>
+
         <button className="v3-btn ghost" onClick={createFolder} title="Создать папку" style={{ padding: '8px 10px', borderColor: 'transparent' }}><FolderPlus size={16} /></button>
       </div>
 
@@ -1151,7 +1156,7 @@ export default function MyFilesPage() {
                             <div key={year + '-' + month + '-' + day} className="mf-gd">
                               <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
                               <div className="mf-gm-items">
-                                {items.map(f => (
+                                {items.map((f: any) => (
                                   <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-gm-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
                                     effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
                                     onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
@@ -1627,7 +1632,7 @@ export default function MyFilesPage() {
         const currIdx = all.findIndex((x: any) => x === preview.list[preview.idx])
         const currFile = all[currIdx]
         return (
-        <div className="mf-modal" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }} onClick={() => setPreview(null)}>
+        <div className="mf-modal" style={{ cursor: 'pointer', viewTransitionName: `folder-${currFile?.messageId}` }} onClick={() => setPreview(null)}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(180deg,rgba(0,0,0,0.5),transparent)', zIndex: 10, userSelect: 'none' }}>
             <span style={{ color: '#fff', fontSize: 13, opacity: 0.9 }}>{currFile?.fileName || ''}</span>
             <span style={{ color: '#fff', fontSize: 12, opacity: 0.6 }}>{currIdx + 1} / {all.length}</span>
@@ -1785,7 +1790,7 @@ export default function MyFilesPage() {
               <button className="v3-btn" onClick={() => setRenameTarget(null)}>Отмена</button>
               <button className="v3-btn primary" onClick={() => {
                 v3store.setMeta({ messageId: renameTarget.messageId, displayName: renameInput.trim() || undefined })
-                setRenameTarget(null); showToast('Переименовано')
+                setRenameTarget(null); toast.success('Переименовано')
                 setFiles(prev => prev.map(f => f.messageId === renameTarget.messageId ? { ...f, fileName: renameInput.trim() || f.fileName } : f))
               }}>Сохранить</button>
             </div>
@@ -1861,12 +1866,13 @@ export default function MyFilesPage() {
                       <button key={a.id} onClick={() => {
                         if (inAlbum) v3store.removeFromAlbum(a.id, ctxMenu.file.messageId)
                         else v3store.addToAlbum(a.id, ctxMenu.file.messageId)
-                        showToast(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
+                        toast.success(inAlbum ? 'Убрано из «' + a.name + '»' : 'Добавлено в «' + a.name + '»')
                         closeCtx()
-                      }} style={{ paddingLeft: 36, fontSize: 12 }}>
+                      }} style={{ paddingLeft: 36, fontSize: 12, textAlign: 'left', width: '100%' }}>
                         <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>
                           {inAlbum ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg> : null}
                         </span>
+                        {a.name}
                       </button>
                     )
                   })}

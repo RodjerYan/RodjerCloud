@@ -5,7 +5,7 @@ import confetti from 'canvas-confetti'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
 import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
-import { SMART_ALBUMS } from "../lib/albums"
+import { SMART_ALBUMS, type SmartAlbum } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from "../lib/dialogs"
 import { toast } from '../lib/toast'
@@ -32,21 +32,6 @@ export default function AlbumsPage() {
   const [hashTrigger, setHashTrigger] = useState(0)
   
   const loaderRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        
-      }
-    }, { rootMargin: '200px' })
-    if (loaderRef.current) observer.observe(loaderRef.current)
-    return () => observer.disconnect()
-  }, [])
-
-  // Reset display count when album changes
-  useEffect(() => {
-    
-  }, [openAlbum])
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -335,7 +320,7 @@ export default function AlbumsPage() {
                     {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
                       <div key={`${year}-${month}-${day}`} className="mf-gd">
                         <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
-                        <div className="mf-gm-items">{items.map(f => renderCard(f, isSmart))}</div>
+                        <div className="mf-gm-items">{items.map((f: any) => renderCard(f, isSmart))}</div>
                       </div>
                     ))}
                   </div>

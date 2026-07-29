@@ -13,7 +13,7 @@ export const pendingStore = {
   listeners: new Set<Function>(),
   subscribe(fn: Function) {
     this.listeners.add(fn)
-    return () => this.listeners.delete(fn)
+    return () => { this.listeners.delete(fn) }
   },
   add(items: PendingUpload[]) {
     this.uploads.push(...items)

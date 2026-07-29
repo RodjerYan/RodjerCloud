@@ -1,3 +1,4 @@
+import React from 'react'
 import { X, Check, AlertCircle, Loader2 } from 'lucide-react'
 
 interface ProgressItem {

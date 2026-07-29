@@ -21,8 +21,8 @@ export interface SyncEvent {
 }
 
 export class AutoSyncService {
-  private watcher: chokidar.FSWatcher | null = null
-  private config: SyncConfig
+  private watcher: import('chokidar').FSWatcher | null = null
+  private config: SyncConfig = { enabled: false, mode: 'all', customPaths: [], fileFilters: { enabled: false, extensions: [] }, excludePatterns: [] }
   private tg: TelegramService
   private running = false
   private queue: QueueItem[] = []
@@ -222,7 +222,7 @@ export class AutoSyncService {
       this.emit({ type: 'detected', file: fp })
       if (this.shouldUploadFile(fp)) this.uploadOne(fp)
     })
-    this.watcher.on('error', (err: Error) => this.emit({ type: 'error', error: err.message }))
+    this.watcher.on('error', (err: unknown) => this.emit({ type: 'error', error: String(err) }))
 
     this.running = true
     console.log('AutoSync: started watching', paths)
