@@ -743,7 +743,7 @@ export default function MyFilesPage() {
     })
 
     const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
-    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true })
+    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
 
     const filesToRestore = [...selectedFiles]
     let processed = 0
@@ -772,23 +772,32 @@ export default function MyFilesPage() {
 
     clearSelection()
 
-    const r = await window.electronAPI.telegram.bulkDelete(ids)
-    unsub()
+    try {
+      const r = await window.electronAPI.telegram.bulkDelete(ids)
+      unsub()
 
-    if (r.success) {
-      setProgressModal(prev => {
-        if (!prev) return prev
-        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total, onClose: () => setProgressModal(null) }
-      })
-    } else {
+      if (r.success) {
+        setProgressModal(prev => {
+          if (!prev) return prev
+          return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total }
+        })
+      } else {
+        hadError = true
+        setProgressModal(prev => {
+          if (!prev) return prev
+          const newItems = prev.items.map((it, i) => {
+            const result = r.data?.[i]
+            return { ...it, status: result?.success ? 'done' as const : 'error' as const }
+          })
+          return { ...prev, items: newItems, current: prev.total }
+        })
+      }
+    } catch (err) {
+      unsub()
       hadError = true
       setProgressModal(prev => {
         if (!prev) return prev
-        const newItems = prev.items.map((it, i) => {
-          const result = r.data?.[i]
-          return { ...it, status: result?.success ? 'done' as const : 'error' as const }
-        })
-        return { ...prev, items: newItems, current: prev.total, onClose: () => setProgressModal(null) }
+        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'error' as const })), current: prev.total }
       })
     }
   }
