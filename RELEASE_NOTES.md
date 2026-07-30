@@ -1,11 +1,11 @@
-## Что нового в v1.0.224
+## Что нового в v1.0.225
 
-- Исправлена вечная "Загрузка" в корзине — страница больше не зависает при ошибке загрузки
-- Исправлен прогресс-бар при удалении файлов — модалка всегда закрывается
+- Повторная сборка для создания релиза на GitHub
+- Исправления предыдущих версий: корзина, прогресс-бар, кеш файлов, auto-sync
 
 ---
 
-## What's new in v1.0.224
+## What's new in v1.0.225
 
-- Fixed eternal "Loading" in trash — page no longer hangs on load error
-- Fixed progress modal on file delete — modal always closes properly
+- Rebuild to create GitHub release
+- Fixes from previous versions: trash page, progress bar, file cache, auto-sync
