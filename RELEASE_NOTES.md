@@ -1,15 +1,11 @@
-## Что нового в v1.0.219
+## Что нового в v1.0.224
 
-- Исправлен прогресс-бар загрузки — теперь корректно пересчитывается при добавлении файлов во время ongoing загрузки
-- Прогресс загрузки считается по байтам вместо среднего арифметического
-- Исправлен цикл загрузки — новые файлы, добавленные во время загрузки, теперь подхватываются
-- Русские названия статусов в очереди загрузки (готово, загрузка, ожидание, ошибка)
+- Исправлена вечная "Загрузка" в корзине — страница больше не зависает при ошибке загрузки
+- Исправлен прогресс-бар при удалении файлов — модалка всегда закрывается
 
 ---
 
-## What's new in v1.0.219
+## What's new in v1.0.224
 
-- Fixed upload progress bar — now recalculates correctly when adding files during an ongoing upload
-- Upload progress is now bytes-based instead of naive average
-- Fixed upload loop — new files added during upload are now picked up
-- Russian status labels in upload queue (done→готово, uploading→загрузка, etc.)
+- Fixed eternal "Loading" in trash — page no longer hangs on load error
+- Fixed progress modal on file delete — modal always closes properly
