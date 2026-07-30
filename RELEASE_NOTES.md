@@ -1,11 +1,13 @@
-## Что нового в v1.0.225
+## Что нового в v1.0.226
 
-- Повторная сборка для создания релиза на GitHub
-- Исправления предыдущих версий: корзина, прогресс-бар, кеш файлов, auto-sync
+- Исправлена вечная "Загрузка" в корзине — убрана блокирующая синхронизация папок из read-only handler'а
+- Добавлены таймауты на Telegram API запросы в listTrash и permanentDeleteBatch
+- Renderer: таймаут 45с на загрузку корзины
 
 ---
 
-## What's new in v1.0.225
+## What's new in v1.0.226
 
-- Rebuild to create GitHub release
-- Fixes from previous versions: trash page, progress bar, file cache, auto-sync
+- Fixed eternal "Loading" in trash — removed blocking folder sync from read-only handler
+- Added timeouts on Telegram API calls in listTrash and permanentDeleteBatch
+- Renderer: 45s timeout on trash page load

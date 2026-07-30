@@ -1140,7 +1140,7 @@ ipcMain.handle('folders:list-trash', async () => {
       })
       Object.keys(d.fileFolders).forEach(k => { if (expiredIds.has(d.fileFolders[k])) delete d.fileFolders[k] })
       await writeFolders(d)
-      await syncFoldersToTelegram()
+      syncFoldersToTelegram().catch(() => {})
     }
     return { success: true, data: active }
   } catch (error) { return { success: false, error: (error as Error).message } }

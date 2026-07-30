@@ -40,6 +40,13 @@ function deferred<T>(): Deferred<T> {
 
 const CHANNEL_NAME = 'My area'
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Operation'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise.then(v => { clearTimeout(timer); resolve(v) }, e => { clearTimeout(timer); reject(e) })
+  })
+}
+
 async function extractChunkToDisk(source: string, target: string, start: number, end: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const rs = fs.createReadStream(source, { start, end: end - 1, highWaterMark: 256 * 1024 })
@@ -817,16 +824,24 @@ export class TelegramService {
 
   async listTrash() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    return withTimeout(this._listTrashInner(), 60000, 'listTrash overall')
+  }
+
+  private async _listTrashInner() {
       const messages: any[] = []
       let offsetId = 0
       const BATCH = 200
       const MAX_SCAN = 5000
       let scanned = 0
       while (scanned < MAX_SCAN) {
-        const batch = await this.client.getMessages(this.channelId as any, {
-          limit: BATCH,
-          ...(offsetId ? { offsetId } : {}),
-        })
+        const batch = await withTimeout(
+          this.client!.getMessages(this.channelId as any, {
+            limit: BATCH,
+            ...(offsetId ? { offsetId } : {}),
+          }),
+          15000,
+          'Telegram getMessages'
+        )
         if (batch.length === 0) break
         messages.push(...batch)
         scanned += batch.length
@@ -1022,7 +1037,11 @@ export class TelegramService {
     const BATCH = 100
     for (let i = 0; i < messageIds.length; i += BATCH) {
       const batch = messageIds.slice(i, i + BATCH)
-      const messages = await this.client.getMessages(this.channelId as any, { ids: batch })
+      const messages = await withTimeout(
+        this.client.getMessages(this.channelId as any, { ids: batch }),
+        15000,
+        'permanentDeleteBatch getMessages'
+      )
       const extraIds: number[] = []
       for (const m of (messages || [])) {
         const caption = m.message || ''
@@ -1031,7 +1050,11 @@ export class TelegramService {
       }
       const allIds = [...batch, ...extraIds]
       for (const id of batch) this.localTrashedIds.delete(id)
-      await this.client.deleteMessages(this.channelId as any, allIds, { revoke: true })
+      await withTimeout(
+        this.client.deleteMessages(this.channelId as any, allIds, { revoke: true }),
+        15000,
+        'permanentDeleteBatch deleteMessages'
+      )
     }
     this.saveTrashState()
   }
