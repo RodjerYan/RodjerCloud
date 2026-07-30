@@ -896,6 +896,11 @@ export class TelegramService {
     try { fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(files), 'utf-8') } catch {}
   }
 
+  invalidateFileCache() {
+    try { if (fs.existsSync(FILE_CACHE_PATH)) fs.unlinkSync(FILE_CACHE_PATH) } catch {}
+    this.fileCache = []
+  }
+
   async listFilesCached(): Promise<any[]> {
     const cached = this.loadFileCache()
     if (cached.length > 0) return cached

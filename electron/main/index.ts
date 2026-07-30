@@ -46,7 +46,11 @@ let initialFolderSyncDone = false
 autoSyncService.setEventCallback((event) => {
   if (mainWindow) {
     mainWindow.webContents.send('autosync:status', event)
-    if (event.type === 'uploaded' || event.type === 'failed') {
+    if (event.type === 'uploaded') {
+      mainWindow.webContents.send('files:changed')
+      appendSyncHistory({ timestamp: Date.now(), fileName: event.file || '', status: event.type, size: 0 }).catch(() => {})
+    }
+    if (event.type === 'failed') {
       appendSyncHistory({ timestamp: Date.now(), fileName: event.file || '', status: event.type, size: 0 }).catch(() => {})
     }
   }
