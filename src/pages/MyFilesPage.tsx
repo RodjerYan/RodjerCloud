@@ -457,6 +457,11 @@ export default function MyFilesPage() {
 
   useEffect(() => { load(); loadFolders() }, [])
 
+  useEffect(() => {
+    const unsub = window.electronAPI.telegram.onFilesChanged(() => { load(); loadFolders() })
+    return unsub
+  }, [load, loadFolders])
+
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
     const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60000)
@@ -501,28 +506,30 @@ export default function MyFilesPage() {
 
   const visibleFiltered = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
 
+  const recentFiles = useMemo(() => {
+    return filtered.filter(f => {
+      const fd = f.uploadedAt || fileDate(f)
+      return fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400
+    })
+  }, [filtered, now])
+
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
+    map['Недавние'] = recentFiles
     visibleFiltered.forEach(f => {
-      const fd = f.uploadedAt || fileDate(f)
-      if (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400) map['Недавние']?.push(f)
-      
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
-  }, [visibleFiltered, now, fileFolders])
+  }, [visibleFiltered, recentFiles, now, fileFolders])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
     if (drillDown === 'Недавние') {
-      return visibleFiltered.filter(f => {
-        const fd = f.uploadedAt || fileDate(f)
-        return (fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400)
-      })
+      return recentFiles
     }
     return visibleFiltered.filter(f => typeOf(f.fileName) === drillDown)
-  }, [drillDown, visibleFiltered, now, fileFolders])
+  }, [drillDown, visibleFiltered, recentFiles, now, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
@@ -736,7 +743,7 @@ export default function MyFilesPage() {
     })
 
     const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
-    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true })
+    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
 
     const filesToRestore = [...selectedFiles]
     let processed = 0
@@ -765,23 +772,32 @@ export default function MyFilesPage() {
 
     clearSelection()
 
-    const r = await window.electronAPI.telegram.bulkDelete(ids)
-    unsub()
+    try {
+      const r = await window.electronAPI.telegram.bulkDelete(ids)
+      unsub()
 
-    if (r.success) {
-      setProgressModal(prev => {
-        if (!prev) return prev
-        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total, onClose: () => setProgressModal(null) }
-      })
-    } else {
+      if (r.success) {
+        setProgressModal(prev => {
+          if (!prev) return prev
+          return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total }
+        })
+      } else {
+        hadError = true
+        setProgressModal(prev => {
+          if (!prev) return prev
+          const newItems = prev.items.map((it, i) => {
+            const result = r.data?.[i]
+            return { ...it, status: result?.success ? 'done' as const : 'error' as const }
+          })
+          return { ...prev, items: newItems, current: prev.total }
+        })
+      }
+    } catch (err) {
+      unsub()
       hadError = true
       setProgressModal(prev => {
         if (!prev) return prev
-        const newItems = prev.items.map((it, i) => {
-          const result = r.data?.[i]
-          return { ...it, status: result?.success ? 'done' as const : 'error' as const }
-        })
-        return { ...prev, items: newItems, current: prev.total, onClose: () => setProgressModal(null) }
+        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'error' as const })), current: prev.total }
       })
     }
   }

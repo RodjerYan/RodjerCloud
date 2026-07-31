@@ -186,6 +186,7 @@ export class AutoSyncService {
       this.markUploaded(fp)
       this.emitQueue()
       this.emit({ type: 'uploaded', file: path.basename(fp) })
+      try { this.tg.invalidateFileCache() } catch {}
     } catch (err: any) {
       console.error(`AutoSync upload error for ${fp}:`, err.message, err.stack)
       this.markUploaded(fp)

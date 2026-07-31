@@ -114,13 +114,24 @@ export default function TrashPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [r, rf] = await Promise.all([
-      window.electronAPI.telegram.listTrash(),
-      window.electronAPI.folders.listTrash()
-    ])
-    if (r.success) setFiles(r.data || [])
-    if (rf.success) setTrashedFolders(rf.data || [])
-    setLoading(false)
+    try {
+      const timeout = <T,>(p: Promise<T>, ms: number): Promise<T> => Promise.race([
+        p,
+        new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Timeout')), ms))
+      ])
+      const [r, rf] = await Promise.all([
+        timeout(window.electronAPI.telegram.listTrash(), 45000),
+        timeout(window.electronAPI.folders.listTrash(), 45000)
+      ]) as [{ success: boolean; data?: any[] }, { success: boolean; data?: any[] }]
+      if (r.success) setFiles(r.data || [])
+      if (rf.success) setTrashedFolders(rf.data || [])
+    } catch (e: any) {
+      console.error('TrashPage load error:', e)
+      setFiles([])
+      setTrashedFolders([])
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { load() }, [load])

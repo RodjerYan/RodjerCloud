@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
       ipcRenderer.invoke('telegram:bulk-download', items),
     bulkDelete: (ids: number[]) => ipcRenderer.invoke('telegram:bulk-delete', ids),
+    onFilesChanged: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on('files:changed', listener)
+      return () => ipcRenderer.removeListener('files:changed', listener)
+    },
     logout: () => ipcRenderer.invoke('telegram:logout'),
     getUserInfo: () => ipcRenderer.invoke('telegram:get-user-info'),
 
