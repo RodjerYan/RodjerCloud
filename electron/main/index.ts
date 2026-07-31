@@ -270,13 +270,23 @@ ipcMain.handle('telegram:verify-code', async (_, code: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      if (!botService.getToken()) {
+      const savedToken = botService.getToken()
+      if (savedToken) {
         try {
-          const botResult = await telegramService.createBotAndAddToChannel()
-          botService.setToken(botResult.token)
-        } catch (e) {
-          log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
-        }
+          const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+          const json = await resp.json()
+          if (json.ok) {
+            log('info', 'Reusing existing valid bot token')
+            return { success: true, data: channelResult }
+          }
+        } catch {}
+        log('warn', 'Saved bot token invalid, creating new bot')
+      }
+      try {
+        const botResult = await telegramService.createBotAndAddToChannel()
+        botService.setToken(botResult.token)
+      } catch (e) {
+        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
       }
       return { success: true, data: channelResult }
     }
@@ -291,13 +301,23 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      if (!botService.getToken()) {
+      const savedToken = botService.getToken()
+      if (savedToken) {
         try {
-          const botResult = await telegramService.createBotAndAddToChannel()
-          botService.setToken(botResult.token)
-        } catch (e) {
-          log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
-        }
+          const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+          const json = await resp.json()
+          if (json.ok) {
+            log('info', 'Reusing existing valid bot token (2FA)')
+            return { success: true, data: channelResult }
+          }
+        } catch {}
+        log('warn', 'Saved bot token invalid (2FA), creating new bot')
+      }
+      try {
+        const botResult = await telegramService.createBotAndAddToChannel()
+        botService.setToken(botResult.token)
+      } catch (e) {
+        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
       }
       return { success: true, data: channelResult }
     }
@@ -320,18 +340,26 @@ ipcMain.handle('telegram:reconnect', async () => {
         log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
       }
     } else {
-      // Ensure stored bot is admin in the channel
       try {
         const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
         const json = await resp.json()
         if (json.ok && json.result?.username) {
           await telegramService.addBotToChannel(json.result.username)
           log('info', 'Ensured bot @' + json.result.username + ' is admin in channel')
+          await telegramService.cleanupBots(savedToken)
+        } else {
+          log('warn', 'Saved bot token invalid, creating new bot')
+          botService.clearToken()
+          try {
+            const botResult = await telegramService.createBotAndAddToChannel()
+            botService.setToken(botResult.token)
+          } catch (e) {
+            log('warn', 'Bot creation after invalid token failed: ' + (e as Error).message)
+          }
         }
       } catch (e) {
-        log('warn', 'Failed to ensure bot is admin: ' + (e as Error).message)
+        log('warn', 'Failed to verify bot token: ' + (e as Error).message)
       }
-      await telegramService.cleanupBots(savedToken)
     }
     await telegramService.createCloudFolder()
     return { success: true, data: result }
@@ -1775,7 +1803,16 @@ ipcMain.handle('share:generate-link', async (_, messageId: number, channelId: st
 
 ipcMain.handle('share:ensure-bot', async () => {
   try {
-    if (botService.getToken()) return { success: true, data: { created: false } }
+    const savedToken = botService.getToken()
+    if (savedToken) {
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+        const json = await resp.json()
+        if (json.ok) return { success: true, data: { created: false } }
+      } catch {}
+      log('warn', 'Saved bot token invalid in ensure-bot, creating new')
+      botService.clearToken()
+    }
     const botResult = await telegramService.createBotAndAddToChannel()
     botService.setToken(botResult.token)
     return { success: true, data: { created: true, username: botResult.username } }
@@ -1784,6 +1821,17 @@ ipcMain.handle('share:ensure-bot', async () => {
 
 ipcMain.handle('share:reuse-bot', async () => {
   try {
+    const savedToken = botService.getToken()
+    if (savedToken) {
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+        const json = await resp.json()
+        if (json.ok && json.result?.username) {
+          await telegramService.addBotToChannel(json.result.username)
+          return { success: true, data: { username: json.result.username } }
+        }
+      } catch {}
+    }
     const botResult = await telegramService.createBotAndAddToChannel()
     botService.setToken(botResult.token)
     return { success: true, data: { username: botResult.username } }
