@@ -7,6 +7,17 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { toast } from '../lib/toast'
 import { BulkProgressModal } from '../components/BulkProgressModal'
+import { FileThumb } from '../components/FileThumb'
+
+function isMediaFile(f: any): { isImg: boolean; isVid: boolean } {
+  const mime = f.mimeType || ''
+  if (mime.startsWith('image/')) return { isImg: true, isVid: false }
+  if (mime.startsWith('video/')) return { isImg: false, isVid: true }
+  const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
+  if (['jpg','jpeg','png','gif','webp','heic','heif','bmp','svg','tiff'].includes(ext)) return { isImg: true, isVid: false }
+  if (['mp4','mov','avi','mkv','webm','m4v'].includes(ext)) return { isImg: false, isVid: true }
+  return { isImg: false, isVid: false }
+}
 
 const fmtSize = (n: number) => {
   if (!n) return '0 B'
@@ -18,17 +29,54 @@ const fmtSize = (n: number) => {
 const DAY_MS = 86400000
 const THREE_DAYS_MS = 3 * DAY_MS
 
-function formatTimeLeft(trashedAt: number): string {
-  if (!trashedAt) return 'сегодня'
+function getTrashProgress(trashedAt: number): { pct: number; color: string; label: string; urgency: 'safe' | 'warn' | 'danger' | 'critical' } {
+  if (!trashedAt) return { pct: 100, color: '#4ade80', label: '', urgency: 'safe' }
   const elapsed = Date.now() - trashedAt
   const remaining = THREE_DAYS_MS - elapsed
-  if (remaining <= 0) return 'сегодня'
+  if (remaining <= 0) return { pct: 0, color: '#ef4444', label: 'сегодня', urgency: 'critical' }
+  const pct = (remaining / THREE_DAYS_MS) * 100
   const days = Math.floor(remaining / DAY_MS)
   const hours = Math.floor((remaining % DAY_MS) / 3600000)
   const minutes = Math.floor((remaining % 3600000) / 60000)
-  if (days > 0) return `удал. через ${days} дн ${hours} ч`
-  if (hours > 0) return `удал. через ${hours} ч ${minutes} мин`
-  return `удал. через ${minutes} мин`
+  let label: string
+  if (days > 0) label = `${days}д ${hours}ч`
+  else if (hours > 0) label = `${hours}ч ${minutes}м`
+  else label = `${minutes}м`
+  let color: string
+  let urgency: 'safe' | 'warn' | 'danger' | 'critical'
+  if (pct < 10) { color = '#ef4444'; urgency = 'critical' }
+  else if (pct < 33) { color = '#f97316'; urgency = 'danger' }
+  else if (pct < 66) { color = '#fbbf24'; urgency = 'warn' }
+  else { color = '#4ade80'; urgency = 'safe' }
+  return { pct, color, label, urgency }
+}
+
+function TrashTimer({ trashedAt }: { trashedAt: number }) {
+  const { pct, color, label, urgency } = getTrashProgress(trashedAt)
+  if (!trashedAt) return null
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      fontSize: 12,
+      fontWeight: 600,
+      color,
+      background: `${color}15`,
+      padding: '3px 10px',
+      borderRadius: 20,
+      border: `1px solid ${color}30`,
+      lineHeight: 1.3,
+      whiteSpace: 'nowrap',
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%', background: color,
+        boxShadow: urgency === 'critical' ? `0 0 6px ${color}` : 'none',
+        flexShrink: 0,
+      }} />
+      {label}
+    </span>
+  )
 }
 
 export default function TrashPage() {
@@ -46,7 +94,7 @@ export default function TrashPage() {
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 60000)
+    const interval = setInterval(() => setNow(Date.now()), 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -488,12 +536,11 @@ export default function TrashPage() {
               <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 1, marginBottom: 8 }}>Папки</div>
               <div className="mf-grid">
                 {trashedFolders.map(f => {
-                  const timeLeft = formatTimeLeft(f.trashedAt)
                   return (
                     <div key={f.id} className="mf-card" style={{ viewTransitionName: `folder_${f.id}` }}>
                       <div className="mf-card-icon" data-type="trash" style={{ color: '#fbbf24' }}>DIR</div>
                       <div className="mf-card-name" title={f.name}>{f.name}</div>
-                      <div className="mf-card-meta">{timeLeft}</div>
+                      <div className="mf-card-meta"><TrashTimer trashedAt={f.trashedAt} /></div>
                       <div className="mf-card-actions">
                         <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
                         <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
@@ -506,13 +553,15 @@ export default function TrashPage() {
           )}
           <div className="mf-grid">
           {filtered.map(f => {
-            const timeLeft = formatTimeLeft(f.trashedAt)
+            const { isImg, isVid } = isMediaFile(f)
             return (
               <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                <div className="mf-card-icon" data-type="trash">{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                <div className="mf-card-icon" data-type="trash">
+                  {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                </div>
                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                <div className="mf-card-meta">{fmtSize(f.fileSize)} · {timeLeft}</div>
+                <div className="mf-card-meta">{fmtSize(f.fileSize)} · <TrashTimer trashedAt={f.trashedAt} /></div>
                 <div className="mf-card-actions">
                   <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                   <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
@@ -530,11 +579,10 @@ export default function TrashPage() {
               <thead><tr><th>Имя</th><th>Удалена</th><th>Действия</th></tr></thead>
               <tbody>
                 {trashedFolders.map(f => {
-                  const timeLeft = formatTimeLeft(f.trashedAt)
                   return (
                     <tr key={f.id} style={{ viewTransitionName: `folder_${f.id}` }}>
                       <td className="ellip" title={f.name}>📁 {f.name}</td>
-                      <td>{timeLeft}</td>
+                      <td><TrashTimer trashedAt={f.trashedAt} /></td>
                       <td>
                         <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
                         <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
@@ -548,17 +596,20 @@ export default function TrashPage() {
         <table className="mf-table" style={{ marginTop: 12 }}>
           <thead><tr>
             <th><input type="checkbox" onChange={() => filtered.forEach(f => toggleSelect(f.messageId))} /></th>
-            <th>Имя</th><th>Размер</th><th>Удалён</th><th>Действия</th>
+            <th></th><th>Имя</th><th>Размер</th><th>Удалён</th><th>Действия</th>
           </tr></thead>
           <tbody>
             {filtered.map(f => {
-              const timeLeft = formatTimeLeft(f.trashedAt)
+              const { isImg, isVid } = isMediaFile(f)
               return (
                 <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                   <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
+                  <td style={{ width: 36, height: 36, padding: 2, borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+                    {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : <span style={{ fontSize: 11, opacity: 0.5 }}>{(f.fileName.split('.').pop() || '?').slice(0, 3).toUpperCase()}</span>}
+                  </td>
                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                   <td>{fmtSize(f.fileSize)}</td>
-                  <td>{timeLeft}</td>
+                  <td><TrashTimer trashedAt={f.trashedAt} /></td>
                   <td>
                     <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                     <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>

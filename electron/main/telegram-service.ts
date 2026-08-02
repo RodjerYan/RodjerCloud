@@ -70,6 +70,11 @@ export class TelegramService {
 
   constructor() {
     this.loadTrashState()
+    // Re-save to persist corrected timestamps (0 → Date.now())
+    if (this.localTrashedIds.size > 0) {
+      const hasZero = Array.from(this.localTrashedIds.values()).some(v => v === 0)
+      if (hasZero) this.saveTrashState()
+    }
   }
 
   private async processHeavyThumbQueue() {
@@ -643,11 +648,27 @@ export class TelegramService {
       ? Math.floor(originalStats.birthtimeMs / 1000)
       : Math.floor(originalStats.mtimeMs / 1000)
 
+    const ext = path.extname(fileName).toLowerCase()
+    const MIME_MAP: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
+      '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
+      '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
+      '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aac': 'audio/aac',
+      '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain', '.csv': 'text/csv', '.json': 'application/json', '.xml': 'application/xml',
+      '.zip': 'application/zip', '.rar': 'application/x-rar-compressed', '.7z': 'application/x-7z-compressed', '.tar': 'application/x-tar', '.gz': 'application/gzip',
+      '.exe': 'application/x-msdownload', '.dmg': 'application/x-apple-diskimage',
+    }
+    const detectedMime = MIME_MAP[ext] || 'application/octet-stream'
+
     return {
       messageId: mainMessageId as number,
       fileName,
       fileSize: originalSizeBytes,
       uploadedAt: fileTime,
+      mimeType: detectedMime,
       hash: fileHash,
       isEncrypted: !!encrypt,
     }
@@ -858,7 +879,7 @@ export class TelegramService {
       }
 
       // Fetch localTrashedIds that weren't in the scan
-      const missingIds = Array.from(this.localTrashedIds).filter(id => !scannedIds.has(id))
+      const missingIds = Array.from(this.localTrashedIds.keys()).filter(id => !scannedIds.has(id))
       if (missingIds.length > 0) {
         console.log('[listTrash] fetching', missingIds.length, 'missing trashed IDs directly')
         try {
@@ -873,7 +894,6 @@ export class TelegramService {
         }
       }
 
-    console.log('[listTrash] scanned', messages.length, 'messages,', this.localTrashedIds.size, 'local trashed IDs')
     const result = messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
@@ -885,31 +905,34 @@ export class TelegramService {
       })
       .map((m: any) => {
         const caption = m.message || ''
+        const msgId = this.msgId(m)
         const createdMatch = caption.match(/Created:\s*(.+)/)
         const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
         const trashedMatch = caption.match(new RegExp(this.TRASH_MARKER + '(\\d+)'))
+        const trashedAt = trashedMatch ? parseInt(trashedMatch[1], 10) : (this.localTrashedIds.get(msgId) || 0)
         return {
-          messageId: this.msgId(m),
+          messageId: msgId,
           fileName: m.file?.name || 'Unknown',
           fileSize: this.toNum(m.file?.size),
           mimeType: m.file?.mimeType || 'application/octet-stream',
           uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
           originalDate: originalDate || undefined,
-          trashedAt: trashedMatch ? parseInt(trashedMatch[1], 10) : 0,
+          trashedAt,
           caption,
           chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
         }
       })
-    console.log('[listTrash] returning', result.length, 'trashed files')
+    const count = result.length
+    if (count > 0) console.log('[listTrash] returning', count, 'trashed files')
     return result
   }
-  private localTrashedIds = new Set<number>();
+  private localTrashedIds = new Map<number, number>();
   private localRestoredIds = new Set<number>();
   
   private saveTrashState() {
     try {
       fs.writeFileSync(TRASH_DATA_PATH, JSON.stringify({
-        trashed: Array.from(this.localTrashedIds),
+        trashed: Object.fromEntries(this.localTrashedIds),
         restored: Array.from(this.localRestoredIds)
       }))
     } catch(e) { console.error('Failed to save trash state', e) }
@@ -919,7 +942,17 @@ export class TelegramService {
     try {
       if (fs.existsSync(TRASH_DATA_PATH)) {
         const data = JSON.parse(fs.readFileSync(TRASH_DATA_PATH, 'utf-8'))
-        if (Array.isArray(data.trashed)) this.localTrashedIds = new Set(data.trashed)
+        const now = Date.now()
+        if (Array.isArray(data.trashed)) {
+          this.localTrashedIds = new Map(data.trashed.map((id: number) => [id, now]))
+          console.log('[loadTrashState] migrated array format, saved', this.localTrashedIds.size, 'IDs with timestamp', now)
+          this.saveTrashState()
+        } else if (data.trashed && typeof data.trashed === 'object') {
+          this.localTrashedIds = new Map(
+            Object.entries(data.trashed).map(([k, v]) => [Number(k), Number(v) || now])
+          )
+          console.log('[loadTrashState] loaded object format,', this.localTrashedIds.size, 'IDs')
+        }
         if (Array.isArray(data.restored)) this.localRestoredIds = new Set(data.restored)
       }
     } catch(e) { console.error('Failed to load trash state', e) }
@@ -965,7 +998,7 @@ export class TelegramService {
 
   async trashFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    this.localTrashedIds.add(messageId)
+    this.localTrashedIds.set(messageId, Date.now())
     this.localRestoredIds.delete(messageId)
     this.saveTrashState()
     try {
