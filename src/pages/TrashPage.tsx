@@ -16,6 +16,20 @@ const fmtSize = (n: number) => {
 }
 
 const DAY_MS = 86400000
+const THREE_DAYS_MS = 3 * DAY_MS
+
+function formatTimeLeft(trashedAt: number): string {
+  if (!trashedAt) return 'сегодня'
+  const elapsed = Date.now() - trashedAt
+  const remaining = THREE_DAYS_MS - elapsed
+  if (remaining <= 0) return 'сегодня'
+  const days = Math.floor(remaining / DAY_MS)
+  const hours = Math.floor((remaining % DAY_MS) / 3600000)
+  const minutes = Math.floor((remaining % 3600000) / 60000)
+  if (days > 0) return `удал. через ${days} дн ${hours} ч`
+  if (hours > 0) return `удал. через ${hours} ч ${minutes} мин`
+  return `удал. через ${minutes} мин`
+}
 
 export default function TrashPage() {
   const [fairAnim, setFairAnim] = useState<any>(null)
@@ -29,6 +43,12 @@ export default function TrashPage() {
   const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
   const isSelecting = useRef(false)
@@ -468,12 +488,12 @@ export default function TrashPage() {
               <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 1, marginBottom: 8 }}>Папки</div>
               <div className="mf-grid">
                 {trashedFolders.map(f => {
-                  const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+                  const timeLeft = formatTimeLeft(f.trashedAt)
                   return (
                     <div key={f.id} className="mf-card" style={{ viewTransitionName: `folder_${f.id}` }}>
                       <div className="mf-card-icon" data-type="trash" style={{ color: '#fbbf24' }}>DIR</div>
                       <div className="mf-card-name" title={f.name}>{f.name}</div>
-                      <div className="mf-card-meta">{daysLeft > 0 ? `удал. через ${daysLeft} дн.` : 'сегодня'}</div>
+                      <div className="mf-card-meta">{timeLeft}</div>
                       <div className="mf-card-actions">
                         <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
                         <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
@@ -486,13 +506,13 @@ export default function TrashPage() {
           )}
           <div className="mf-grid">
           {filtered.map(f => {
-            const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+            const timeLeft = formatTimeLeft(f.trashedAt)
             return (
               <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                 <div className="mf-card-icon" data-type="trash">{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                <div className="mf-card-meta">{fmtSize(f.fileSize)} · {daysLeft > 0 ? `удал. через ${daysLeft} дн.` : 'сегодня'}</div>
+                <div className="mf-card-meta">{fmtSize(f.fileSize)} · {timeLeft}</div>
                 <div className="mf-card-actions">
                   <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                   <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
@@ -510,11 +530,11 @@ export default function TrashPage() {
               <thead><tr><th>Имя</th><th>Удалена</th><th>Действия</th></tr></thead>
               <tbody>
                 {trashedFolders.map(f => {
-                  const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+                  const timeLeft = formatTimeLeft(f.trashedAt)
                   return (
                     <tr key={f.id} style={{ viewTransitionName: `folder_${f.id}` }}>
                       <td className="ellip" title={f.name}>📁 {f.name}</td>
-                      <td>{daysLeft > 0 ? `через ${daysLeft} дн.` : 'сегодня'}</td>
+                      <td>{timeLeft}</td>
                       <td>
                         <button title="Восстановить" onClick={(e) => handleRestoreFolder(f.id, e)}><RotateCcw size={14} /></button>
                         <button title="Удалить навсегда" className="danger" onClick={(e) => handlePermDeleteFolder(f.id, e)}><X size={14} /></button>
@@ -532,13 +552,13 @@ export default function TrashPage() {
           </tr></thead>
           <tbody>
             {filtered.map(f => {
-              const daysLeft = Math.max(0, 3 - Math.floor((Date.now() - (f.trashedAt || 0)) / DAY_MS))
+              const timeLeft = formatTimeLeft(f.trashedAt)
               return (
                 <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                   <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                   <td>{fmtSize(f.fileSize)}</td>
-                  <td>{daysLeft > 0 ? `через ${daysLeft} дн.` : 'сегодня'}</td>
+                  <td>{timeLeft}</td>
                   <td>
                     <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
                     <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
