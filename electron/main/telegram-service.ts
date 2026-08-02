@@ -831,24 +831,50 @@ export class TelegramService {
       const messages: any[] = []
       let offsetId = 0
       const BATCH = 200
-      const MAX_SCAN = 5000
-      let scanned = 0
-      while (scanned < MAX_SCAN) {
-        const batch = await withTimeout(
-          this.client!.getMessages(this.channelId as any, {
-            limit: BATCH,
-            ...(offsetId ? { offsetId } : {}),
-          }),
-          15000,
-          'Telegram getMessages'
-        )
-        if (batch.length === 0) break
+      const MAX_BATCHES = 5
+      let batchCount = 0
+      const scannedIds = new Set<number>()
+      while (batchCount < MAX_BATCHES) {
+        batchCount++
+        let batch: any[]
+        try {
+          batch = await withTimeout(
+            this.client!.getMessages(this.channelId as any, {
+              limit: BATCH,
+              ...(offsetId ? { offsetId } : {}),
+            }),
+            8000,
+            'listTrash batch ' + batchCount
+          )
+        } catch (e: any) {
+          console.warn('[listTrash] batch', batchCount, 'failed:', e.message)
+          break
+        }
+        if (!batch || batch.length === 0) break
+        for (const m of batch) scannedIds.add(this.msgId(m))
         messages.push(...batch)
-        scanned += batch.length
         if (batch.length < BATCH) break
         offsetId = this.msgId(batch[batch.length - 1])
       }
-    return messages
+
+      // Fetch localTrashedIds that weren't in the scan
+      const missingIds = Array.from(this.localTrashedIds).filter(id => !scannedIds.has(id))
+      if (missingIds.length > 0) {
+        console.log('[listTrash] fetching', missingIds.length, 'missing trashed IDs directly')
+        try {
+          const fetched = await withTimeout(
+            this.client!.getMessages(this.channelId as any, { ids: missingIds }),
+            10000,
+            'listTrash fetch missing IDs'
+          )
+          if (fetched) messages.push(...fetched)
+        } catch (e: any) {
+          console.warn('[listTrash] fetch missing IDs failed:', e.message)
+        }
+      }
+
+    console.log('[listTrash] scanned', messages.length, 'messages,', this.localTrashedIds.size, 'local trashed IDs')
+    const result = messages
       .filter((m: any) => {
         if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
         const msgId = this.msgId(m)
@@ -874,6 +900,8 @@ export class TelegramService {
           chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
         }
       })
+    console.log('[listTrash] returning', result.length, 'trashed files')
+    return result
   }
   private localTrashedIds = new Set<number>();
   private localRestoredIds = new Set<number>();
