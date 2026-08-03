@@ -773,10 +773,20 @@ export class TelegramService {
     let safety = 0
     while (remaining > 0 && safety < 20) {
       safety++
-      const batch = await this.client.getMessages(this.channelId as any, {
-        limit: Math.min(remaining + 50, 200),
-        ...(currentOffsetId ? { offsetId: currentOffsetId } : {}),
-      })
+      let batch: any[]
+      try {
+        batch = await withTimeout(
+          this.client.getMessages(this.channelId as any, {
+            limit: Math.min(remaining + 50, 200),
+            ...(currentOffsetId ? { offsetId: currentOffsetId } : {}),
+          }),
+          8000,
+          'listFilesPaginated batch'
+        )
+      } catch (e: any) {
+        console.warn('[listFilesPaginated] batch failed:', e.message)
+        break
+      }
       if (batch.length === 0) break
       for (const m of batch) {
         if (this.isFileVisible(m)) {
@@ -801,10 +811,20 @@ export class TelegramService {
     const MAX_MESSAGES = 10000
     let scanned = 0
     while (scanned < MAX_MESSAGES) {
-      const batch = await this.client.getMessages(this.channelId as any, {
-        limit: BATCH,
-        ...(offsetId ? { offsetId } : {}),
-      })
+      let batch: any[]
+      try {
+        batch = await withTimeout(
+          this.client.getMessages(this.channelId as any, {
+            limit: BATCH,
+            ...(offsetId ? { offsetId } : {}),
+          }),
+          8000,
+          'listFiles batch'
+        )
+      } catch (e: any) {
+        console.warn('[listFiles] batch failed:', e.message)
+        break
+      }
       if (batch.length === 0) break
       messages.push(...batch)
       scanned += batch.length
