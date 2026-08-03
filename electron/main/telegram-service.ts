@@ -852,7 +852,7 @@ export class TelegramService {
       const messages: any[] = []
       let offsetId = 0
       const BATCH = 200
-      const MAX_BATCHES = 5
+      const MAX_BATCHES = 10
       let batchCount = 0
       const scannedIds = new Set<number>()
       while (batchCount < MAX_BATCHES) {
@@ -878,14 +878,14 @@ export class TelegramService {
         offsetId = this.msgId(batch[batch.length - 1])
       }
 
-      // Fetch localTrashedIds that weren't in the scan
+      // Also fetch all localTrashedIds not in the scan
       const missingIds = Array.from(this.localTrashedIds.keys()).filter(id => !scannedIds.has(id))
       if (missingIds.length > 0) {
         console.log('[listTrash] fetching', missingIds.length, 'missing trashed IDs directly')
         try {
           const fetched = await withTimeout(
             this.client!.getMessages(this.channelId as any, { ids: missingIds }),
-            10000,
+            15000,
             'listTrash fetch missing IDs'
           )
           if (fetched) messages.push(...fetched)

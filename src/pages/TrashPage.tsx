@@ -188,8 +188,8 @@ export default function TrashPage() {
         new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Timeout')), ms))
       ])
       const [r, rf] = await Promise.all([
-        timeout(window.electronAPI.telegram.listTrash(), 45000),
-        timeout(window.electronAPI.folders.listTrash(), 45000)
+        timeout(window.electronAPI.telegram.listTrash(), 90000),
+        timeout(window.electronAPI.folders.listTrash(), 90000)
       ]) as [{ success: boolean; data?: any[] }, { success: boolean; data?: any[] }]
       if (r.success) setFiles(r.data || [])
       if (rf.success) setTrashedFolders(rf.data || [])
