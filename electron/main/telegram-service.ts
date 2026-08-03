@@ -808,7 +808,7 @@ export class TelegramService {
     const messages: any[] = []
     let offsetId = 0
     const BATCH = 200
-    const MAX_MESSAGES = 10000
+    const MAX_MESSAGES = 2000
     let scanned = 0
     while (scanned < MAX_MESSAGES) {
       let batch: any[]
@@ -872,7 +872,7 @@ export class TelegramService {
       const messages: any[] = []
       let offsetId = 0
       const BATCH = 200
-      const MAX_BATCHES = 10
+      const MAX_BATCHES = 5
       let batchCount = 0
       const scannedIds = new Set<number>()
       while (batchCount < MAX_BATCHES) {

@@ -549,7 +549,10 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
 
 ipcMain.handle('telegram:list-files', async () => {
   try {
-    const files = await telegramService.listFilesCached()
+    const files = await Promise.race([
+      telegramService.listFilesCached(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 30000))
+    ])
     telegramService.syncFilesInBackground().catch(() => {})
     return { success: true, data: files }
   } catch (error) { return { success: false, error: (error as Error).message } }
