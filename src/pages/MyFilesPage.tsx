@@ -27,7 +27,7 @@ function typeOf(name: string): string {
   return 'Другое'
 }
 
-const TWELVE_HOURS = 43200
+const TWELVE_HOURS = 86400
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 

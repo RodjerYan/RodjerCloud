@@ -37,7 +37,7 @@
   --space-xl: 32px;
   
   /* Типографика */
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
   
   /* Анимации */

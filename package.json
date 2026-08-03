@@ -1,7 +1,7 @@
 {
   "name": "rodjercloud",
   "private": true,
-  "version": "1.0.229",
+  "version": "1.0.230",
   "description": "RodjerCloud - Telegram Cloud Storage Desktop App",
   "main": "out/main/index.js",
   "author": "RodjerCloud",
