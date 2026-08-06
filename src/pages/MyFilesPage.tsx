@@ -67,7 +67,7 @@ export default function MyFilesPage() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(CATEGORIES))
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [preview, setPreview] = useState<{ idx: number; list: any[] } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
