@@ -554,7 +554,9 @@ ipcMain.handle('telegram:list-files', async () => {
       telegramService.listFilesCached(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 120000))
     ])
-    telegramService.syncFilesInBackground().catch(() => {})
+    telegramService.syncFilesInBackground().then(() => {
+      if (mainWindow) mainWindow.webContents.send('files:changed')
+    }).catch(() => {})
     return { success: true, data: files }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
