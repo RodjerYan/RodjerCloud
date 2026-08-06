@@ -998,6 +998,11 @@ export class TelegramService {
     this.fileCache = []
   }
 
+  getCachedFiles(): any[] {
+    if (this.fileCache.length > 0) return this.fileCache
+    return this.loadFileCache()
+  }
+
   invalidateOldFileCache(maxAgeMs: number) {
     try {
       if (fs.existsSync(FILE_CACHE_PATH)) {
