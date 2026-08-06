@@ -493,7 +493,7 @@ export default function MyFilesPage() {
 
   const currentLevelFolders = useMemo(() => folders.filter(f => (f.parentId || null) === (folderDrill || null)), [folders, folderDrill])
   const currentFiles = useMemo(() => {
-    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId])
+    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files
     if (search) return arr.filter(f => (f.fileName || '').toLowerCase().includes(search.toLowerCase()))
     return arr
   }, [files, fileFolders, folderDrill, search])
@@ -1317,7 +1317,7 @@ export default function MyFilesPage() {
               </div>
             )
           })}
-          {(folders.length > 0 || folderDrill || pendingUploads.length > 0) && (() => {
+          {(folders.length > 0 || folderDrill || pendingUploads.length > 0 || files.length > 0) && (() => {
 
             return (
               <div style={{ marginTop: folderDrill ? 4 : 24, padding: folderDrill ? '0' : '0 14px' }}>

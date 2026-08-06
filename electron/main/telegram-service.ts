@@ -998,11 +998,16 @@ export class TelegramService {
   }
 
   async listFilesCached(): Promise<any[]> {
-    const cached = this.loadFileCache()
-    if (cached.length > 0) return cached
-    const files = await this.listFiles()
-    this.saveFileCache(files)
-    return files
+    try {
+      const files = await this.listFiles()
+      this.saveFileCache(files)
+      return files
+    } catch (e) {
+      console.warn('[listFilesCached] fresh scan failed, using cache:', (e as Error).message)
+      const cached = this.loadFileCache()
+      if (cached.length > 0) return cached
+      throw e
+    }
   }
 
   async syncFilesInBackground(): Promise<void> {
