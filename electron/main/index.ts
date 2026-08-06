@@ -146,7 +146,7 @@ app.whenReady().then(async () => {
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
   telegramService.cleanThumbnailCache()
-  telegramService.invalidateOldFileCache(60 * 60 * 1000)
+  telegramService.invalidateFileCache()
   try {
     const previewCache = path.join(app.getPath('userData'), 'preview-cache')
     if (fs.existsSync(previewCache)) {
@@ -548,15 +548,11 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
   }
 })
 
-ipcMain.handle('telegram:list-files', async () => {
+ipcMain.handle('telegram:list-files', async (event) => {
   try {
-    const files = await Promise.race([
-      telegramService.listFilesCached(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 120000))
-    ])
-    telegramService.syncFilesInBackground().then(() => {
-      if (mainWindow) mainWindow.webContents.send('files:changed')
-    }).catch(() => {})
+    const files = await telegramService.listFilesCached((scanned) => {
+      event.sender.send('files:scan-progress', { scanned })
+    })
     return { success: true, data: files }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })

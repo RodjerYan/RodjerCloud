@@ -90,6 +90,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('app:update-available', listener)
       return () => ipcRenderer.removeListener('app:update-available', listener)
     },
+    onScanProgress: (cb: (data: { scanned: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('files:scan-progress', listener)
+      return () => ipcRenderer.removeListener('files:scan-progress', listener)
+    },
   },
   storage: {
     getDownloadPath: () => ipcRenderer.invoke('storage:get-download-path'),

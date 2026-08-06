@@ -63,6 +63,7 @@ export default function MyFilesPage() {
   const [visibleCount, setVisibleCount] = useState(20)
   const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [scanProgress, setScanProgress] = useState<number | null>(null)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
@@ -332,6 +333,7 @@ export default function MyFilesPage() {
   const load = async (silent = false) => {
     if (!silent) setLoading(true)
     setLoadError(null)
+    setScanProgress(null)
     try {
       const r = await window.electronAPI.telegram.listFiles()
       if (r.success) {
@@ -461,6 +463,11 @@ export default function MyFilesPage() {
     const unsub = window.electronAPI.telegram.onFilesChanged(() => { load(); loadFolders() })
     return unsub
   }, [load, loadFolders])
+
+  useEffect(() => {
+    const unsub = window.electronAPI.app.onScanProgress((data) => { setScanProgress(data.scanned) })
+    return unsub
+  }, [])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
@@ -1111,9 +1118,16 @@ export default function MyFilesPage() {
 
       {loading ? (
         <div className="mf-skeleton-grid" style={{ marginTop: '20px' }}>
-          {[...Array(12)].map((_, i) => (
-            <div key={i} className="mf-skeleton-card" />
-          ))}
+          {scanProgress !== null ? (
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px 20px', color: 'var(--v3-text-secondary)' }}>
+              <div style={{ fontSize: 18, marginBottom: 8 }}>Сканирование канала…</div>
+              <div style={{ fontSize: 14 }}>{scanProgress} сообщений</div>
+            </div>
+          ) : (
+            [...Array(12)].map((_, i) => (
+              <div key={i} className="mf-skeleton-card" />
+            ))
+          )}
         </div>
       ) : drillDown ? (
         <div className="mf-gallery">

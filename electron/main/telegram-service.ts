@@ -803,7 +803,7 @@ export class TelegramService {
     return { files, nextOffsetId }
   }
 
-  async listFiles() {
+  async listFiles(onProgress?: (scanned: number) => void) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages: any[] = []
     let offsetId = 0
@@ -818,7 +818,7 @@ export class TelegramService {
             limit: BATCH,
             ...(offsetId ? { offsetId } : {}),
           }),
-          15000,
+          30000,
           'listFiles batch'
         )
       } catch (e: any) {
@@ -828,9 +828,10 @@ export class TelegramService {
       if (batch.length === 0) break
       messages.push(...batch)
       scanned += batch.length
+      if (onProgress) onProgress(scanned)
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
-      await new Promise(r => setTimeout(r, 300))
+      await new Promise(r => setTimeout(r, 100))
     }
     return messages
       .filter((m: any) => {
@@ -1010,10 +1011,10 @@ export class TelegramService {
     } catch {}
   }
 
-  async listFilesCached(): Promise<any[]> {
+  async listFilesCached(onProgress?: (scanned: number) => void): Promise<any[]> {
     const cached = this.loadFileCache()
     if (cached.length > 0) return cached
-    const files = await this.listFiles()
+    const files = await this.listFiles(onProgress)
     this.saveFileCache(files)
     return files
   }
