@@ -146,7 +146,7 @@ app.whenReady().then(async () => {
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
   telegramService.cleanThumbnailCache()
-  telegramService.invalidateFileCache()
+  telegramService.invalidateOldFileCache(60 * 60 * 1000)
   try {
     const previewCache = path.join(app.getPath('userData'), 'preview-cache')
     if (fs.existsSync(previewCache)) {
@@ -552,7 +552,7 @@ ipcMain.handle('telegram:list-files', async () => {
   try {
     const files = await Promise.race([
       telegramService.listFilesCached(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 60000))
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 120000))
     ])
     telegramService.syncFilesInBackground().catch(() => {})
     return { success: true, data: files }

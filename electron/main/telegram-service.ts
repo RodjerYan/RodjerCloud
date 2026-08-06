@@ -808,7 +808,7 @@ export class TelegramService {
     const messages: any[] = []
     let offsetId = 0
     const BATCH = 200
-    const MAX_MESSAGES = 1000000
+    const MAX_MESSAGES = 100000
     let scanned = 0
     while (scanned < MAX_MESSAGES) {
       let batch: any[]
@@ -818,7 +818,7 @@ export class TelegramService {
             limit: BATCH,
             ...(offsetId ? { offsetId } : {}),
           }),
-          8000,
+          15000,
           'listFiles batch'
         )
       } catch (e: any) {
@@ -995,6 +995,19 @@ export class TelegramService {
   invalidateFileCache() {
     try { if (fs.existsSync(FILE_CACHE_PATH)) fs.unlinkSync(FILE_CACHE_PATH) } catch {}
     this.fileCache = []
+  }
+
+  invalidateOldFileCache(maxAgeMs: number) {
+    try {
+      if (fs.existsSync(FILE_CACHE_PATH)) {
+        const stat = fs.statSync(FILE_CACHE_PATH)
+        const age = Date.now() - stat.mtimeMs
+        if (age > maxAgeMs) {
+          fs.unlinkSync(FILE_CACHE_PATH)
+          this.fileCache = []
+        }
+      }
+    } catch {}
   }
 
   async listFilesCached(): Promise<any[]> {
