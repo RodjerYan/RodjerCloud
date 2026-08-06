@@ -551,7 +551,7 @@ ipcMain.handle('telegram:list-files', async () => {
   try {
     const files = await Promise.race([
       telegramService.listFilesCached(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 30000))
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('listFiles timeout')), 60000))
     ])
     telegramService.syncFilesInBackground().catch(() => {})
     return { success: true, data: files }
