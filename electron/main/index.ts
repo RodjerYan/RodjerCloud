@@ -146,6 +146,7 @@ app.whenReady().then(async () => {
   if (prefs.autoSync?.enabled) autoSyncService.start()
   telegramService.startTrashCleanup()
   telegramService.cleanThumbnailCache()
+  telegramService.invalidateFileCache()
   try {
     const previewCache = path.join(app.getPath('userData'), 'preview-cache')
     if (fs.existsSync(previewCache)) {

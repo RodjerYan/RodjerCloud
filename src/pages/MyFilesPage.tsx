@@ -67,7 +67,7 @@ export default function MyFilesPage() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(CATEGORIES))
   const [preview, setPreview] = useState<{ idx: number; list: any[] } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
@@ -493,7 +493,7 @@ export default function MyFilesPage() {
 
   const currentLevelFolders = useMemo(() => folders.filter(f => (f.parentId || null) === (folderDrill || null)), [folders, folderDrill])
   const currentFiles = useMemo(() => {
-    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files
+    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId])
     if (search) return arr.filter(f => (f.fileName || '').toLowerCase().includes(search.toLowerCase()))
     return arr
   }, [files, fileFolders, folderDrill, search])
