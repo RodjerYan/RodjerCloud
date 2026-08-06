@@ -493,7 +493,7 @@ export default function MyFilesPage() {
 
   const currentLevelFolders = useMemo(() => folders.filter(f => (f.parentId || null) === (folderDrill || null)), [folders, folderDrill])
   const currentFiles = useMemo(() => {
-    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files.filter((f: any) => !fileFolders[f.messageId])
+    const arr = folderDrill ? files.filter((f: any) => fileFolders[f.messageId] === folderDrill) : files
     if (search) return arr.filter(f => (f.fileName || '').toLowerCase().includes(search.toLowerCase()))
     return arr
   }, [files, fileFolders, folderDrill, search])
