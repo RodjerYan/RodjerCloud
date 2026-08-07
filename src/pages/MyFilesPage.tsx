@@ -528,8 +528,8 @@ export default function MyFilesPage() {
     if (drillDown === 'Недавние') {
       return recentFiles
     }
-    return visibleFiltered.filter(f => typeOf(f.fileName) === drillDown)
-  }, [drillDown, visibleFiltered, recentFiles, now, fileFolders])
+    return filtered.filter(f => typeOf(f.fileName) === drillDown)
+  }, [drillDown, filtered, recentFiles, now, fileFolders])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
