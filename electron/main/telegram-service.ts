@@ -67,6 +67,7 @@ export class TelegramService {
   private processingHeavyQueue = false
   private fileCache: any[] = []
   private syncingFiles = false
+  private listFilesPromise: Promise<any[]> | null = null
 
   constructor() {
     this.loadTrashState()
@@ -818,10 +819,15 @@ export class TelegramService {
             limit: BATCH,
             ...(offsetId ? { offsetId } : {}),
           }),
-          30000,
+          60000,
           'listFiles batch'
         )
       } catch (e: any) {
+        if (e.message.includes('flood') || e.message.includes('FLOOD')) {
+          console.warn('[listFiles] flood wait, retrying in 30s...')
+          await new Promise(r => setTimeout(r, 30000))
+          continue
+        }
         console.warn('[listFiles] batch failed:', e.message)
         break
       }
@@ -831,7 +837,7 @@ export class TelegramService {
       if (onProgress) onProgress(scanned)
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
-      await new Promise(r => setTimeout(r, 100))
+      await new Promise(r => setTimeout(r, 500))
     }
     return messages
       .filter((m: any) => {
@@ -998,11 +1004,6 @@ export class TelegramService {
     this.fileCache = []
   }
 
-  getCachedFiles(): any[] {
-    if (this.fileCache.length > 0) return this.fileCache
-    return this.loadFileCache()
-  }
-
   invalidateOldFileCache(maxAgeMs: number) {
     try {
       if (fs.existsSync(FILE_CACHE_PATH)) {
@@ -1016,23 +1017,32 @@ export class TelegramService {
     } catch {}
   }
 
-  async listFilesCached(onProgress?: (scanned: number) => void): Promise<any[]> {
+  async listFilesCached(): Promise<any[]> {
+    if (this.fileCache.length > 0) return this.fileCache
     const cached = this.loadFileCache()
-    if (cached.length > 0) return cached
-    const files = await this.listFiles(onProgress)
-    this.saveFileCache(files)
-    return files
+    if (cached.length > 0) { this.fileCache = cached; return cached }
+    if (!this.listFilesPromise) {
+      this.listFilesPromise = this.listFiles().then(files => {
+        this.saveFileCache(files)
+        this.fileCache = files
+        return files
+      }).finally(() => { this.listFilesPromise = null })
+    }
+    return this.listFilesPromise
   }
 
   async forceRescanFiles(): Promise<any[]> {
     this.invalidateFileCache()
+    this.listFilesPromise = null
     const files = await this.listFiles()
     this.saveFileCache(files)
+    this.fileCache = files
     return files
   }
 
   async syncFilesInBackground(): Promise<void> {
     if (this.syncingFiles || !this.client || !this.channelId) return
+    if (this.listFilesPromise) return
     this.syncingFiles = true
     try {
       const files = await this.listFiles()

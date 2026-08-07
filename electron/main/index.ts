@@ -547,15 +547,8 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
   }
 })
 
-ipcMain.handle('telegram:list-files', async (event) => {
+ipcMain.handle('telegram:list-files', async () => {
   try {
-    const cached = telegramService.getCachedFiles()
-    if (cached.length > 0) {
-      telegramService.syncFilesInBackground().then(() => {
-        event.sender.send('files:changed')
-      }).catch(() => {})
-      return { success: true, data: cached }
-    }
     const files = await telegramService.listFilesCached()
     return { success: true, data: files }
   } catch (error) { return { success: false, error: (error as Error).message } }
