@@ -517,11 +517,11 @@ export default function MyFilesPage() {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
     map['Недавние'] = recentFiles
-    visibleFiltered.forEach(f => {
+    filtered.forEach(f => {
       map[typeOf(f.fileName)]?.push(f)
     })
     return map
-  }, [visibleFiltered, recentFiles, now, fileFolders])
+  }, [filtered, recentFiles, now, fileFolders])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
