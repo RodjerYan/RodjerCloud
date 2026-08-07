@@ -178,6 +178,11 @@ export class TelegramService {
     this.codeRequested = deferred<void>()
     this.passwordRequested = deferred<void>()
 
+    if (this.client) {
+      try { await this.client.disconnect() } catch {}
+      this.client = null as any
+    }
+
     const session = new StringSession('')
     this.client = new TelegramClient(session, API_ID, API_HASH, {
       connectionRetries: 5,
@@ -398,6 +403,10 @@ export class TelegramService {
   }
 
   async reconnect(sessionString: string) {
+    if (this.client) {
+      try { await this.client.disconnect() } catch {}
+      this.client = null as any
+    }
     const session = new StringSession(sessionString)
     this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5 })
     await this.client.connect()
@@ -811,25 +820,24 @@ export class TelegramService {
     const BATCH = 200
     const MAX_MESSAGES = 100000
     let scanned = 0
+    let consecutiveErrors = 0
     while (scanned < MAX_MESSAGES) {
       let batch: any[]
       try {
-        batch = await withTimeout(
-          this.client.getMessages(this.channelId as any, {
-            limit: BATCH,
-            ...(offsetId ? { offsetId } : {}),
-          }),
-          60000,
-          'listFiles batch'
-        )
+        batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+        consecutiveErrors = 0
       } catch (e: any) {
-        if (e.message.includes('flood') || e.message.includes('FLOOD')) {
-          console.warn('[listFiles] flood wait, retrying in 30s...')
-          await new Promise(r => setTimeout(r, 30000))
-          continue
+        consecutiveErrors++
+        if (consecutiveErrors >= 3) {
+          console.warn('[listFiles] too many consecutive errors, stopping')
+          break
         }
-        console.warn('[listFiles] batch failed:', e.message)
-        break
+        console.warn('[listFiles] batch failed:', e.message, 'retrying in 5s...')
+        await new Promise(r => setTimeout(r, 5000))
+        continue
       }
       if (batch.length === 0) break
       messages.push(...batch)
