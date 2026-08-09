@@ -329,26 +329,27 @@ export default function MyFilesPage() {
 
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const processRawFiles = (raw: any[]) =>
+    raw
+      .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
+      .map((f: any) => {
+        const meta = v3store.metaFor(f.messageId)
+        if (meta?.displayName) return { ...f, fileName: meta.displayName }
+        return f
+      })
+
   const load = async (silent = false) => {
     if (!silent) setLoading(true)
     setLoadError(null)
     try {
-      const r = await window.electronAPI.telegram.listFiles()
-      if (r.success) {
-        const processedFiles = (r.data || [])
-          .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
-          .map((f: any) => {
-            const meta = v3store.metaFor(f.messageId)
-            if (meta?.displayName) return { ...f, fileName: meta.displayName }
-            return f
-          })
-        setFiles(processedFiles)
-      }
-      else setLoadError(r.error || 'Не удалось загрузить файлы')
+      const r = await window.electronAPI.telegram.listFilesCached()
+      if (r.success) setFiles(processRawFiles(r.data || []))
+      if (!silent) setLoading(false)
+      window.electronAPI.telegram.syncFilesBg()
     } catch (e: any) {
       setLoadError(e.message || 'Ошибка загрузки')
+      if (!silent) setLoading(false)
     }
-    if (!silent) setLoading(false)
   }
 
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
@@ -458,9 +459,14 @@ export default function MyFilesPage() {
   useEffect(() => { load(); loadFolders() }, [])
 
   useEffect(() => {
-    const unsub = window.electronAPI.telegram.onFilesChanged(() => { load(); loadFolders() })
+    const unsub = window.electronAPI.telegram.onFilesChanged(() => {
+      window.electronAPI.telegram.listFilesCached().then((r: any) => {
+        if (r.success) setFiles(processRawFiles(r.data || []))
+      })
+      loadFolders()
+    })
     return unsub
-  }, [load, loadFolders])
+  }, [loadFolders])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {

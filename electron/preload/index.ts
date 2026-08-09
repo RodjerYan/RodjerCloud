@@ -20,7 +20,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('telegram:bulk-progress', listener)
     },
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
+    listFilesCached: () => ipcRenderer.invoke('telegram:list-files-cached'),
     listFilesPaginated: (limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-files-paginated', limit, offsetId),
+    syncFilesBg: () => ipcRenderer.invoke('telegram:sync-files-bg'),
+    onSyncProgress: (cb: (data: { fileCount: number; scannedMessages: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('files:sync-progress', listener)
+      return () => ipcRenderer.removeListener('files:sync-progress', listener)
+    },
     downloadFile: (messageId: number, fileName: string) =>
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
     downloadThumbnail: (messageId: number, fileName?: string) =>

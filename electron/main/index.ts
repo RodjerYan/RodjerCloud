@@ -380,8 +380,8 @@ let activeUploads = 0
 const uploadCancelled = new Set<string>()
 async function getConcurrency(): Promise<number> {
   const p = await readPrefs()
-  const c = parseInt(String(p.uploadConcurrency || 2), 10)
-  return Math.min(5, Math.max(1, isNaN(c) ? 2 : c))
+  const c = parseInt(String(p.uploadConcurrency || 5), 10)
+  return Math.min(5, Math.max(1, isNaN(c) ? 5 : c))
 }
 async function processQueue() {
   const limit = await getConcurrency()
@@ -547,10 +547,28 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
   }
 })
 
+ipcMain.handle('telegram:list-files-cached', async () => {
+  try {
+    const cached = telegramService.getCachedFilesInstant()
+    return { success: true, data: cached }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:list-files', async () => {
   try {
     const files = await telegramService.listFilesCached()
     return { success: true, data: files }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:sync-files-bg', async (event) => {
+  try {
+    telegramService.syncFilesInBackground((fileCount, scannedMessages) => {
+      try {
+        event.sender.send('files:sync-progress', { fileCount, scannedMessages })
+      } catch {}
+    })
+    return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -762,7 +780,7 @@ ipcMain.handle('storage:set-download-path', async (_, p: string) => {
 })
 
 ipcMain.handle('storage:get-upload-concurrency', async () => {
-  try { const prefs = await readPrefs(); return { success: true, data: prefs.uploadConcurrency || 2 } }
+  try { const prefs = await readPrefs(); return { success: true, data: prefs.uploadConcurrency || 5 } }
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 

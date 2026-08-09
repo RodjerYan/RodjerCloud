@@ -785,16 +785,17 @@ export class TelegramService {
       safety++
       let batch: any[]
       try {
-        batch = await withTimeout(
-          this.client.getMessages(this.channelId as any, {
-            limit: Math.min(remaining + 50, 200),
-            ...(currentOffsetId ? { offsetId: currentOffsetId } : {}),
-          }),
-          8000,
-          'listFilesPaginated batch'
-        )
+        batch = await this.client.getMessages(this.channelId as any, {
+          limit: Math.min(remaining + 50, 200),
+          ...(currentOffsetId ? { offsetId: currentOffsetId } : {}),
+        })
       } catch (e: any) {
-        console.warn('[listFilesPaginated] batch failed:', e.message)
+        const msg = e.message || ''
+        if (msg.includes('flood') || msg.includes('420')) {
+          await new Promise(r => setTimeout(r, 15000))
+          continue
+        }
+        console.warn('[listFilesPaginated] batch failed:', msg)
         break
       }
       if (batch.length === 0) break
@@ -808,74 +809,61 @@ export class TelegramService {
       remaining -= batch.length
       currentOffsetId = this.msgId(batch[batch.length - 1])
       if (batch.length < 200) break
+      await new Promise(r => setTimeout(r, 500))
     }
     const nextOffsetId = files.length >= limit && currentOffsetId ? currentOffsetId : null
     return { files, nextOffsetId }
   }
 
-  async listFiles(onProgress?: (scanned: number) => void) {
+  async listFiles(onProgress?: (fileCount: number, scannedMessages: number) => void) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const messages: any[] = []
-    let offsetId = 0
+
     const BATCH = 200
-    const MAX_MESSAGES = 100000
-    let scanned = 0
-    let consecutiveErrors = 0
-    while (scanned < MAX_MESSAGES) {
-      let batch: any[]
-      try {
-        batch = await this.client.getMessages(this.channelId as any, {
-          limit: BATCH,
-          ...(offsetId ? { offsetId } : {}),
-        })
-        consecutiveErrors = 0
-      } catch (e: any) {
-        consecutiveErrors++
-        if (consecutiveErrors >= 3) {
-          console.warn('[listFiles] too many consecutive errors, stopping')
-          break
+    const MAX_MESSAGES = 500000
+
+    const fetchBatch = async (offsetId: number, limit: number): Promise<any[]> => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          return await this.client!.getMessages(this.channelId as any, {
+            limit,
+            ...(offsetId ? { offsetId } : {}),
+          })
+        } catch (e: any) {
+          const msg = e.message || ''
+          if (msg.includes('flood') || msg.includes('420') || msg.includes('Too Many')) {
+            const wait = Math.min(60, 10 * (attempt + 1))
+            console.warn(`[listFiles] flood wait #${attempt + 1}, sleeping ${wait}s`)
+            await new Promise(r => setTimeout(r, wait * 1000))
+            continue
+          }
+          console.warn(`[listFiles] batch offset=${offsetId} failed:`, msg)
+          return []
         }
-        console.warn('[listFiles] batch failed:', e.message, 'retrying in 5s...')
-        await new Promise(r => setTimeout(r, 5000))
-        continue
       }
+      console.warn(`[listFiles] batch offset=${offsetId} gave up after 5 attempts`)
+      return []
+    }
+
+    const visibleMsgs: any[] = []
+    let offsetId = 0
+    let scanned = 0
+
+    while (scanned < MAX_MESSAGES) {
+      const batch = await fetchBatch(offsetId, BATCH)
       if (batch.length === 0) break
-      messages.push(...batch)
+
+      for (const m of batch) {
+        if (this.isFileVisible(m)) visibleMsgs.push(m)
+      }
       scanned += batch.length
-      if (onProgress) onProgress(scanned)
+      if (onProgress) onProgress(visibleMsgs.length, scanned)
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
       await new Promise(r => setTimeout(r, 500))
     }
-    return messages
-      .filter((m: any) => {
-        if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
-        const msgId = this.msgId(m)
-        if (this.localTrashedIds.has(msgId)) return false
-        if (this.localRestoredIds.has(msgId)) return true
-        const caption: string = m.message || ''
-        return !caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
-      })
-      .map((m: any) => {
-        const caption = m.message || ''
-        const createdMatch = caption.match(/Created:\s*(.+)/)
-        const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
-        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
-        const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
-        return {
-          messageId: this.msgId(m),
-          fileName: m.file?.name || 'Unknown',
-          fileSize: this.toNum(m.file?.size),
-          mimeType: m.file?.mimeType || 'application/octet-stream',
-          uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
-          originalDate: originalDate || undefined,
-          caption,
-          chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
-          isEncrypted: !!vaultMatch,
-          isMultipart: !!multipartMatch,
-          multipartIds: multipartMatch ? multipartMatch[1].split(',').map(Number) : [],
-        }
-      })
+
+    console.log(`[listFiles] done: ${visibleMsgs.length} files from ${scanned} messages`)
+    return visibleMsgs.map((m: any) => this.parseFileMessage(m))
   }
 
   async listTrash() {
@@ -993,23 +981,40 @@ export class TelegramService {
     } catch(e) { console.error('Failed to load trash state', e) }
   }
 
+  private cacheMeta: { latestMessageId: number; lastSyncAt: number } = { latestMessageId: 0, lastSyncAt: 0 }
+
   private loadFileCache(): any[] {
     try {
       if (fs.existsSync(FILE_CACHE_PATH)) {
-        const data = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
-        if (Array.isArray(data)) { this.fileCache = data; return data }
+        const raw = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
+        if (Array.isArray(raw)) {
+          this.fileCache = raw
+          this.cacheMeta = { latestMessageId: raw.length > 0 ? Math.max(...raw.map((f: any) => f.messageId || 0)) : 0, lastSyncAt: 0 }
+          return raw
+        }
+        if (raw && Array.isArray(raw.files)) {
+          this.fileCache = raw.files
+          this.cacheMeta = { latestMessageId: raw.latestMessageId || 0, lastSyncAt: raw.lastSyncAt || 0 }
+          return raw.files
+        }
       }
     } catch {}
     return []
   }
 
   private saveFileCache(files: any[]) {
-    try { fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(files), 'utf-8') } catch {}
+    try {
+      const latestId = files.length > 0 ? Math.max(...files.map((f: any) => f.messageId || 0)) : 0
+      this.cacheMeta = { latestMessageId: latestId, lastSyncAt: Date.now() }
+      const data = { files, latestMessageId: latestId, lastSyncAt: Date.now() }
+      fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(data), 'utf-8')
+    } catch {}
   }
 
   invalidateFileCache() {
     try { if (fs.existsSync(FILE_CACHE_PATH)) fs.unlinkSync(FILE_CACHE_PATH) } catch {}
     this.fileCache = []
+    this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0 }
   }
 
   invalidateOldFileCache(maxAgeMs: number) {
@@ -1020,15 +1025,22 @@ export class TelegramService {
         if (age > maxAgeMs) {
           fs.unlinkSync(FILE_CACHE_PATH)
           this.fileCache = []
+          this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0 }
         }
       }
     } catch {}
   }
 
-  async listFilesCached(): Promise<any[]> {
+  getCachedFilesInstant(): any[] {
     if (this.fileCache.length > 0) return this.fileCache
-    const cached = this.loadFileCache()
-    if (cached.length > 0) { this.fileCache = cached; return cached }
+    const disk = this.loadFileCache()
+    if (disk.length > 0) this.fileCache = disk
+    return disk
+  }
+
+  async listFilesCached(): Promise<any[]> {
+    const instant = this.getCachedFilesInstant()
+    if (instant.length > 0) return instant
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
         this.saveFileCache(files)
@@ -1048,14 +1060,66 @@ export class TelegramService {
     return files
   }
 
-  async syncFilesInBackground(): Promise<void> {
+  private async deltaSync(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
+    if (!this.client || !this.channelId) return
+    const fromId = this.cacheMeta.latestMessageId
+    if (fromId === 0) return
+
+    const BATCH = 200
+    const newFiles: any[] = []
+    let offsetId = 0
+    let scanned = 0
+
+    while (true) {
+      let batch: any[]
+      try {
+        batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+      } catch (e: any) {
+        if ((e.message || '').includes('flood') || (e.message || '').includes('420')) {
+          await new Promise(r => setTimeout(r, 15000))
+          continue
+        }
+        break
+      }
+      if (batch.length === 0) break
+
+      let foundOld = false
+      for (const m of batch) {
+        const msgId = this.msgId(m)
+        if (msgId <= fromId) { foundOld = true; break }
+        if (this.isFileVisible(m)) newFiles.push(this.parseFileMessage(m))
+      }
+      scanned += batch.length
+      if (onProgress) onProgress(this.fileCache.length + newFiles.length, scanned)
+      if (foundOld || batch.length < BATCH) break
+      offsetId = this.msgId(batch[batch.length - 1])
+      await new Promise(r => setTimeout(r, 500))
+    }
+
+    if (newFiles.length > 0) {
+      const merged = [...newFiles, ...this.fileCache]
+      const seen = new Set<number>()
+      const deduped = merged.filter((f: any) => { if (seen.has(f.messageId)) return false; seen.add(f.messageId); return true })
+      this.fileCache = deduped
+      this.saveFileCache(deduped)
+    }
+  }
+
+  async syncFilesInBackground(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
     if (this.syncingFiles || !this.client || !this.channelId) return
     if (this.listFilesPromise) return
     this.syncingFiles = true
     try {
-      const files = await this.listFiles()
-      this.saveFileCache(files)
-      this.fileCache = files
+      if (this.cacheMeta.latestMessageId > 0) {
+        await this.deltaSync(onProgress)
+      } else {
+        const files = await this.listFiles(onProgress)
+        this.saveFileCache(files)
+        this.fileCache = files
+      }
     } catch {}
     this.syncingFiles = false
   }

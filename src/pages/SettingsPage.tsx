@@ -6,7 +6,7 @@ import iconUrl from '../assets/icon.png'
 import { toast } from '../lib/toast'
 
 export default function SettingsPage({ channelInfo, onChangeChannel, updateAvailable }: { channelInfo: any; onChangeChannel: () => void; updateAvailable?: boolean }) {
-  const [concurrency, setConcurrency] = useState(2)
+  const [concurrency, setConcurrency] = useState(5)
   const [autoRename, setAutoRename] = useState(false)
   const [turboMode, setTurboMode] = useState(false)
   const [botToken, setBotToken] = useState('')

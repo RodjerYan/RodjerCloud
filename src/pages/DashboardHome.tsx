@@ -28,11 +28,21 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    (async () => {
-      const res = await window.electronAPI.telegram.listFiles()
-      if (res.success) setFiles(res.data || [])
+    let active = true
+    ;(async () => {
+      const cacheRes = await window.electronAPI.telegram.listFilesCached()
+      if (!active) return
+      setFiles(cacheRes.data || [])
       setLoading(false)
+      window.electronAPI.telegram.syncFilesBg()
     })()
+    const unsubChanged = window.electronAPI.telegram.onFilesChanged?.(() => {
+      if (!active) return
+      window.electronAPI.telegram.listFilesCached().then((r: any) => {
+        if (r.success) setFiles(r.data || [])
+      })
+    })
+    return () => { active = false; unsubChanged?.() }
   }, [])
 
   const total = files.length

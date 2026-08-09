@@ -55,7 +55,12 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   }
 
   const processQueue = async () => {
-    const limit = Math.min(5, Math.max(1, parseInt(localStorage.getItem('uploadConcurrency') || '2', 10) || 2))
+    let limit = 5
+    try {
+      const r = await window.electronAPI.storage.getUploadConcurrency()
+      if (r.success && r.data) limit = Math.min(5, Math.max(1, r.data))
+    } catch {}
+
     let active = 0
     const runNext = () => {
       while (active < limit) {
