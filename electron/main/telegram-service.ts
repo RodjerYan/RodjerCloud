@@ -136,7 +136,11 @@ export class TelegramService {
           try { fs.unlinkSync(tmpPath) } catch {}
           
           const { BrowserWindow } = require('electron')
-          BrowserWindow.getAllWindows().forEach((w: { webContents: { send: (channel: string, data: unknown) => void } }) => w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }))
+          BrowserWindow.getAllWindows().forEach((w: any) => {
+            if (!w.isDestroyed()) {
+              try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
+            }
+          })
         }
       } catch (e) {
         console.error('Heavy thumb queue error:', e)
@@ -187,6 +191,7 @@ export class TelegramService {
     this.client = new TelegramClient(session, API_ID, API_HASH, {
       connectionRetries: 5,
       useWSS: false,
+      floodSleepThreshold: 120,
     })
 
     try { (this.client as any).setLogLevel?.('error') } catch {}
@@ -408,7 +413,7 @@ export class TelegramService {
       this.client = null as any
     }
     const session = new StringSession(sessionString)
-    this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5 })
+    this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5, floodSleepThreshold: 120 })
     await this.client.connect()
 
     const dialogs = await this.client.getDialogs({ limit: 200 })

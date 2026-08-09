@@ -44,10 +44,14 @@ botService.loadToken()
 let initialFolderSyncDone = false
 
 autoSyncService.setEventCallback((event) => {
-  if (mainWindow) {
-    mainWindow.webContents.send('autosync:status', event)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('autosync:status', event)
+    } catch {}
     if (event.type === 'uploaded') {
-      mainWindow.webContents.send('files:changed')
+      try {
+        mainWindow.webContents.send('files:changed')
+      } catch {}
       appendSyncHistory({ timestamp: Date.now(), fileName: event.file || '', status: event.type, size: 0 }).catch(() => {})
     }
     if (event.type === 'failed') {
@@ -113,14 +117,16 @@ async function checkUpdate() {
       const matchFn = platformAssetPattern()
       const asset = (res.assets || []).find((a: any) => matchFn(a.name))
       const wins = BrowserWindow.getAllWindows()
-      if (wins.length > 0) {
-        wins[0].webContents.send('app:update-available', {
-          version: tag,
-          assetId: asset?.id || 0,
-          assetName: asset?.name || '',
-          htmlUrl: res.html_url || '',
-          releaseNotes: (res.body || '').slice(0, 2000),
-        })
+      if (wins.length > 0 && !wins[0].isDestroyed()) {
+        try {
+          wins[0].webContents.send('app:update-available', {
+            version: tag,
+            assetId: asset?.id || 0,
+            assetName: asset?.name || '',
+            htmlUrl: res.html_url || '',
+            releaseNotes: (res.body || '').slice(0, 2000),
+          })
+        } catch {}
         log('info', `[update] sent to renderer: v${tag}`)
       }
     }
@@ -172,13 +178,31 @@ app.whenReady().then(async () => {
   setTimeout(checkUpdate, 30000)
   setInterval(checkUpdate, 3600000)
 
-  setInterval(async () => {
+  let syncInterval = 3000
+  let lastFileCount = 0
+  let idleCycles = 0
+
+  async function adaptiveSync() {
     if (!mainWindow || mainWindow.isDestroyed()) return
     try {
+      const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
-      mainWindow.webContents.send('files:changed')
+      const after = telegramService.getCachedFilesInstant().length
+      if (!mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('files:changed') } catch {}
+      }
+      if (after > before || after > lastFileCount) {
+        idleCycles = 0
+        syncInterval = 3000
+        lastFileCount = after
+      } else {
+        idleCycles++
+        if (idleCycles > 10) syncInterval = Math.min(syncInterval + 3000, 30000)
+      }
     } catch {}
-  }, 3000)
+    setTimeout(adaptiveSync, syncInterval)
+  }
+  adaptiveSync()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
