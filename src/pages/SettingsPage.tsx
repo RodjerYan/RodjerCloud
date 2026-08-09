@@ -7,6 +7,8 @@ import { toast } from '../lib/toast'
 
 export default function SettingsPage({ channelInfo, onChangeChannel, updateAvailable }: { channelInfo: any; onChangeChannel: () => void; updateAvailable?: boolean }) {
   const [concurrency, setConcurrency] = useState(5)
+  const [concurrencyDraft, setConcurrencyDraft] = useState(5)
+  const [concurrencySaved, setConcurrencySaved] = useState(true)
   const [autoRename, setAutoRename] = useState(false)
   const [turboMode, setTurboMode] = useState(false)
   const [botToken, setBotToken] = useState('')
@@ -37,7 +39,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
       const a = await window.electronAPI.storage.getAskDownloadPath()
       if (a.success) setAskDownloadPath(a.data || false)
       const c = await window.electronAPI.storage.getUploadConcurrency()
-      if (c.success) setConcurrency(c.data || 2)
+      if (c.success) { setConcurrency(c.data || 5); setConcurrencyDraft(c.data || 5) }
       const tm = await window.electronAPI.storage.getTurboMode?.()
       if (tm?.success) setTurboMode(tm.data || false)
       setAutoRename(localStorage.getItem('v2.autoRename') === '1')
@@ -49,9 +51,11 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
     })
   }, [])
 
-  const onConcurrency = async (n: number) => {
-    setConcurrency(n)
-    await window.electronAPI.storage.setUploadConcurrency(n)
+  const saveConcurrency = async () => {
+    await window.electronAPI.storage.setUploadConcurrency(concurrencyDraft)
+    setConcurrency(concurrencyDraft)
+    setConcurrencySaved(true)
+    toast.success('Сохранено')
   }
 
   const copyKey = async () => {
@@ -149,7 +153,15 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
               <div className="settings-title">Одновременных загрузок</div>
               <div className="settings-desc">Количество файлов, загружаемых параллельно (до 5)</div>
             </div>
-            <input type="number" min={1} max={5} value={concurrency} onChange={e => onConcurrency(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))} style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="number" min={1} max={5} value={concurrencyDraft}
+                onChange={e => { const v = Math.max(1, Math.min(5, parseInt(e.target.value) || 1)); setConcurrencyDraft(v); setConcurrencySaved(v === concurrency) }}
+                style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
+              <button onClick={saveConcurrency} disabled={concurrencySaved}
+                style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: concurrencySaved ? 'rgba(255,255,255,0.05)' : '#7c83ff', color: concurrencySaved ? 'rgba(255,255,255,0.3)' : '#fff', fontWeight: 600, fontSize: 13, cursor: concurrencySaved ? 'default' : 'pointer', transition: 'all 0.2s' }}>
+                {concurrencySaved ? 'Сохранено' : 'Сохранить'}
+              </button>
+            </div>
           </div>
           <div className="settings-divider" />
           <label className="settings-row">

@@ -172,6 +172,18 @@ app.whenReady().then(async () => {
   setTimeout(checkUpdate, 30000)
   setInterval(checkUpdate, 3600000)
 
+  setInterval(async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    try {
+      const before = telegramService.getCachedFilesInstant().length
+      await telegramService.syncFilesInBackground()
+      const after = telegramService.getCachedFilesInstant().length
+      if (after > before) {
+        mainWindow.webContents.send('files:changed')
+      }
+    } catch {}
+  }, 30000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
