@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
       await telegramService.syncFilesInBackground()
       mainWindow.webContents.send('files:changed')
     } catch {}
-  }, 30000)
+  }, 3000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
