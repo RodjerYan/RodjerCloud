@@ -175,12 +175,8 @@ app.whenReady().then(async () => {
   setInterval(async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     try {
-      const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
-      const after = telegramService.getCachedFilesInstant().length
-      if (after > before) {
-        mainWindow.webContents.send('files:changed')
-      }
+      mainWindow.webContents.send('files:changed')
     } catch {}
   }, 30000)
 

@@ -1062,7 +1062,11 @@ export class TelegramService {
 
   private async deltaSync(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
     if (!this.client || !this.channelId) return
-    const fromId = this.cacheMeta.latestMessageId
+    let fromId = this.cacheMeta.latestMessageId
+    if (fromId === 0 && this.fileCache.length > 0) {
+      fromId = Math.max(...this.fileCache.map((f: any) => f.messageId || 0))
+      this.cacheMeta.latestMessageId = fromId
+    }
     if (fromId === 0) return
 
     const BATCH = 200
@@ -1109,18 +1113,20 @@ export class TelegramService {
   }
 
   async syncFilesInBackground(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
-    if (this.syncingFiles || !this.client || !this.channelId) return
-    if (this.listFilesPromise) return
+    if (!this.client || !this.channelId) return
+    if (this.syncingFiles) return
     this.syncingFiles = true
     try {
-      if (this.cacheMeta.latestMessageId > 0) {
+      if (this.cacheMeta.latestMessageId > 0 || this.fileCache.length > 0) {
         await this.deltaSync(onProgress)
       } else {
         const files = await this.listFiles(onProgress)
         this.saveFileCache(files)
         this.fileCache = files
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[syncFilesInBackground] error:', (e as Error).message)
+    }
     this.syncingFiles = false
   }
 
