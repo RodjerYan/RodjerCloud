@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net, crashReporter } from 'electron'
 import { execSync, spawn } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -104,6 +104,10 @@ function createWindow() {
     log(lvl, '[renderer] ' + msg)
   })
 
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
@@ -177,6 +181,13 @@ async function checkUpdate() {
     log('error', '[update] check failed: ' + (e as Error).message)
   }
 }
+
+crashReporter.start({
+  submitURL: '',
+  productName: 'RodjerCloud',
+  compress: true,
+  uploadToServer: false,
+})
 
 app.whenReady().then(async () => {
   protocol.handle('local-file', (request) => {
@@ -487,7 +498,7 @@ async function runUpload(job: UploadJob): Promise<void> {
   try {
     log('info', `[upload] start: ${job.filePath} (id=${job.id})`)
     let lastSend = 0
-    const THROTTLE_MS = 250
+    const THROTTLE_MS = 1000
     const isCancelled = () => uploadCancelled.has(job.id)
     const sendProgress = (sent: number, total: number) => {
       if (isCancelled()) return

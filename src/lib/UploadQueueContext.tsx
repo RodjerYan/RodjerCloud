@@ -98,16 +98,22 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
       pendingUpdates.set(data.id, { percent: data.percent, sent: data.sent, total: data.total });
       const now = Date.now();
 
-      if (now - lastUpdate > 300) {
+      if (now - lastUpdate > 500) {
         if (!rafId) {
           rafId = window.requestAnimationFrame(() => {
             const batch = new Map(pendingUpdates);
             pendingUpdates.clear();
-            setQueue(prev => prev.map(q => {
-              const u = batch.get(q.id);
-              if (u) return { ...q, percent: u.percent, sent: u.sent, total: u.total };
-              return q;
-            }));
+            if (batch.size > 0) {
+              setQueue(prev => {
+                let changed = false;
+                const next = prev.map(q => {
+                  const u = batch.get(q.id);
+                  if (u) { changed = true; return { ...q, percent: u.percent, sent: u.sent, total: u.total }; }
+                  return q;
+                });
+                return changed ? next : prev;
+              });
+            }
             lastUpdate = Date.now();
             rafId = null;
           });

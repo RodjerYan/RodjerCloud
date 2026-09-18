@@ -1,3 +1,25 @@
+## Что нового в v1.0.266
+
+- React.memo для FileThumb — предотвращает каскадные re-renders при progress updates
+- React.memo для QueueItem — предотвращает re-render завершённых файлов
+- Progress throttle увеличен до 1000ms (было 250ms) — снижает нагрузку на IPC
+- progress batch только если есть изменения — skip если ничего не изменилось
+- crashReporter для диагностики native crashes
+- render-process-gone handler для логирования renderer crashes
+
+---
+
+## What's new in v1.0.266
+
+- React.memo for FileThumb — prevents cascade re-renders on progress updates
+- React.memo for QueueItem — prevents re-rendering completed files
+- Progress throttle increased to 1000ms (was 250ms) — reduces IPC load
+- Progress batch only if changes detected — skip if nothing changed
+- crashReporter for native crash diagnostics
+- render-process-gone handler for renderer crash logging
+
+---
+
 ## Что нового в v1.0.265
 
 - Адаптивный timeout: min 30мин, +20мин/GB (для 10GB файла timeout ~3.5 часа)

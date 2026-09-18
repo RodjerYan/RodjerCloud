@@ -8,6 +8,38 @@ import { useUploadQueue } from '../lib/UploadQueueContext'
 const TG_LIMIT = 2 * 1024 * 1024 * 1024
 const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 
+const QueueItem = React.memo(({ q, onCancel }: { q: any; onCancel: (id: string) => void }) => (
+  <li className={'up-item up-item-' + q.status}>
+    <div className="up-item-info">
+      <div className="up-item-name">
+        {q.encrypt && <span title="Будет зашифровано">🔒 </span>}
+        {q.fileName}
+        {q.fileSize > TG_LIMIT && (
+          <span className="up-warn"><AlertTriangle size={12} /> Exceeds Telegram 2GB limit</span>
+        )}
+      </div>
+      <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status === 'done' ? 'готово' : q.status === 'uploading' ? 'загрузка' : q.status === 'waiting' ? 'ожидание' : q.status === 'failed' ? 'ошибка' : q.status}{q.error ? ' - ' + q.error : ''}</div>
+    </div>
+    <div className="up-item-progress">
+      {q.status === 'uploading' && <Loader2 size={16} className="spin" />}
+      {q.status === 'done' && <CheckCircle2 size={16} className="ok" />}
+      {q.status === 'failed' && <AlertTriangle size={16} className="err" />}
+      <div className="up-bar"><div className="up-bar-fill" style={{ width: q.percent + '%' }} /></div>
+      <span className="up-pct">{q.percent}%</span>
+      {q.fileSize > 50 * 1024 * 1024 && q.sent !== undefined && q.total ? (
+        <>
+          <span className="up-detail">{fmtSize(q.sent)} / {fmtSize(q.total)}</span>
+          <span className="up-detail">ост. {fmtSize(Math.max(0, q.total - q.sent))}</span>
+          {(() => { const totalCh = Math.max(1, Math.ceil(q.total / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((q.sent || 1) / CHUNK_SIZE))); return totalCh > 1 ? <span className="up-detail">ч. {curCh}/{totalCh}</span> : null })()}
+        </>
+      ) : null}
+      {(q.status === 'waiting' || q.status === 'uploading') && (
+        <button onClick={() => onCancel(q.id)} title="Отменить"><X size={14} /></button>
+      )}
+    </div>
+  </li>
+))
+
 const ALL_STEPS = [
   { key: 'downloading', label: 'Скачивание' },
   { key: 'compressing', label: 'Архивация' },
@@ -195,35 +227,7 @@ export default function UploadPage() {
           </div>
           <ul>
             {queue.map(q => (
-              <li key={q.id} className={'up-item up-item-' + q.status}>
-                <div className="up-item-info">
-                  <div className="up-item-name">
-                    {q.encrypt && <span title="Будет зашифровано">🔒 </span>}
-                    {q.fileName}
-                    {q.fileSize > TG_LIMIT && (
-                      <span className="up-warn"><AlertTriangle size={12} /> Exceeds Telegram 2GB limit</span>
-                    )}
-                  </div>
-                  <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status === 'done' ? 'готово' : q.status === 'uploading' ? 'загрузка' : q.status === 'waiting' ? 'ожидание' : q.status === 'failed' ? 'ошибка' : q.status}{q.error ? ' - ' + q.error : ''}</div>
-                </div>
-                <div className="up-item-progress">
-                  {q.status === 'uploading' && <Loader2 size={16} className="spin" />}
-                  {q.status === 'done' && <CheckCircle2 size={16} className="ok" />}
-                  {q.status === 'failed' && <AlertTriangle size={16} className="err" />}
-                  <div className="up-bar"><div className="up-bar-fill" style={{ width: q.percent + '%' }} /></div>
-                  <span className="up-pct">{q.percent}%</span>
-                  {q.fileSize > 50 * 1024 * 1024 && q.sent !== undefined && q.total ? (
-                    <>
-                      <span className="up-detail">{fmtSize(q.sent)} / {fmtSize(q.total)}</span>
-                      <span className="up-detail">ост. {fmtSize(Math.max(0, q.total - q.sent))}</span>
-                      {(() => { const totalCh = Math.max(1, Math.ceil(q.total / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((q.sent || 1) / CHUNK_SIZE))); return totalCh > 1 ? <span className="up-detail">ч. {curCh}/{totalCh}</span> : null })()}
-                    </>
-                  ) : null}
-                  {(q.status === 'waiting' || q.status === 'uploading') && (
-                    <button onClick={() => { window.electronAPI.telegram.cancelUpload(q.id); removeItem(q.id) }} title="Отменить"><X size={14} /></button>
-                  )}
-                </div>
-              </li>
+              <QueueItem key={q.id} q={q} onCancel={(id) => { window.electronAPI.telegram.cancelUpload(id); removeItem(id) }} />
             ))}
           </ul>
         </div>

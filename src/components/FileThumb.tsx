@@ -59,7 +59,7 @@ interface FileThumbProps {
   typeLabel: string
 }
 
-export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVideo, typeLabel }) => {
+export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, fileName, isVideo, typeLabel }) => {
   const [url, setUrl] = useState<string | null>(null)
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -125,4 +125,4 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
       )}
     </div>
   )
-}
+})
