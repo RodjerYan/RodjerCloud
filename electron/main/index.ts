@@ -461,6 +461,11 @@ async function processQueue() {
   }
 }
 async function runUpload(job: UploadJob): Promise<void> {
+  const startTime = Date.now()
+  const watchdog = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000)
+    if (elapsed > 60) log('warn', `[upload] still uploading after ${elapsed}s: ${job.filePath}`)
+  }, 30000)
   try {
     log('info', `[upload] start: ${job.filePath} (id=${job.id})`)
     let lastSend = 0
@@ -487,7 +492,7 @@ async function runUpload(job: UploadJob): Promise<void> {
       return
     }
     sendProgress(result.fileSize, result.fileSize)
-    log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes)`)
+    log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes, ${Math.floor((Date.now() - startTime) / 1000)}s)`)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
     log('error', `[upload] FAILED: ${job.filePath} — ${(error as Error)?.message || String(error)}`)
@@ -497,6 +502,8 @@ async function runUpload(job: UploadJob): Promise<void> {
       job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
     }
     uploadCancelled.delete(job.id)
+  } finally {
+    clearInterval(watchdog)
   }
 }
 

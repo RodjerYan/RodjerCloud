@@ -1,17 +1,17 @@
-## Что нового в v1.0.261
+## Что нового в v1.0.262
 
-- Ограничено количество workers до 8 (было 32 в turbo mode) — главная причина OOM крашей при загрузке
-- Снижена максимальная параллельность загрузки с 5 до 3 для снижения потребления памяти
-- Добавлены обработчики unhandledRejection и uncaughtException — приложение больше не падает без лога
-- Добавлено логирование каждой загрузки (старт/успех/ошибка) в rodjercloud.log
-- Асинхронные execFile/readFile для ffmpeg и HEIC thumbnail
+- Thumbnail генерация пропускается для файлов >50MB — главная причина native crash на MOV файлах
+- Таймаут ffmpeg/sips снижен до 5 секунд (было 10-15)
+- Добавлен maxBuffer в execFile вызовы для ffmpeg и sips
+- Добавлен watchdog для загрузок — предупреждение в лог если загрузка длится >60 секунд
+- Добавлено время выполнения в лог завершённых загрузок
 
 ---
 
-## What's new in v1.0.261
+## What's new in v1.0.262
 
-- Capped upload workers to 8 max (was 32 in turbo mode) — main cause of OOM crashes
-- Reduced max concurrent uploads from 5 to 3 to reduce memory pressure
-- Added unhandledRejection and uncaughtException handlers — app no longer crashes silently
-- Added upload logging (start/success/error) to rodjercloud.log
-- Async execFile/readFile for ffmpeg and HEIC thumbnail generation
+- Thumbnail generation skipped for files >50MB — main cause of native crash on MOV files
+- Reduced ffmpeg/sips timeout to 5 seconds (was 10-15)
+- Added maxBuffer to execFile calls for ffmpeg and sips
+- Added upload watchdog — logs warning if upload takes >60 seconds
+- Added elapsed time to upload completion logs

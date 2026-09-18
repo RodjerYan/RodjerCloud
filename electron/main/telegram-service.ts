@@ -499,7 +499,7 @@ export class TelegramService {
     }
 
     let thumbBuffer: Buffer | undefined = undefined
-    if (!isTemp) {
+    if (!isTemp && sizeBytes <= 50 * 1024 * 1024) {
       await thumbAcquire()
       try {
         const ext = path.extname(filePath).toLowerCase()
@@ -509,7 +509,7 @@ export class TelegramService {
             const baseName = path.basename(filePath)
             if (process.platform === 'darwin') {
               const pngPath = path.join(tempDir, baseName + '.png')
-              await execFileAsync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
+              await execFileAsync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 5000 })
               if (fs.existsSync(pngPath)) {
                 const pngBuf = await fs.promises.readFile(pngPath)
                 const img = nativeImage.createFromBuffer(pngBuf)
@@ -529,7 +529,7 @@ export class TelegramService {
                   '-i', filePath, '-vframes', '1',
                   '-vf', 'scale=320:320:force_original_aspect_ratio=decrease,format=yuv420p',
                   '-q:v', '5', '-y', jpgPath
-                ], { timeout: 10000 })
+                ], { timeout: 5000, maxBuffer: 1024 * 1024 })
               } catch (err) { console.error('ffmpeg thumb error:', err) }
               
               if (fs.existsSync(jpgPath)) {
@@ -548,7 +548,7 @@ export class TelegramService {
             if (process.platform === 'darwin') {
               const tempDir = app.getPath('temp')
               const sipsTmp = path.join(tempDir, path.basename(filePath) + '.jpg')
-              await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', filePath, '--out', sipsTmp], { timeout: 15000 })
+              await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', filePath, '--out', sipsTmp], { timeout: 5000, maxBuffer: 1024 * 1024 })
               outputBuffer = await fs.promises.readFile(sipsTmp)
               try { fs.unlinkSync(sipsTmp) } catch {}
             } else {
