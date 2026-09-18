@@ -1051,6 +1051,21 @@ export class TelegramService {
     return this.listFilesPromise
   }
 
+  getFileCategoryCounts(): Record<string, number> {
+    const all = this.getCachedFilesInstant()
+    const counts: Record<string, number> = { Изображения: 0, Видео: 0, Аудио: 0, Документы: 0, Архивы: 0, Другое: 0 }
+    for (const f of all) {
+      const name = (f.fileName || '').toLowerCase()
+      if (/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg|avif)$/i.test(name)) counts['Изображения']++
+      else if (/\.(mp4|mov|avi|mkv|webm|flv)$/i.test(name)) counts['Видео']++
+      else if (/\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(name)) counts['Аудио']++
+      else if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|djvu|epub|fb2)$/i.test(name)) counts['Документы']++
+      else if (/\.(zip|rar|7z|tar|gz)$/i.test(name)) counts['Архивы']++
+      else counts['Другое']++
+    }
+    return counts
+  }
+
   async listFilesFromCache(limit: number, offsetId: number = 0): Promise<{ files: any[]; nextOffsetId: number | null; total: number }> {
     if (this.fileCache.length > 0) {
       const filtered = offsetId > 0

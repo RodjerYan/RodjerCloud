@@ -623,6 +623,12 @@ ipcMain.handle('telegram:list-files-from-cache', async (_, limit: number, offset
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:get-category-counts', async () => {
+  try {
+    return { success: true, data: telegramService.getFileCategoryCounts() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:list-files', async () => {
   try {
     const files = await telegramService.listFilesCached()

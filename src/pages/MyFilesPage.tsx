@@ -60,6 +60,7 @@ export default function MyFilesPage() {
   const [favs, setFavs] = useState<any[]>([])
 
   const [files, setFiles] = useState<any[]>([])
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const [visibleCount, setVisibleCount] = useState(30)
   const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -344,6 +345,13 @@ export default function MyFilesPage() {
 
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const loadCategoryCounts = useCallback(async () => {
+    try {
+      const r = await window.electronAPI.telegram.getCategoryCounts()
+      if (r.success && r.data) setCategoryCounts(r.data)
+    } catch {}
+  }, [])
+
   const processRawFiles = (raw: any[]) =>
     raw
       .filter((x: any) => !locallyDeletedIds.current.has(x.messageId))
@@ -357,7 +365,10 @@ export default function MyFilesPage() {
     if (!silent) setLoading(true)
     setLoadError(null)
     try {
-      const r = await window.electronAPI.telegram.listFilesFromCache(30, 0)
+      const [r] = await Promise.all([
+        window.electronAPI.telegram.listFilesFromCache(30, 0),
+        loadCategoryCounts()
+      ])
       if (r.success) {
         setFiles(processRawFiles(r.data || []))
         nextOffsetIdRef.current = r.nextOffsetId ?? null
@@ -505,10 +516,11 @@ export default function MyFilesPage() {
           totalFilesRef.current = r.total ?? 0
         }
       })
+      loadCategoryCounts()
       loadFolders()
     })
     return unsub
-  }, [loadFolders])
+  }, [loadFolders, loadCategoryCounts])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
@@ -1303,6 +1315,7 @@ export default function MyFilesPage() {
         <div className="mf-sections">
           {!folderDrill && CATEGORIES.map(cat => {
             const items = grouped[cat]
+            const displayCount = categoryCounts[cat] ?? items.length
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
             const isDrillable = cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио'
@@ -1312,7 +1325,7 @@ export default function MyFilesPage() {
                   <ChevronDown size={14} />
                   <span className="mf-section-icon">{CAT_ICON[cat]}</span>
                   <span className="mf-section-title">{cat}</span>
-                  <span className="mf-section-count">{items.length}</span>
+                  <span className="mf-section-count">{displayCount}</span>
                   {items.length > 0 && <button className="v3-btn ghost" style={{ padding: 4, border: 'none', color: '#7c83ff', fontSize: 11, marginLeft: 4 }}
                     onClick={(e) => { e.stopPropagation(); handleArchive(cat, items) }} title="Архивировать и загрузить">
                     <Archive size={12} />
