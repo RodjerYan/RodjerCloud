@@ -57,10 +57,10 @@ jobs:
           cat commit_msg.txt >> generated_notes.md
           
           if gh release view "${{ github.ref_name }}" --json tagName > /dev/null 2>&1; then
-            gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.exe" --yes 2>/dev/null || true
-            gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.exe.blockmap" --yes 2>/dev/null || true
-            gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.dmg" --yes 2>/dev/null || true
-            gh release delete-asset "${{ github.ref_name }}" "RodjerCloud-*.dmg.blockmap" --yes 2>/dev/null || true
+            # Delete all old assets
+            gh api "/repos/RodjerYan/RodjerCloud/releases/${{ github.ref_name }}/assets" --jq '.[].name' | while read asset; do
+              gh release delete-asset "${{ github.ref_name }}" "$asset" --yes 2>/dev/null || true
+            done
             gh release upload "${{ github.ref_name }}" *.exe *.exe.blockmap *.dmg *.dmg.blockmap --clobber || true
             gh release edit "${{ github.ref_name }}" -F generated_notes.md || true
           else
