@@ -6,7 +6,19 @@ import path from 'path'
 import crypto from 'crypto'
 import zlib from 'zlib'
 import { app, ipcMain, nativeImage } from 'electron'
+import { execFile } from 'child_process'
 import { vaultService } from './vault-service'
+
+// Thumbnail semaphore — max 2 concurrent thumbnail generations to prevent memory spikes
+let thumbSemCount = 0
+const thumbSemMax = 2
+const thumbSemQueue: (() => void)[] = []
+function thumbAcquire(): Promise<void> {
+  if (thumbSemCount < thumbSemMax) { thumbSemCount++; return Promise.resolve() }
+  return new Promise(resolve => thumbSemQueue.push(resolve))
+}
+function thumbRelease() { thumbSemCount--; if (thumbSemQueue.length > 0) { thumbSemCount++; thumbSemQueue.shift()!() } }
+const execFileAsync = require('util').promisify(execFile) as typeof execFile
 
 const SHARE_LOG = () => path.join(app.isPackaged ? app.getPath('userData') : app.getAppPath(), 'share-debug.log')
 function shareLog(...args: unknown[]) {
@@ -89,15 +101,14 @@ export class TelegramService {
         
         await this.performDownload(task.message, tmpPath)
         
-        if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
-          let outputBuffer: Buffer = fs.readFileSync(tmpPath)
+        if (fs.existsSync(tmpPath) && (await fs.promises.stat(tmpPath)).size > 0) {
+          let outputBuffer: Buffer = await fs.promises.readFile(tmpPath)
           
           if (process.platform === 'darwin') {
-            const { execFileSync } = require('child_process')
             const sipsTmp = tmpPath + '.jpg'
             try {
-              execFileSync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
-              outputBuffer = fs.readFileSync(sipsTmp)
+              await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
+              outputBuffer = await fs.promises.readFile(sipsTmp)
               try { fs.unlinkSync(sipsTmp) } catch {}
             } catch (e: any) {
               console.error('sips convert error:', e)
@@ -132,7 +143,7 @@ export class TelegramService {
             outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
           }
           
-          fs.writeFileSync(task.cachePath, outputBuffer)
+          await fs.promises.writeFile(task.cachePath, outputBuffer)
           try { fs.unlinkSync(tmpPath) } catch {}
           
           const { BrowserWindow } = require('electron')
@@ -489,90 +500,94 @@ export class TelegramService {
 
     let thumbBuffer: Buffer | undefined = undefined
     if (!isTemp) {
-      const ext = path.extname(filePath).toLowerCase()
-      if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
-        try {
-          const tempDir = app.getPath('temp')
-          const baseName = path.basename(filePath)
-          if (process.platform === 'darwin') {
-            const pngPath = path.join(tempDir, baseName + '.png')
-            require('child_process').execFileSync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
-            if (fs.existsSync(pngPath)) {
-              const pngBuf = fs.readFileSync(pngPath)
-              const img = nativeImage.createFromBuffer(pngBuf)
-              if (!img.isEmpty()) {
-                thumbBuffer = img.toJPEG(80)
-                ;(thumbBuffer as any).name = 'thumb.jpg'
-              }
-              try { fs.unlinkSync(pngPath) } catch {}
-            }
-          } else {
-            const jpgPath = path.join(tempDir, baseName + '_thumb.jpg')
-            try {
-              let ffmpegPath = require('ffmpeg-static')
-              if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
-              require('child_process').execFileSync(ffmpegPath, [
-                '-ss', '00:00:00.000',
-                '-i', filePath, '-vframes', '1',
-                '-vf', 'scale=320:320:force_original_aspect_ratio=decrease,format=yuv420p',
-                '-q:v', '5', '-y', jpgPath
-              ], { timeout: 10000, stdio: 'ignore' })
-            } catch (err) { console.error('ffmpeg thumb error:', err) }
-            
-            if (fs.existsSync(jpgPath)) {
-              thumbBuffer = fs.readFileSync(jpgPath)
-              ;(thumbBuffer as any).name = 'thumb.jpg'
-              try { fs.unlinkSync(jpgPath) } catch {}
-            }
-          }
-        } catch (e) {
-          console.error('qlmanage thumb failed:', e)
-        }
-      } else if (ext === '.heic' || ext === '.heif') {
-        try {
-          const inputBuffer = fs.readFileSync(filePath)
-          let outputBuffer: Buffer = inputBuffer
-          if (process.platform === 'darwin') {
-            const { execFileSync } = require('child_process')
+      await thumbAcquire()
+      try {
+        const ext = path.extname(filePath).toLowerCase()
+        if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
+          try {
             const tempDir = app.getPath('temp')
-            const sipsTmp = path.join(tempDir, path.basename(filePath) + '.jpg')
-            execFileSync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', filePath, '--out', sipsTmp], { timeout: 15000 })
-            outputBuffer = fs.readFileSync(sipsTmp)
-            try { fs.unlinkSync(sipsTmp) } catch {}
-          } else {
-            const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
-            const { Worker } = require('worker_threads')
-            const outBuf = await new Promise<Buffer>((resolve, reject) => {
-              const worker = new Worker(`
-                const heicConvert = require('${heicPath}');
-                const { parentPort, workerData } = require('worker_threads');
-                async function run() {
-                  try {
-                    const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
-                    parentPort.postMessage({ success: true, buffer: out });
-                  } catch (e) {
-                    parentPort.postMessage({ success: false, error: e.message });
-                  }
+            const baseName = path.basename(filePath)
+            if (process.platform === 'darwin') {
+              const pngPath = path.join(tempDir, baseName + '.png')
+              await execFileAsync('/usr/bin/qlmanage', ['-t', '-s', '320', filePath, '-o', tempDir], { timeout: 10000 })
+              if (fs.existsSync(pngPath)) {
+                const pngBuf = await fs.promises.readFile(pngPath)
+                const img = nativeImage.createFromBuffer(pngBuf)
+                if (!img.isEmpty()) {
+                  thumbBuffer = img.toJPEG(80)
+                  ;(thumbBuffer as any).name = 'thumb.jpg'
                 }
-                run();
-              `, { eval: true, workerData: inputBuffer })
-              worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
-                if (msg.success) resolve(Buffer.from(msg.buffer!))
-                else reject(new Error(msg.error))
-              })
-              worker.on('error', reject)
-              worker.on('exit', (code: number | null) => {
-                if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
-              })
-            })
-            const img = nativeImage.createFromBuffer(outBuf as Buffer)
-            outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+                try { fs.unlinkSync(pngPath) } catch {}
+              }
+            } else {
+              const jpgPath = path.join(tempDir, baseName + '_thumb.jpg')
+              try {
+                let ffmpegPath = require('ffmpeg-static')
+                if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
+                await execFileAsync(ffmpegPath, [
+                  '-ss', '00:00:00.000',
+                  '-i', filePath, '-vframes', '1',
+                  '-vf', 'scale=320:320:force_original_aspect_ratio=decrease,format=yuv420p',
+                  '-q:v', '5', '-y', jpgPath
+                ], { timeout: 10000 })
+              } catch (err) { console.error('ffmpeg thumb error:', err) }
+              
+              if (fs.existsSync(jpgPath)) {
+                thumbBuffer = await fs.promises.readFile(jpgPath)
+                ;(thumbBuffer as any).name = 'thumb.jpg'
+                try { fs.unlinkSync(jpgPath) } catch {}
+              }
+            }
+          } catch (e) {
+            console.error('qlmanage thumb failed:', e)
           }
-          thumbBuffer = outputBuffer
-          ;(thumbBuffer as any).name = 'thumb.jpg'
-        } catch (e) {
-          console.error('heic thumb failed on upload:', e)
+        } else if (ext === '.heic' || ext === '.heif') {
+          try {
+            const inputBuffer = await fs.promises.readFile(filePath)
+            let outputBuffer: Buffer = inputBuffer
+            if (process.platform === 'darwin') {
+              const tempDir = app.getPath('temp')
+              const sipsTmp = path.join(tempDir, path.basename(filePath) + '.jpg')
+              await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', filePath, '--out', sipsTmp], { timeout: 15000 })
+              outputBuffer = await fs.promises.readFile(sipsTmp)
+              try { fs.unlinkSync(sipsTmp) } catch {}
+            } else {
+              const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+              const { Worker } = require('worker_threads')
+              const outBuf = await new Promise<Buffer>((resolve, reject) => {
+                const worker = new Worker(`
+                  const heicConvert = require('${heicPath}');
+                  const { parentPort, workerData } = require('worker_threads');
+                  async function run() {
+                    try {
+                      const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                      parentPort.postMessage({ success: true, buffer: out });
+                    } catch (e) {
+                      parentPort.postMessage({ success: false, error: e.message });
+                    }
+                  }
+                  run();
+                `, { eval: true, workerData: inputBuffer })
+                worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                  if (msg.success) resolve(Buffer.from(msg.buffer!))
+                  else reject(new Error(msg.error))
+                })
+                worker.on('error', reject)
+                worker.on('exit', (code: number | null) => {
+                  if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                })
+              })
+              const img = nativeImage.createFromBuffer(outBuf as Buffer)
+              outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+            }
+            thumbBuffer = outputBuffer
+            ;(thumbBuffer as any).name = 'thumb.jpg'
+          } catch (e) {
+            console.error('heic thumb failed on upload:', e)
+          }
         }
+      } finally {
+        thumbRelease()
       }
     }
 

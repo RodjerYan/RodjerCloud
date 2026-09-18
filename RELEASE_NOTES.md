@@ -1,15 +1,13 @@
-## Что нового в v1.0.259
+## Что нового в v1.0.260
 
-- Исправлено отображение файлов в виртуальных папках (Видео, Аудио, Изображения) — теперь загружаются все файлы категории из полного кэша, а не только из 30 загруженных
-- Добавлен IPC getFilesByCategory для загрузки файлов по типу из полного кэша
-- Исправлено отображение в раскрывающихся категориях (Документы, Архивы, Другое) — загрузка при раскрытии из полного кэша
-- Добавлен индикатор загрузки при переходе в виртуальную папку
+- Исправлен краш при массовой загрузке файлов — заменены синхронные операции (execFileSync, readFileSync) на асинхронные
+- Добавлен семафор для thumbnail-операций (макс 2 одновременно) для предотвращения пиков потребления памяти
+- FFmpeg и sips теперь запускаются асинхронно — UI больше не замерзает при генерации превью
 
 ---
 
-## What's new in v1.0.259
+## What's new in v1.0.260
 
-- Fixed file display in virtual folders (Video, Audio, Images) — now loads all files from full cache, not just 30 loaded files
-- Added getFilesByCategory IPC for loading files by type from full cache
-- Fixed display in expandable categories (Documents, Archives, Other) — loads from full cache on expand
-- Added loading indicator when entering virtual folders
+- Fixed crash during bulk file upload — replaced synchronous operations (execFileSync, readFileSync) with async equivalents
+- Added semaphore for thumbnail generation (max 2 concurrent) to prevent memory spikes
+- FFmpeg and sips now run asynchronously — UI no longer freezes during thumbnail generation
