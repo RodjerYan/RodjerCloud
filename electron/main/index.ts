@@ -281,7 +281,8 @@ app.whenReady().then(async () => {
 
   async function adaptiveSync() {
     if (!mainWindow || mainWindow.isDestroyed()) return
-    if (uploadsInProgress) { setTimeout(adaptiveSync, 5000); return }
+    // In v250 adaptiveSync ran during uploads, keeping Telegram connection alive.
+    // Pausing it caused sendFile to hang on stale connections.
     try {
       const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
