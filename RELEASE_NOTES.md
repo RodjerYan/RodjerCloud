@@ -1,3 +1,23 @@
+## Что нового в v1.0.264
+
+- Пауза фоновой синхронизации во время загрузок (устраняет crash при параллельном getMessages + sendFile)
+- 10-минутный timeout на каждую часть sendFile (защита от зависания)
+- Логирование памяти до/после каждой загрузки
+- process.on('exit') handler для логирования кодов выхода
+- Watchdog теперь показывает использование памяти
+
+---
+
+## What's new in v1.0.264
+
+- Pauses background sync during uploads (fixes crash from concurrent getMessages + sendFile)
+- 10-minute timeout per sendFile part (prevents hanging)
+- Memory logging before/after each upload
+- process.on('exit') handler to log exit codes
+- Watchdog now shows memory usage
+
+---
+
 ## Что нового в v1.0.263
 
 - Адаптивное количество workers в зависимости от размера файла (>500MB: 1 worker, >100MB: 2, <100MB: 2-4)

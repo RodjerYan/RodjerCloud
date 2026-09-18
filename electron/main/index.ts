@@ -36,6 +36,12 @@ process.on('unhandledRejection', (reason: any) => {
 process.on('uncaughtException', (err: any) => {
   log('error', `[uncaughtException] ${err?.stack || err?.message || String(err)}`)
 })
+process.on('beforeExit', (code: number) => {
+  log('warn', `[beforeExit] code=${code} activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}`)
+})
+process.on('exit', (code: number) => {
+  try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] [FATAL] [process.exit] code=${code} activeUploads=${activeUploads}\n`) } catch {}
+})
 
 const previewSessions = new Map<string, { files: any[]; idx: number; dir: string }>()
 let previewIdSeq = 0
@@ -221,6 +227,7 @@ app.whenReady().then(async () => {
 
   async function adaptiveSync() {
     if (!mainWindow || mainWindow.isDestroyed()) return
+    if (uploadsInProgress) { setTimeout(adaptiveSync, 5000); return }
     try {
       const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
@@ -446,6 +453,7 @@ ipcMain.handle('telegram:get-user-info', async () => {
 type UploadJob = { id: string; filePath: string; encrypt?: boolean; customFileName?: string; event: { sender: { send: (c: string, d: any) => void } } }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
+let uploadsInProgress = false
 const uploadCancelled = new Set<string>()
 async function getConcurrency(): Promise<number> {
   const p = await readPrefs()
@@ -465,14 +473,16 @@ async function processQueue() {
     if (activeUploads >= limit) break
     uploadQueue.shift()!
     activeUploads++
-    runUpload(job).finally(() => { activeUploads--; processQueue() })
+    uploadsInProgress = true
+    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) uploadsInProgress = false; processQueue() })
   }
 }
 async function runUpload(job: UploadJob): Promise<void> {
   const startTime = Date.now()
   const watchdog = setInterval(() => {
     const elapsed = Math.floor((Date.now() - startTime) / 1000)
-    if (elapsed > 60) log('warn', `[upload] still uploading after ${elapsed}s: ${job.filePath}`)
+    const mem = process.memoryUsage()
+    log('warn', `[upload] still uploading after ${elapsed}s: ${job.filePath} heap=${(mem.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mem.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
   }, 30000)
   try {
     log('info', `[upload] start: ${job.filePath} (id=${job.id})`)

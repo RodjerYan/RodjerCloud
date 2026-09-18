@@ -452,6 +452,10 @@ export class TelegramService {
   async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
+    const memBefore = process.memoryUsage()
+    const sizeMB = (fs.statSync(filePath).size / 1024 / 1024).toFixed(1)
+    console.log(`[upload] mem before ${path.basename(filePath)} (${sizeMB}MB): heap=${(memBefore.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(memBefore.rss / 1024 / 1024).toFixed(0)}MB`)
+
     let uploadPath = filePath
     let ivHex = ''
     let isTemp = false
@@ -632,7 +636,8 @@ export class TelegramService {
         captionStr = `#chunk_of ${mainMessageId}`
       }
 
-      const result = await this.client.sendFile(this.channelId as any, {
+      const SEND_TIMEOUT = 10 * 60 * 1000
+      const sendPromise = this.client!.sendFile(this.channelId as any, {
         file: partPath,
         caption: captionStr,
         fileName,
@@ -654,6 +659,10 @@ export class TelegramService {
           }
         },
       } as any)
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`sendFile timeout after ${SEND_TIMEOUT / 1000}s for ${fileName} part ${i}`)), SEND_TIMEOUT)
+      )
+      const result = await Promise.race([sendPromise, timeoutPromise])
 
       if (isMultipart) {
         try { fs.unlinkSync(partPath) } catch {}
@@ -694,6 +703,10 @@ export class TelegramService {
       '.exe': 'application/x-msdownload', '.dmg': 'application/x-apple-diskimage',
     }
     const detectedMime = MIME_MAP[ext] || 'application/octet-stream'
+
+    const memAfter = process.memoryUsage()
+    const deltaHeap = ((memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024).toFixed(1)
+    console.log(`[upload] mem after ${fileName}: heap=${(memAfter.heapUsed / 1024 / 1024).toFixed(0)}MB (delta=${deltaHeap}MB) rss=${(memAfter.rss / 1024 / 1024).toFixed(0)}MB`)
 
     return {
       messageId: mainMessageId as number,
