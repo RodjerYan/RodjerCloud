@@ -96,50 +96,45 @@ function createWindow() {
 
 const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://updater-proxy-rodjer1.vercel.app'
 
-async function proxyFetch(path: string): Promise<any> {
-  return new Promise<any>((resolve, reject) => {
-    const timeout = setTimeout(() => { req.destroy(); reject(new Error('Update check timeout')) }, 15000)
-    const opts: any = { headers: { 'User-Agent': 'RodjerCloud' } }
-    const req = https.get(`${UPDATE_SERVER_URL}${path}`, opts, (res) => {
+function netFetch(url: string, headers: Record<string, string> = {}, timeoutMs = 12000): Promise<{ statusCode: number; data: string }> {
+  return new Promise((resolve, reject) => {
+    const req = net.request({ method: 'GET', url })
+    const timer = setTimeout(() => { req.abort(); reject(new Error('Network timeout')) }, timeoutMs)
+    for (const [k, v] of Object.entries(headers)) req.setHeader(k, v)
+    req.on('response', (res) => {
       let data = ''
-      res.on('data', (chunk) => data += chunk)
-      res.on('end', () => {
-        clearTimeout(timeout)
-        if (res.statusCode && res.statusCode >= 400) {
-          return reject(new Error(`Proxy ${res.statusCode}`))
-        }
-        try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
-      })
+      res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+      res.on('end', () => { clearTimeout(timer); resolve({ statusCode: res.statusCode || 0, data }) })
+      res.on('error', (err: Error) => { clearTimeout(timer); reject(err) })
     })
-    req.on('error', (err) => { clearTimeout(timeout); reject(err) })
-  })
-}
-
-async function fetchFromGitHub(): Promise<any> {
-  return new Promise<any>((resolve, reject) => {
-    const timeout = setTimeout(() => { req.destroy(); reject(new Error('GitHub API timeout')) }, 15000)
-    const opts: any = { headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' } }
-    const req = https.get('https://api.github.com/repos/RodjerYan/RodjerCloud/releases/latest', opts, (res) => {
-      let data = ''
-      res.on('data', (chunk) => data += chunk)
-      res.on('end', () => {
-        clearTimeout(timeout)
-        if (res.statusCode && res.statusCode >= 400) {
-          return reject(new Error(`GitHub API ${res.statusCode}`))
-        }
-        try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
-      })
-    })
-    req.on('error', (err) => { clearTimeout(timeout); reject(err) })
+    req.on('error', (err) => { clearTimeout(timer); reject(err) })
+    req.end()
   })
 }
 
 async function fetchLatestRelease(): Promise<any> {
+  const errors: string[] = []
+
   try {
-    return await fetchFromGitHub()
-  } catch {
-    return await proxyFetch('/api/latest')
-  }
+    const { statusCode, data } = await netFetch(
+      'https://api.github.com/repos/RodjerYan/RodjerCloud/releases/latest',
+      { 'Accept': 'application/vnd.github.v3+json' }
+    )
+    if (statusCode >= 400) throw new Error(`GitHub API ${statusCode}`)
+    const parsed = JSON.parse(data)
+    if (parsed && parsed.tag_name) return parsed
+    throw new Error('No tag_name in GitHub response')
+  } catch (e: any) { errors.push('GitHub: ' + e.message) }
+
+  try {
+    const { statusCode, data } = await netFetch(`${UPDATE_SERVER_URL}/api/latest`, { 'Accept': 'application/json' })
+    if (statusCode >= 400) throw new Error(`Proxy ${statusCode}`)
+    const parsed = JSON.parse(data)
+    if (parsed && parsed.tag_name) return parsed
+    throw new Error('No tag_name in proxy response')
+  } catch (e: any) { errors.push('Proxy: ' + e.message) }
+
+  throw new Error('All update sources failed: ' + errors.join('; '))
 }
 
 async function checkUpdate() {
