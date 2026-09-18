@@ -606,7 +606,7 @@ export class TelegramService {
     let totalSent = 0
     let fileHash = ''
     try { fileHash = await computeFileHash(filePath) } catch {}
-    log('info', `[upload] hash computed for ${fileName}, entering upload loop`)
+    console.log(`[upload] hash computed for ${fileName}, entering upload loop`)
 
     let mainCaptionStr = ''
 
@@ -660,7 +660,7 @@ export class TelegramService {
         const partSizeGB = partSizeBytes / (1024 * 1024 * 1024)
         const SEND_TIMEOUT = Math.max(30 * 60 * 1000, Math.ceil(partSizeGB * 20) * 60 * 1000)
         console.log(`[upload] part ${i + 1}/${totalParts}: ${this.formatFileSize(partSizeBytes)}, timeout=${Math.round(SEND_TIMEOUT / 60000)}min, workers=${workersCount}`)
-        log('info', `[upload] calling sendFile: ${fileName} part ${i + 1}/${totalParts}, ${this.formatFileSize(partSizeBytes)}, workers=${workersCount}`)
+        console.log(`[upload] calling sendFile: ${fileName} part ${i + 1}/${totalParts}, ${this.formatFileSize(partSizeBytes)}, workers=${workersCount}`)
         const sendPromise = this.client!.sendFile(this.channelId as any, {
           file: partPath,
           caption: captionStr,
