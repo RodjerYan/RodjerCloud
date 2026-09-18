@@ -1033,6 +1033,9 @@ export class TelegramService {
   }
 
   getCachedFilesInstant(): any[] {
+    if (this.fileCache.length > 0) return this.fileCache
+    const disk = this.loadFileCache()
+    if (disk.length > 0) this.fileCache = disk
     return this.fileCache
   }
 
