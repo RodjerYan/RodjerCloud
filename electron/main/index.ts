@@ -103,7 +103,13 @@ async function proxyFetch(path: string): Promise<any> {
     const req = https.get(`${UPDATE_SERVER_URL}${path}`, opts, (res) => {
       let data = ''
       res.on('data', (chunk) => data += chunk)
-      res.on('end', () => { clearTimeout(timeout); try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+      res.on('end', () => {
+        clearTimeout(timeout)
+        if (res.statusCode && res.statusCode >= 400) {
+          return reject(new Error(`Proxy ${res.statusCode}`))
+        }
+        try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
+      })
     })
     req.on('error', (err) => { clearTimeout(timeout); reject(err) })
   })
@@ -116,7 +122,13 @@ async function fetchFromGitHub(): Promise<any> {
     const req = https.get('https://api.github.com/repos/RodjerYan/RodjerCloud/releases/latest', opts, (res) => {
       let data = ''
       res.on('data', (chunk) => data += chunk)
-      res.on('end', () => { clearTimeout(timeout); try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+      res.on('end', () => {
+        clearTimeout(timeout)
+        if (res.statusCode && res.statusCode >= 400) {
+          return reject(new Error(`GitHub API ${res.statusCode}`))
+        }
+        try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
+      })
     })
     req.on('error', (err) => { clearTimeout(timeout); reject(err) })
   })
