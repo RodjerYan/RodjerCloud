@@ -61,22 +61,24 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
       if (r.success && r.data) limit = Math.min(5, Math.max(1, r.data))
     } catch {}
 
+    const processingIds = new Set<string>()
     let active = 0
     const runNext = () => {
       while (active < limit) {
-        const it = queueRef.current.find(q => q.status === 'waiting')
+        const it = queueRef.current.find(q => q.status === 'waiting' && !processingIds.has(q.id))
         if (!it) break
         if (it.fileSize > TG_LIMIT) {
           setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'failed', error: 'Exceeds 2GB' } : q))
           continue
         }
+        processingIds.add(it.id)
         active++
         setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'uploading' } : q))
         window.electronAPI.telegram.uploadFile(it.filePath, it.id, it.encrypt).then((res: { success: boolean; error?: string }) => {
           setQueue(prev => prev.map(q => q.id === it.id
             ? { ...q, status: res.success ? 'done' : 'failed', percent: res.success ? 100 : q.percent, error: res.success ? undefined : res.error }
             : q))
-        }).finally(() => { active--; runNext() })
+        }).finally(() => { active--; processingIds.delete(it.id); runNext() })
       }
       if (active === 0) isProcessing.current = false
     }
@@ -92,18 +94,16 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
       pendingUpdates.set(data.id, { percent: data.percent, sent: data.sent, total: data.total });
       const now = Date.now();
 
-      // Only schedule a state update if we haven't done one recently (throttle to 100ms)
-      if (now - lastUpdate > 100) {
+      if (now - lastUpdate > 300) {
         if (!rafId) {
           rafId = window.requestAnimationFrame(() => {
+            const batch = new Map(pendingUpdates);
+            pendingUpdates.clear();
             setQueue(prev => prev.map(q => {
-              const u = pendingUpdates.get(q.id);
-              if (u) {
-                return { ...q, percent: u.percent, sent: u.sent, total: u.total };
-              }
+              const u = batch.get(q.id);
+              if (u) return { ...q, percent: u.percent, sent: u.sent, total: u.total };
               return q;
             }));
-            pendingUpdates.clear();
             lastUpdate = Date.now();
             rafId = null;
           });

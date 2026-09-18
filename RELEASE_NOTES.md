@@ -1,29 +1,15 @@
-## Что нового в v1.0.251
+## Что нового в v1.0.255
 
-- Оптимизация памяти: ленивая загрузка файлов (30 за раз) вместо загрузки всех 14k
-- Листовой чтение кэша через `listFilesFromCache` с пагинацией
-- Глобальный listener для превью вместо 14k IPC подписок
-- Debounce поиска 300ms + лимит 100 результатов
-- Кэширование DOMRect + requestAnimationFrame для selection box
-- Мемоизация `loadFolders` и `folderFilesCache`
-- Очистка temp HTML при закрытии preview
-- Archiver level 9 → 6
-- Лимит uploadedIndex 50k записей
-- `autoCleanTrash` через `localTrashedIds` вместо сканирования всех сообщений
-- `deltaSync` push + Set dedup вместо merged array
+- Исправлен краш при массовой загрузке файлов — дедупликация очереди uploads
+- Увеличен throttle прогресса загрузки до 300ms для снижения нагрузки на UI
+- Обновления теперь проверяются напрямую через GitHub API (без Vercel proxy)
+- Скачивание обновлений напрямую с GitHub Releases (без Vercel proxy)
 
 ---
 
-## What's new in v1.0.251
+## What's new in v1.0.255
 
-- Memory optimization: lazy file loading (30 at a time) instead of loading all 14k files
-- Leaf cache reading via `listFilesFromCache` with pagination
-- Global listener for thumbnails instead of 14k IPC subscriptions
-- Search debounce 300ms + 100 result limit
-- Cached DOMRect + requestAnimationFrame for selection box
-- Memoized `loadFolders` and `folderFilesCache`
-- Temp HTML cleanup on preview window close
-- Archiver compression level 9 → 6
-- uploadedIndex capped at 50k entries
-- `autoCleanTrash` uses `localTrashedIds` instead of scanning all messages
-- `deltaSync` uses push + Set dedup instead of merged array
+- Fixed crash during bulk file upload — deduplicated upload queue
+- Increased upload progress throttle to 300ms to reduce UI load
+- Update checks now use GitHub API directly (no Vercel proxy)
+- Update downloads use GitHub Releases directly (no Vercel proxy)
