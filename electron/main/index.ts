@@ -453,9 +453,17 @@ async function getConcurrency(): Promise<number> {
   return Math.min(3, Math.max(1, isNaN(c) ? 3 : c))
 }
 async function processQueue() {
-  const limit = await getConcurrency()
-  while (activeUploads < limit && uploadQueue.length > 0) {
-    const job = uploadQueue.shift()!
+  const baseLimit = await getConcurrency()
+  while (activeUploads < baseLimit && uploadQueue.length > 0) {
+    const job = uploadQueue[0]
+    let limit = baseLimit
+    try {
+      const st = fs.statSync(job.filePath)
+      if (st.size > 500 * 1024 * 1024) limit = 1
+      else if (st.size > 100 * 1024 * 1024) limit = Math.min(2, baseLimit)
+    } catch {}
+    if (activeUploads >= limit) break
+    uploadQueue.shift()!
     activeUploads++
     runUpload(job).finally(() => { activeUploads--; processQueue() })
   }

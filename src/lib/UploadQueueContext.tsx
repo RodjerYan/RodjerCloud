@@ -71,6 +71,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'failed', error: 'Exceeds 2GB' } : q))
           continue
         }
+        let effectiveLimit = limit
+        if (it.fileSize > 500 * 1024 * 1024) effectiveLimit = 1
+        else if (it.fileSize > 100 * 1024 * 1024) effectiveLimit = Math.min(2, limit)
+        if (active >= effectiveLimit) break
         processingIds.add(it.id)
         active++
         setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'uploading' } : q))
