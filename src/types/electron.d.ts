@@ -117,6 +117,13 @@ declare global {
         scanDuplicates: () => Promise<{ success: boolean; data?: { found: number; groups: number }; error?: string }>
         onScanProgress: (cb: (data: { done: number; total: number; currentFile: string }) => void) => () => void
       }
+      window: {
+        minimize: () => Promise<void>
+        maximize: () => Promise<void>
+        close: () => Promise<void>
+        forceQuit: () => Promise<void>
+        onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => () => void
+      }
     }
   }
 }

@@ -1,3 +1,27 @@
+## Что нового в v1.0.267
+
+- Полная диагностика жизненного цикла окна: close/closed/unresponsive с stack traces
+- Renderer beforeunload handler для логирования попыток закрытия
+- Window-all-closed и before-quit/will-quit логирование с состоянием загрузок
+- Защита от закрытия окна во время активных загрузок (e.preventDefault)
+- Force-quit IPC для принудительного закрытия
+- SIGINT/SIGTERM обработчики
+- App:close-blocked event для renderer
+
+---
+
+## What's new in v1.0.267
+
+- Full window lifecycle diagnostics: close/closed/unresponsive/did-crash with stack traces
+- Renderer beforeunload handler to log close attempts
+- Window-all-closed and before-quit/will-quit logging with upload state
+- Close protection during active uploads (e.preventDefault)
+- Force-quit IPC for forced shutdown
+- SIGINT/SIGTERM handlers
+- App:close-blocked event for renderer
+
+---
+
 ## Что нового в v1.0.266
 
 - React.memo для FileThumb — предотвращает каскадные re-renders при progress updates

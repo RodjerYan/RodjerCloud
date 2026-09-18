@@ -172,6 +172,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
+    forceQuit: () => ipcRenderer.invoke('window:force-quit'),
+    onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('app:close-blocked', listener)
+      return () => ipcRenderer.removeListener('app:close-blocked', listener)
+    },
   },
   bot: {
     getHashDb: () => ipcRenderer.invoke('bot:get-hash-db'),

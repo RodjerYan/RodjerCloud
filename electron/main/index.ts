@@ -40,8 +40,10 @@ process.on('beforeExit', (code: number) => {
   log('warn', `[beforeExit] code=${code} activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}`)
 })
 process.on('exit', (code: number) => {
-  try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] [FATAL] [process.exit] code=${code} activeUploads=${activeUploads}\n`) } catch {}
+  try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] [FATAL] [process.exit] code=${code} activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress} queueLen=${uploadQueue.length}\n`) } catch {}
 })
+process.on('SIGINT', () => { log('warn', '[SIGINT] received') })
+process.on('SIGTERM', () => { log('warn', '[SIGTERM] received') })
 
 const previewSessions = new Map<string, { files: any[]; idx: number; dir: string }>()
 let previewIdSeq = 0
@@ -105,10 +107,33 @@ function createWindow() {
   })
 
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode}`)
+    log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode} activeUploads=${activeUploads}`)
   })
 
-  mainWindow.on('closed', () => { mainWindow = null })
+  mainWindow.webContents.on('unresponsive', () => {
+    log('error', `[unresponsive] renderer became unresponsive! activeUploads=${activeUploads}`)
+  })
+
+  mainWindow.webContents.on('responsive', () => {
+    log('warn', `[responsive] renderer became responsive again`)
+  })
+
+  mainWindow.on('close', (e) => {
+    const stack = new Error().stack || ''
+    log('warn', `[window.close] fired! activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}\nStack: ${stack}`)
+    if (activeUploads > 0 && uploadsInProgress) {
+      log('warn', `[window.close] BLOCKING close — ${activeUploads} uploads still active!`)
+      e.preventDefault()
+      if (mainWindow) {
+        mainWindow.webContents.send('app:close-blocked', { activeUploads })
+      }
+    }
+  })
+
+  mainWindow.on('closed', () => {
+    log('warn', `[window.closed] mainWindow set to null`)
+    mainWindow = null
+  })
 }
 
 const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://updater-proxy-rodjer1.vercel.app'
@@ -265,10 +290,19 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  const stack = new Error().stack || ''
+  log('warn', `[window-all-closed] activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}\nStack: ${stack}`)
   autoSyncService.stop()
   if (process.platform !== 'darwin') app.quit()
 })
-app.on('before-quit', () => { autoSyncService.stop() })
+app.on('before-quit', (e) => {
+  const stack = new Error().stack || ''
+  log('warn', `[before-quit] activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}\nStack: ${stack}`)
+  autoSyncService.stop()
+})
+app.on('will-quit', (e) => {
+  log('warn', `[will-quit] activeUploads=${activeUploads}`)
+})
 
 // --- Window Controls ---
 ipcMain.handle('window:minimize', () => { if (mainWindow) mainWindow.minimize() })
@@ -277,7 +311,16 @@ ipcMain.handle('window:maximize', () => {
   if (mainWindow.isMaximized()) mainWindow.unmaximize()
   else mainWindow.maximize()
 })
-ipcMain.handle('window:close', () => { if (mainWindow) mainWindow.close() })
+ipcMain.handle('window:close', () => {
+  const stack = new Error().stack || ''
+  log('warn', `[window:close IPC] activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}\nStack: ${stack}`)
+  if (mainWindow) mainWindow.close()
+})
+ipcMain.handle('window:force-quit', () => {
+  log('warn', `[window:force-quit] user force-quit while activeUploads=${activeUploads}`)
+  if (mainWindow) mainWindow.destroy()
+  app.quit()
+})
 
 // ===== V2 prefs file helpers =====
 let prefsLock: Promise<void> = Promise.resolve()

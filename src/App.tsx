@@ -101,6 +101,14 @@ function App() {
   const handleDuckDone = useCallback(() => setShowDuckSplash(false), [])
 
   useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      window.electronAPI.app?.log?.('warn', '[renderer beforeunload] window closing!')
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
+
+  useEffect(() => {
     let t: any;
     v3store.init().then(() => {
       t = setTimeout(() => setShowSplash(false), 1400)
@@ -112,6 +120,13 @@ function App() {
       document.documentElement.style.setProperty("--v3-sans-active", p.font || "var(--v3-sans)")
     })
     return () => { if (t) clearTimeout(t) }
+  }, [])
+
+  useEffect(() => {
+    const unsub = window.electronAPI.window?.onCloseBlocked?.((data: { activeUploads: number }) => {
+      window.electronAPI.app?.log?.('warn', `[renderer] close blocked — ${data.activeUploads} uploads still active`)
+    })
+    return () => { unsub?.() }
   }, [])
 
   useEffect(() => {
