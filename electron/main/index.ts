@@ -58,15 +58,24 @@ const botService = new BotService()
 botService.loadToken()
 let initialFolderSyncDone = false
 
+let lastFilesChangedSent = 0
+const FILES_CHANGED_THROTTLE_MS = 5000
+function sendFilesChanged() {
+  const now = Date.now()
+  if (now - lastFilesChangedSent < FILES_CHANGED_THROTTLE_MS) return
+  lastFilesChangedSent = now
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('files:changed') } catch {}
+  }
+}
+
 autoSyncService.setEventCallback((event) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
       mainWindow.webContents.send('autosync:status', event)
     } catch {}
     if (event.type === 'uploaded') {
-      try {
-        mainWindow.webContents.send('files:changed')
-      } catch {}
+      sendFilesChanged()
       appendSyncHistory({ timestamp: Date.now(), fileName: event.file || '', status: event.type, size: 0 }).catch(() => {})
     }
     if (event.type === 'failed') {
@@ -108,6 +117,15 @@ function createWindow() {
 
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode} activeUploads=${activeUploads}`)
+    if (details.reason === 'oom' || details.reason === 'crashed') {
+      log('warn', `[render-process-gone] auto-recovering in 2s...`)
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          log('warn', `[render-process-gone] reloading window`)
+          mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+        }
+      }, 2000)
+    }
   })
 
   mainWindow.webContents.on('unresponsive', () => {
@@ -268,10 +286,8 @@ app.whenReady().then(async () => {
       const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
       const after = telegramService.getCachedFilesInstant().length
-      if (!mainWindow.isDestroyed()) {
-        try { mainWindow.webContents.send('files:changed') } catch {}
-      }
       if (after > before || after > lastFileCount) {
+        sendFilesChanged()
         idleCycles = 0
         syncInterval = 3000
         lastFileCount = after
@@ -716,6 +732,15 @@ ipcMain.handle('telegram:list-files-from-cache', async (_, limit: number, offset
 ipcMain.handle('telegram:get-category-counts', async () => {
   try {
     return { success: true, data: telegramService.getFileCategoryCounts() }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:get-total-size', async () => {
+  try {
+    const cached = telegramService.getCachedFilesInstant()
+    let totalSize = 0
+    for (const f of cached) totalSize += (f as any).fileSize || 0
+    return { success: true, data: { total: cached.length, totalSize } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

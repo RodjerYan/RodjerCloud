@@ -1,3 +1,13 @@
+## Что нового в v1.0.268
+
+- **Критическое исправление:** OOM (нехватка памяти) renderer при загрузке больших MOV файлов
+- DashboardHome больше не загружает все 12550+ файлов — использует пагинированный API
+- Throttle для `files:changed` событий — max раз в 5 секунд вместо каждого цикла синхронизации
+- Auto-recovery renderer после OOM или crash — окно автоматически перезагружается
+- Debounce для обработчиков `files:changed` в DashboardHome и MyFilesPage (3 сек)
+
+---
+
 ## Что нового в v1.0.267
 
 - Полная диагностика жизненного цикла окна: close/closed/unresponsive с stack traces

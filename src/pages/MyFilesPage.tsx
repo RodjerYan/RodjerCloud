@@ -106,6 +106,7 @@ export default function MyFilesPage() {
   const initialSelectedOnDrag = useRef<Set<number>>(new Set())
   const elementRectsRef = useRef<Map<Element, DOMRect>>(new Map())
   const rafRef = useRef<number>(0)
+  const filesChangedDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { selectedRef.current = selected }, [selected])
 
@@ -534,16 +535,19 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     const unsub = window.electronAPI.telegram.onFilesChanged(() => {
-      window.electronAPI.telegram.listFilesFromCache(30, 0).then((r: any) => {
-        if (r.success) {
-          setFiles(processRawFiles(r.data || []))
-          nextOffsetIdRef.current = r.nextOffsetId ?? null
-          totalFilesRef.current = r.total ?? 0
-        }
-      })
-      loadCategoryCounts()
-      loadFolders()
-      setExpandedCatFiles({})
+      if (filesChangedDebounceRef.current) clearTimeout(filesChangedDebounceRef.current)
+      filesChangedDebounceRef.current = setTimeout(() => {
+        window.electronAPI.telegram.listFilesFromCache(30, 0).then((r: any) => {
+          if (r.success) {
+            setFiles(processRawFiles(r.data || []))
+            nextOffsetIdRef.current = r.nextOffsetId ?? null
+            totalFilesRef.current = r.total ?? 0
+          }
+        })
+        loadCategoryCounts()
+        loadFolders()
+        setExpandedCatFiles({})
+      }, 3000)
     })
     return unsub
   }, [loadFolders, loadCategoryCounts])

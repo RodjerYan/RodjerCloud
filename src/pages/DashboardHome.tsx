@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts'
 import { Upload, HardDrive, FileText, TrendingUp } from 'lucide-react'
@@ -26,36 +26,52 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
   const navigate = useNavigate()
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  const [totalStats, setTotalStats] = useState<{ total: number; totalSize: number }>({ total: 0, totalSize: 0 })
 
   useEffect(() => {
     let active = true
     ;(async () => {
-      const cacheRes = await window.electronAPI.telegram.listFilesCached()
+      const [cacheRes, countsRes, sizeRes] = await Promise.all([
+        window.electronAPI.telegram.listFilesFromCache(5, 0),
+        window.electronAPI.telegram.getCategoryCounts(),
+        window.electronAPI.telegram.getTotalSize()
+      ])
       if (!active) return
       setFiles(cacheRes.data || [])
+      if (countsRes.success && countsRes.data) setCategoryCounts(countsRes.data)
+      if (sizeRes.success && sizeRes.data) {
+        setTotalStats(sizeRes.data)
+      }
       setLoading(false)
       window.electronAPI.telegram.syncFilesBg()
     })()
     const unsubChanged = window.electronAPI.telegram.onFilesChanged?.(() => {
       if (!active) return
-      window.electronAPI.telegram.listFilesCached().then((r: any) => {
-        if (r.success) setFiles(r.data || [])
-      })
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        Promise.all([
+          window.electronAPI.telegram.listFilesFromCache(5, 0),
+          window.electronAPI.telegram.getCategoryCounts(),
+          window.electronAPI.telegram.getTotalSize()
+        ]).then(([cacheRes, countsRes, sizeRes]) => {
+          if (!active) return
+          setFiles(cacheRes.data || [])
+          if (countsRes.success && countsRes.data) setCategoryCounts(countsRes.data)
+          if (sizeRes.success && sizeRes.data) setTotalStats(sizeRes.data)
+        })
+      }, 3000)
     })
-    return () => { active = false; unsubChanged?.() }
+    return () => { active = false; unsubChanged?.(); if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [])
 
-  const total = files.length
-  const totalSize = files.reduce((s, f) => s + (f.fileSize || 0), 0)
-  const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600
-  const weekFiles = files.filter(f => (f.originalDate || f.uploadedAt || 0) >= oneWeekAgo).length
+  const total = totalStats.total
+  const totalSize = totalStats.totalSize
   const avgSize = total ? totalSize / total : 0
 
-  const typeMap: Record<string, number> = {}
   const CATS = ['Изображения', 'Видео', 'Аудио', 'Документы', 'Архивы', 'Другое']
-  CATS.forEach(c => typeMap[c] = 0)
-  files.forEach(f => { const t = typeOf(f.fileName || ''); typeMap[t] = (typeMap[t] || 0) + 1 })
-  const chartData = CATS.filter(c => typeMap[c] > 0).map(name => ({ name, value: typeMap[name] }))
+  const chartData = CATS.filter(c => (categoryCounts[c] || 0) > 0).map(name => ({ name, value: categoryCounts[name] || 0 }))
 
   const recent = [...files].sort((a, b) => ((b.originalDate || b.uploadedAt) || 0) - ((a.originalDate || a.uploadedAt) || 0)).slice(0, 5)
 
@@ -72,7 +88,6 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
           <>
             <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Всего файлов</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:40,height:28}}/></div></div></div>
             <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Использовано</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:60,height:28}}/></div></div></div>
-            <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">За неделю</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:30,height:28}}/></div></div></div>
             <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Средний размер</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:55,height:28}}/></div></div></div>
           </>
         ) : (
@@ -84,9 +99,6 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
               <div className="dh-card-body"><div className="dh-card-label">Использовано</div>
                 <div className="dh-card-value">{fmtSize(totalSize)}</div></div></div>
             <div className="dh-card"><div className="dh-card-icon"><TrendingUp size={20} /></div>
-              <div className="dh-card-body"><div className="dh-card-label">За неделю</div>
-                <div className="dh-card-value">{weekFiles}</div></div></div>
-            <div className="dh-card"><div className="dh-card-icon"><BarChart3Icon /></div>
               <div className="dh-card-body"><div className="dh-card-label">Средний размер</div>
                 <div className="dh-card-value">{fmtSize(avgSize)}</div></div></div>
           </>
