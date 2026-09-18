@@ -98,19 +98,42 @@ const UPDATE_SERVER_URL = process.env.VITE_UPDATE_SERVER_URL || 'https://updater
 
 async function proxyFetch(path: string): Promise<any> {
   return new Promise<any>((resolve, reject) => {
+    const timeout = setTimeout(() => { req.destroy(); reject(new Error('Update check timeout')) }, 15000)
     const opts: any = { headers: { 'User-Agent': 'RodjerCloud' } }
-    https.get(`${UPDATE_SERVER_URL}${path}`, opts, (res) => {
+    const req = https.get(`${UPDATE_SERVER_URL}${path}`, opts, (res) => {
       let data = ''
       res.on('data', (chunk) => data += chunk)
-      res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
-    }).on('error', reject)
+      res.on('end', () => { clearTimeout(timeout); try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+    })
+    req.on('error', (err) => { clearTimeout(timeout); reject(err) })
   })
+}
+
+async function fetchFromGitHub(): Promise<any> {
+  return new Promise<any>((resolve, reject) => {
+    const timeout = setTimeout(() => { req.destroy(); reject(new Error('GitHub API timeout')) }, 15000)
+    const opts: any = { headers: { 'User-Agent': 'RodjerCloud', 'Accept': 'application/vnd.github.v3+json' } }
+    const req = https.get('https://api.github.com/repos/RodjerYan/RodjerCloud/releases/latest', opts, (res) => {
+      let data = ''
+      res.on('data', (chunk) => data += chunk)
+      res.on('end', () => { clearTimeout(timeout); try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+    })
+    req.on('error', (err) => { clearTimeout(timeout); reject(err) })
+  })
+}
+
+async function fetchLatestRelease(): Promise<any> {
+  try {
+    return await fetchFromGitHub()
+  } catch {
+    return await proxyFetch('/api/latest')
+  }
 }
 
 async function checkUpdate() {
   try {
     const current = app.getVersion()
-    const res = await proxyFetch(`/api/latest`)
+    const res = await fetchLatestRelease()
     const tag = (res.tag_name || '').replace(/^v/, '')
     log('info', `[update] current=${current} latest=${tag}`)
     if (tag && isNewer(tag, current)) {
@@ -901,7 +924,7 @@ function platformAssetPattern(): (name: string) => boolean {
 ipcMain.handle('app:check-update', async () => {
   try {
     const currentVersion = app.getVersion()
-    const res = await proxyFetch(`/api/latest`)
+    const res = await fetchLatestRelease()
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (!tag) return { success: true, data: { hasUpdate: false } }
     const hasUpdate = isNewer(tag, currentVersion)
