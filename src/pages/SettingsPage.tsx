@@ -95,7 +95,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
     const unsub = window.electronAPI.app.onDownloadProgress((p: { percent: number }) => {
       setDownloadProgress(p.percent)
     })
-    const r = await window.electronAPI.app.downloadUpdate(updateModal.assetId)
+    const r = await window.electronAPI.app.downloadUpdate(updateModal.assetId, updateModal.assetName, updateModal.latestVersion)
     unsub()
     if (r.success && r.data) {
       setDownloadPathState(r.data.filePath)

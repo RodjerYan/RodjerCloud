@@ -994,13 +994,20 @@ function downloadWithNet(event: any, url: string, destPath: string, accept?: str
   })
 }
 
-ipcMain.handle('app:download-update', async (event, assetId: number, _assetName?: string, _latestVersion?: string) => {
+ipcMain.handle('app:download-update', async (event, assetId: number, assetName?: string, latestVersion?: string) => {
   try {
     const tempDir = app.getPath('temp')
     const ext = process.platform === 'darwin' ? '.dmg' : '.exe'
     const fileName = 'update' + ext
     const destPath = path.join(tempDir, fileName)
-    const downloadUrl = `${UPDATE_SERVER_URL}/api/download?id=${assetId}`
+
+    let downloadUrl: string
+    if (assetName && latestVersion) {
+      downloadUrl = `https://github.com/RodjerYan/RodjerCloud/releases/download/v${latestVersion}/${assetName}`
+    } else {
+      downloadUrl = `${UPDATE_SERVER_URL}/api/download?id=${assetId}`
+    }
+
     await downloadWithNet(event, downloadUrl, destPath)
     return { success: true, data: { filePath: destPath, fileName } }
   } catch (error) {
