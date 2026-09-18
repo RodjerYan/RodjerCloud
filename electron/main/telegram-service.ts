@@ -488,11 +488,11 @@ export class TelegramService {
       }
     } catch {}
 
-    let workersCount = 4
+    let workersCount = 2
     if (turboMode) {
-      if (sizeBytes < 10 * 1024 * 1024) workersCount = 8
-      else if (sizeBytes < 100 * 1024 * 1024) workersCount = 16
-      else workersCount = 32
+      if (sizeBytes < 10 * 1024 * 1024) workersCount = 4
+      else if (sizeBytes < 100 * 1024 * 1024) workersCount = 6
+      else workersCount = 8
     } else {
       if (sizeBytes > 100 * 1024 * 1024) workersCount = 4
       else workersCount = 2

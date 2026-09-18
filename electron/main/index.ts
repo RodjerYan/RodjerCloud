@@ -30,6 +30,13 @@ function log(level: string, msg: string) {
 
 let mainWindow: BrowserWindow | null = null
 
+process.on('unhandledRejection', (reason: any) => {
+  log('error', `[unhandledRejection] ${reason?.stack || reason?.message || String(reason)}`)
+})
+process.on('uncaughtException', (err: any) => {
+  log('error', `[uncaughtException] ${err?.stack || err?.message || String(err)}`)
+})
+
 const previewSessions = new Map<string, { files: any[]; idx: number; dir: string }>()
 let previewIdSeq = 0
 function nextPreviewId(): number {
@@ -442,8 +449,8 @@ let activeUploads = 0
 const uploadCancelled = new Set<string>()
 async function getConcurrency(): Promise<number> {
   const p = await readPrefs()
-  const c = parseInt(String(p.uploadConcurrency || 5), 10)
-  return Math.min(5, Math.max(1, isNaN(c) ? 5 : c))
+  const c = parseInt(String(p.uploadConcurrency || 3), 10)
+  return Math.min(3, Math.max(1, isNaN(c) ? 3 : c))
 }
 async function processQueue() {
   const limit = await getConcurrency()
@@ -455,6 +462,7 @@ async function processQueue() {
 }
 async function runUpload(job: UploadJob): Promise<void> {
   try {
+    log('info', `[upload] start: ${job.filePath} (id=${job.id})`)
     let lastSend = 0
     const THROTTLE_MS = 250
     const isCancelled = () => uploadCancelled.has(job.id)
@@ -473,13 +481,16 @@ async function runUpload(job: UploadJob): Promise<void> {
       sendProgress(sent, total)
     }, job.encrypt, job.customFileName, isCancelled)
     if (isCancelled()) {
+      log('info', `[upload] cancelled: ${job.filePath}`)
       job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
       uploadCancelled.delete(job.id)
       return
     }
     sendProgress(result.fileSize, result.fileSize)
+    log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes)`)
     job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
   } catch (error) {
+    log('error', `[upload] FAILED: ${job.filePath} — ${(error as Error)?.message || String(error)}`)
     if (!uploadCancelled.has(job.id)) {
       job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
     } else {

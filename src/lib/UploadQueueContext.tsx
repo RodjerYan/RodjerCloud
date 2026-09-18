@@ -55,10 +55,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   }
 
   const processQueue = async () => {
-    let limit = 5
+    let limit = 3
     try {
       const r = await window.electronAPI.storage.getUploadConcurrency()
-      if (r.success && r.data) limit = Math.min(5, Math.max(1, r.data))
+      if (r.success && r.data) limit = Math.min(3, Math.max(1, r.data))
     } catch {}
 
     const processingIds = new Set<string>()
