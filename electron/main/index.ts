@@ -205,7 +205,7 @@ async function checkUpdate() {
     log('info', `[update] current=${current} latest=${tag}`)
     if (tag && isNewer(tag, current)) {
       const matchFn = platformAssetPattern()
-      const asset = (res.assets || []).find((a: any) => matchFn(a.name))
+      const asset = findAssetForVersion(res.assets || [], tag, matchFn)
       const wins = BrowserWindow.getAllWindows()
       if (wins.length > 0 && !wins[0].isDestroyed()) {
         try {
@@ -1054,6 +1054,14 @@ function platformAssetPattern(): (name: string) => boolean {
   return () => false
 }
 
+function findAssetForVersion(assets: any[], latestVersion: string, matchFn: (name: string) => boolean): any | undefined {
+  // Prefer asset matching the exact version
+  const exactMatch = (assets || []).find((a: any) => matchFn(a.name) && a.name.includes(latestVersion))
+  if (exactMatch) return exactMatch
+  // Fallback to any matching asset (for older releases)
+  return (assets || []).find((a: any) => matchFn(a.name))
+}
+
 ipcMain.handle('app:check-update', async () => {
   try {
     const currentVersion = app.getVersion()
@@ -1061,8 +1069,8 @@ ipcMain.handle('app:check-update', async () => {
     const tag = (res.tag_name || '').replace(/^v/, '')
     if (!tag) return { success: true, data: { hasUpdate: false } }
     const hasUpdate = isNewer(tag, currentVersion)
-    const matchFn = platformAssetPattern()
-    const asset = (res.assets || []).find((a: any) => matchFn(a.name))
+      const matchFn = platformAssetPattern()
+      const asset = findAssetForVersion(res.assets || [], tag, matchFn)
     return {
       success: true,
       data: {
