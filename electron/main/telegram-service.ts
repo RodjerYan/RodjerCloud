@@ -610,70 +610,96 @@ export class TelegramService {
 
     const tempDir = app.getPath('temp')
 
-    for (let i = 0; i < totalParts; i++) {
-      if (checkCancelled?.()) throw new Error('Upload cancelled by user')
-      const partStart = i * CHUNK_SIZE
-      const partEnd = Math.min((i + 1) * CHUNK_SIZE, sizeBytes)
-      const partSizeBytes = partEnd - partStart
-      
-      let partPath = uploadPath
-      if (isMultipart) {
-        partPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${i}`)
-        await extractChunkToDisk(uploadPath, partPath, partStart, partEnd)
-      }
-
-      let partSent = 0
-
-      let captionStr = ''
-      if (i === 0) {
-        // @ts-ignore
-        captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
-        if (encrypt) {
-          captionStr += `\n#vault ${ivHex}`
+    if (isMultipart) {
+      const neededBytes = sizeBytes + CHUNK_SIZE
+      try {
+        const disk = require('child_process').execSync('wmic logicaldisk where "DeviceID=\'' + tempDir.substring(0, 2) + '\'" get FreeSpace /value', { encoding: 'utf8', timeout: 3000 })
+        const freeMatch = disk.match(/FreeSpace=(\d+)/)
+        const freeBytes = freeMatch ? parseInt(freeMatch[1]) : 0
+        if (freeBytes > 0 && freeBytes < neededBytes) {
+          throw new Error(`Not enough disk space: need ${this.formatFileSize(neededBytes)}, have ${this.formatFileSize(freeBytes)} on ${tempDir.substring(0, 2)}`)
         }
-        mainCaptionStr = captionStr
-      } else {
-        captionStr = `#chunk_of ${mainMessageId}`
+        console.log(`[upload] disk check: need ${this.formatFileSize(neededBytes)}, free ${this.formatFileSize(freeBytes)}`)
+      } catch (e: any) {
+        if (e?.message?.includes('Not enough disk space')) throw e
+        console.warn('[upload] disk space check failed (non-fatal):', e.message)
       }
+    }
 
-      const SEND_TIMEOUT = 10 * 60 * 1000
-      const sendPromise = this.client!.sendFile(this.channelId as any, {
-        file: partPath,
-        caption: captionStr,
-        fileName,
-        forceDocument: true,
-        workers: workersCount,
-        thumb: i === 0 ? thumbBuffer : undefined,
-        progressCallback: (progress: any) => {
-          try {
-            const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
-            const sent = val <= 1 ? Math.round(val * partSizeBytes) : Math.min(val, partSizeBytes)
-            if (sent > partSent) {
-              const diff = sent - partSent
-              totalSent += diff
-              partSent = sent
-              onProgress?.(totalSent, sizeBytes)
-            }
-          } catch (err) {
-            console.error('Progress callback error:', err)
+    const multipartChunkPaths: string[] = []
+    try {
+      for (let i = 0; i < totalParts; i++) {
+        if (checkCancelled?.()) throw new Error('Upload cancelled by user')
+        const partStart = i * CHUNK_SIZE
+        const partEnd = Math.min((i + 1) * CHUNK_SIZE, sizeBytes)
+        const partSizeBytes = partEnd - partStart
+        
+        let partPath = uploadPath
+        if (isMultipart) {
+          partPath = path.join(tempDir, `rodjer_chunk_${crypto.randomUUID()}_${i}`)
+          multipartChunkPaths.push(partPath)
+          await extractChunkToDisk(uploadPath, partPath, partStart, partEnd)
+        }
+
+        let partSent = 0
+
+        let captionStr = ''
+        if (i === 0) {
+          // @ts-ignore
+          captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
+          if (encrypt) {
+            captionStr += `\n#vault ${ivHex}`
           }
-        },
-      } as any)
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`sendFile timeout after ${SEND_TIMEOUT / 1000}s for ${fileName} part ${i}`)), SEND_TIMEOUT)
-      )
-      const result = await Promise.race([sendPromise, timeoutPromise])
+          mainCaptionStr = captionStr
+        } else {
+          captionStr = `#chunk_of ${mainMessageId}`
+        }
 
-      if (isMultipart) {
-        try { fs.unlinkSync(partPath) } catch {}
-      }
+        const partSizeGB = partSizeBytes / (1024 * 1024 * 1024)
+        const SEND_TIMEOUT = Math.max(30 * 60 * 1000, Math.ceil(partSizeGB * 20) * 60 * 1000)
+        console.log(`[upload] part ${i + 1}/${totalParts}: ${this.formatFileSize(partSizeBytes)}, timeout=${Math.round(SEND_TIMEOUT / 60000)}min, workers=${workersCount}`)
+        const sendPromise = this.client!.sendFile(this.channelId as any, {
+          file: partPath,
+          caption: captionStr,
+          fileName,
+          forceDocument: true,
+          workers: workersCount,
+          thumb: i === 0 ? thumbBuffer : undefined,
+          progressCallback: (progress: any) => {
+            try {
+              const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
+              const sent = val <= 1 ? Math.round(val * partSizeBytes) : Math.min(val, partSizeBytes)
+              if (sent > partSent) {
+                const diff = sent - partSent
+                totalSent += diff
+                partSent = sent
+                onProgress?.(totalSent, sizeBytes)
+              }
+            } catch (err) {
+              console.error('Progress callback error:', err)
+            }
+          },
+        } as any)
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`sendFile timeout after ${Math.round(SEND_TIMEOUT / 60000)}min for ${fileName} part ${i + 1}/${totalParts}`)), SEND_TIMEOUT)
+        )
+        const result = await Promise.race([sendPromise, timeoutPromise])
 
-      const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
-      if (i === 0) {
-        mainMessageId = msgId
-      } else {
-        multipartIds.push(msgId)
+        if (isMultipart) {
+          try { fs.unlinkSync(partPath) } catch {}
+          multipartChunkPaths.splice(multipartChunkPaths.indexOf(partPath), 1)
+        }
+
+        const msgId = typeof (result as any).id === 'object' ? Number((result as any).id.toString()) : (result as any).id
+        if (i === 0) {
+          mainMessageId = msgId
+        } else {
+          multipartIds.push(msgId)
+        }
       }
+    } catch (err) {
+      for (const p of multipartChunkPaths) { try { fs.unlinkSync(p) } catch {} }
+      throw err
     }
 
     if (isMultipart && multipartIds.length > 0 && mainMessageId !== null) {

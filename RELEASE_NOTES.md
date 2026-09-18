@@ -1,3 +1,21 @@
+## Что нового в v1.0.265
+
+- Адаптивный timeout: min 30мин, +20мин/GB (для 10GB файла timeout ~3.5 часа)
+- Очистка temp-чанков при ошибке/отмене загрузки
+- Проверка свободного места на диске перед multipart загрузкой
+- Логирование размера части и timeout перед каждым sendFile
+
+---
+
+## What's new in v1.0.265
+
+- Adaptive timeout: min 30min, +20min/GB (for 10GB file timeout ~3.5 hours)
+- Temp chunk cleanup on error/cancel
+- Disk space check before multipart upload
+- Log part size and timeout before each sendFile
+
+---
+
 ## Что нового в v1.0.264
 
 - Пауза фоновой синхронизации во время загрузок (устраняет crash при параллельном getMessages + sendFile)
