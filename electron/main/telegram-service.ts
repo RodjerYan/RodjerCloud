@@ -704,37 +704,33 @@ export class TelegramService {
   private async autoCleanTrash() {
     if (!this.client || !this.channelId) return
     try {
-      const messages: any[] = []
-      let offsetId = 0
-      const BATCH = 200
-      while (true) {
-        const batch = await this.client.getMessages(this.channelId as any, {
-          limit: BATCH,
-          ...(offsetId ? { offsetId } : {}),
-        })
-        if (batch.length === 0) break
-        messages.push(...batch)
-        if (batch.length < BATCH) break
-        offsetId = this.msgId(batch[batch.length - 1])
-      }
       const now = Date.now()
-      for (const m of messages) {
-        const caption: string = m.message || ''
-        const escapedMarker = this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const match = caption.match(new RegExp(`${escapedMarker}(\\d+)`))
-        if (!match) continue
-        const trashedAt = parseInt(match[1], 10)
+      const expiredIds: number[] = []
+      for (const [msgId, trashedAt] of this.localTrashedIds) {
         if (now - trashedAt > this.TRASH_DAYS * 24 * 3600 * 1000) {
-          try {
-            let idsToDelete = [this.msgId(m)]
-            const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
-            if (multipartMatch) {
-              idsToDelete.push(...multipartMatch[1].split(',').map(Number))
-            }
-            await this.client.deleteMessages(this.channelId as any, idsToDelete, { revoke: true })
-          } catch {}
+          expiredIds.push(msgId)
         }
       }
+      if (expiredIds.length === 0) return
+      for (let i = 0; i < expiredIds.length; i += 100) {
+        const batch = expiredIds.slice(i, i + 100)
+        try {
+          const messages = await this.client.getMessages(this.channelId as any, { ids: batch })
+          const allIdsToDelete: number[] = []
+          for (const m of (messages || [])) {
+            const caption: string = m.message || ''
+            const ids = [this.msgId(m)]
+            const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+            if (multipartMatch) ids.push(...multipartMatch[1].split(',').map(Number))
+            allIdsToDelete.push(...ids)
+            this.localTrashedIds.delete(this.msgId(m))
+          }
+          if (allIdsToDelete.length > 0) {
+            await this.client.deleteMessages(this.channelId as any, allIdsToDelete, { revoke: true })
+          }
+        } catch {}
+      }
+      this.saveTrashState()
     } catch {}
   }
 
@@ -993,8 +989,8 @@ export class TelegramService {
       if (fs.existsSync(FILE_CACHE_PATH)) {
         const raw = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
         if (Array.isArray(raw)) {
-          this.fileCache = raw
-          this.cacheMeta = { latestMessageId: raw.length > 0 ? Math.max(...raw.map((f: any) => f.messageId || 0)) : 0, lastSyncAt: 0 }
+          const latestId = raw.length > 0 ? raw.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
+          this.cacheMeta = { latestMessageId: latestId, lastSyncAt: 0 }
           return raw
         }
         if (raw && Array.isArray(raw.files)) {
@@ -1009,7 +1005,7 @@ export class TelegramService {
 
   private saveFileCache(files: any[]) {
     try {
-      const latestId = files.length > 0 ? Math.max(...files.map((f: any) => f.messageId || 0)) : 0
+      const latestId = files.length > 0 ? files.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
       this.cacheMeta = { latestMessageId: latestId, lastSyncAt: Date.now() }
       const data = { files, latestMessageId: latestId, lastSyncAt: Date.now() }
       fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(data), 'utf-8')
@@ -1037,15 +1033,11 @@ export class TelegramService {
   }
 
   getCachedFilesInstant(): any[] {
-    if (this.fileCache.length > 0) return this.fileCache
-    const disk = this.loadFileCache()
-    if (disk.length > 0) this.fileCache = disk
-    return disk
+    return this.fileCache
   }
 
   async listFilesCached(): Promise<any[]> {
-    const instant = this.getCachedFilesInstant()
-    if (instant.length > 0) return instant
+    if (this.fileCache.length > 0) return this.fileCache
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
         this.saveFileCache(files)
@@ -1054,6 +1046,44 @@ export class TelegramService {
       }).finally(() => { this.listFilesPromise = null })
     }
     return this.listFilesPromise
+  }
+
+  async listFilesFromCache(limit: number, offsetId: number = 0): Promise<{ files: any[]; nextOffsetId: number | null; total: number }> {
+    if (this.fileCache.length > 0) {
+      const filtered = offsetId > 0
+        ? this.fileCache.filter((f: any) => f.messageId < offsetId)
+        : this.fileCache
+      const page = filtered.slice(0, limit)
+      const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
+      return { files: page, nextOffsetId, total: this.fileCache.length }
+    }
+    try {
+      if (fs.existsSync(FILE_CACHE_PATH)) {
+        const raw = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
+        const allFiles = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.files) ? raw.files : [])
+        if (allFiles.length > 0) {
+          const latestId = allFiles.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0)
+          this.cacheMeta = { latestMessageId: latestId, lastSyncAt: 0 }
+          const filtered = offsetId > 0
+            ? allFiles.filter((f: any) => f.messageId < offsetId)
+            : allFiles
+          const page = filtered.slice(0, limit)
+          const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
+          return { files: page, nextOffsetId, total: allFiles.length }
+        }
+      }
+    } catch {}
+    if (!this.listFilesPromise) {
+      this.listFilesPromise = this.listFiles().then(files => {
+        this.saveFileCache(files)
+        this.fileCache = files
+        return files
+      }).finally(() => { this.listFilesPromise = null })
+    }
+    const allFiles = await this.listFilesPromise
+    const page = allFiles.slice(0, limit)
+    const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
+    return { files: page, nextOffsetId, total: allFiles.length }
   }
 
   async forceRescanFiles(): Promise<any[]> {
@@ -1069,7 +1099,7 @@ export class TelegramService {
     if (!this.client || !this.channelId) return
     let fromId = this.cacheMeta.latestMessageId
     if (fromId === 0 && this.fileCache.length > 0) {
-      fromId = Math.max(...this.fileCache.map((f: any) => f.messageId || 0))
+      fromId = this.fileCache.reduce((max, f: any) => Math.max(max, f.messageId || 0), 0)
       this.cacheMeta.latestMessageId = fromId
     }
     if (fromId === 0) return
@@ -1109,11 +1139,13 @@ export class TelegramService {
     }
 
     if (newFiles.length > 0) {
-      const merged = [...newFiles, ...this.fileCache]
-      const seen = new Set<number>()
-      const deduped = merged.filter((f: any) => { if (seen.has(f.messageId)) return false; seen.add(f.messageId); return true })
-      this.fileCache = deduped
-      this.saveFileCache(deduped)
+      const existingIds = new Set(this.fileCache.map((f: any) => f.messageId))
+      for (const f of newFiles) {
+        if (!existingIds.has(f.messageId)) {
+          this.fileCache.push(f)
+        }
+      }
+      this.saveFileCache(this.fileCache)
     }
   }
 

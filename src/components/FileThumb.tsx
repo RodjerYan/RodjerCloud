@@ -29,6 +29,29 @@ function unobserve(el: Element) {
   observerCallbacks.delete(el);
 }
 
+const thumbUrlCache = new Map<number, string>()
+const thumbPendingCallbacks = new Map<number, Set<(url: string) => void>>()
+let globalThumbListenerAttached = false
+
+function ensureGlobalThumbListener() {
+  if (globalThumbListenerAttached) return
+  globalThumbListenerAttached = true
+  window.electronAPI.telegram.onThumbnailReady?.((data: { messageId: number; path: string }) => {
+    const cached = thumbUrlCache.get(data.messageId)
+    if (cached) return
+    window.electronAPI.file.getLocalUrl(data.path).then((d: any) => {
+      if (d.success && d.data) {
+        thumbUrlCache.set(data.messageId, d.data)
+        const cbs = thumbPendingCallbacks.get(data.messageId)
+        if (cbs) {
+          cbs.forEach(cb => cb(d.data))
+          thumbPendingCallbacks.delete(data.messageId)
+        }
+      }
+    })
+  })
+}
+
 interface FileThumbProps {
   messageId: number
   fileName: string
@@ -53,23 +76,39 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
 
   useEffect(() => {
     if (!isVisible) return
-
+    const cached = thumbUrlCache.get(messageId)
+    if (cached) {
+      setUrl(cached)
+      return
+    }
     let active = true
     loadThumb(messageId, fileName, (res) => {
-      if (active && res) setUrl(res)
+      if (active && res) {
+        thumbUrlCache.set(messageId, res)
+        setUrl(res)
+      }
     })
     return () => { active = false }
   }, [messageId, fileName, isVisible])
 
   useEffect(() => {
-    if (!window.electronAPI.telegram.onThumbnailReady) return
-    const unsub = window.electronAPI.telegram.onThumbnailReady(async (data: { messageId: number; path: string }) => {
-      if (data.messageId === messageId) {
-        const d = await window.electronAPI.file.getLocalUrl(data.path)
-        if (d.success) setUrl(d.data)
+    ensureGlobalThumbListener()
+    if (thumbUrlCache.has(messageId)) {
+      setUrl(thumbUrlCache.get(messageId)!)
+      return
+    }
+    if (!thumbPendingCallbacks.has(messageId)) {
+      thumbPendingCallbacks.set(messageId, new Set())
+    }
+    const cb = (resolvedUrl: string) => setUrl(resolvedUrl)
+    thumbPendingCallbacks.get(messageId)!.add(cb)
+    return () => {
+      const set = thumbPendingCallbacks.get(messageId)
+      if (set) {
+        set.delete(cb)
+        if (set.size === 0) thumbPendingCallbacks.delete(messageId)
       }
-    })
-    return () => unsub()
+    }
   }, [messageId])
 
   return (
@@ -87,4 +126,3 @@ export const FileThumb: React.FC<FileThumbProps> = ({ messageId, fileName, isVid
     </div>
   )
 }
-

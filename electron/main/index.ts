@@ -531,7 +531,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     try { event.sender.send('archive-progress', { percent: 0, phase: 'compressing' }) } catch {}
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(archivePath)
-      const archive = new ZipArchive({ zlib: { level: 9 } })
+      const archive = new ZipArchive({ zlib: { level: 6 } })
       let archiveCount = 0
 
       output.on('close', () => resolve())
@@ -583,6 +583,13 @@ ipcMain.handle('telegram:list-files-cached', async () => {
   try {
     const cached = telegramService.getCachedFilesInstant()
     return { success: true, data: cached }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:list-files-from-cache', async (_, limit: number, offsetId: number) => {
+  try {
+    const result = await telegramService.listFilesFromCache(limit || 30, offsetId || 0)
+    return { success: true, data: result.files, nextOffsetId: result.nextOffsetId, total: result.total }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -1387,6 +1394,9 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
 
     previewSessions.set(winId.toString(), { files, idx, dir: downloadDir })
 
+    const tmpDir = app.getPath('temp')
+    const tmpFile = path.join(tmpDir, `preview-${winId}.html`)
+
     const pw = new BrowserWindow({
       width: Math.min(1200, screen.getPrimaryDisplay().workAreaSize.width - 100),
       height: Math.min(800, screen.getPrimaryDisplay().workAreaSize.height - 100),
@@ -1401,7 +1411,11 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
       }
     })
     previewWindows.set(winId, pw)
-    pw.on('closed', () => { previewWindows.delete(winId); previewSessions.delete(winId.toString()) })
+    pw.on('closed', () => {
+      previewWindows.delete(winId)
+      previewSessions.delete(winId.toString())
+      try { fs.unlinkSync(tmpFile) } catch {}
+    })
 
     const html = `<!DOCTYPE html>
 <html>
@@ -1529,8 +1543,6 @@ document.addEventListener('mousemove', function() {
 })
 </script></body></html>`
 
-    const tmpDir = app.getPath('temp')
-    const tmpFile = path.join(tmpDir, `preview-${winId}.html`)
     fs.writeFileSync(tmpFile, html, 'utf-8')
     pw.loadFile(tmpFile)
     pw.show()

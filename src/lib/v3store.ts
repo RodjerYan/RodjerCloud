@@ -56,19 +56,43 @@ function set<T>(k: string, v: T) {
 }
 
 function stateJson(): string {
-  return JSON.stringify({
-    trash: get(K.trash, []), favs: get(K.favs, []), shared: get(K.shared, []),
-    activity: get(K.activity, []), tags: get(K.tags, []), fileTags: get(K.fileTags, []),
-    notes: get(K.notes, []), albums: get(K.albums, []), meta: get(K.meta, []),
-    prefs: get(K.prefs, {}), smart: get(K.smart, []), recent: get(K.recent, []),
-  })
+  const data: Record<string, any> = {}
+  const trash = get(K.trash, [])
+  const favs = get(K.favs, [])
+  const shared = get(K.shared, [])
+  const activity = get(K.activity, [])
+  const tags = get(K.tags, [])
+  const fileTags = get(K.fileTags, [])
+  const notes = get(K.notes, [])
+  const albums = get(K.albums, [])
+  const meta = get(K.meta, [])
+  const prefs = get(K.prefs, {})
+  const smart = get(K.smart, [])
+  const recent = get(K.recent, [])
+  if (trash.length) data.trash = trash
+  if (favs.length) data.favs = favs
+  if (shared.length) data.shared = shared
+  if (activity.length) data.activity = activity
+  if (tags.length) data.tags = tags
+  if (fileTags.length) data.fileTags = fileTags
+  if (notes.length) data.notes = notes
+  if (albums.length) data.albums = albums
+  if (meta.length) data.meta = meta
+  if (Object.keys(prefs).length) data.prefs = prefs
+  if (smart.length) data.smart = smart
+  if (recent.length) data.recent = recent
+  return JSON.stringify(data)
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null
+let syncDirty = false
 function scheduleSync() {
-  if (syncTimer) clearTimeout(syncTimer)
+  syncDirty = true
+  if (syncTimer) return
   syncTimer = setTimeout(() => {
     syncTimer = null
+    if (!syncDirty) return
+    syncDirty = false
     window.electronAPI?.state?.sync(stateJson()).catch(() => {})
   }, 2000)
 }

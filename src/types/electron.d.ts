@@ -14,6 +14,7 @@ declare global {
         onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => () => void
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
         downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
         onThumbnailReady: (cb: (data: { messageId: number; path: string }) => void) => () => void
@@ -99,6 +100,8 @@ declare global {
       }
       file: {
         computeHash: (messageId: number) => Promise<{ success: boolean; data?: string; error?: string }>
+        readDataUrl: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
+        getLocalUrl: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
       }
       vault: {
         hasPassword: () => Promise<boolean>

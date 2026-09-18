@@ -1,23 +1,33 @@
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useState, useRef } from "react"
 import { Search } from "lucide-react"
 import { v3store, fmtBytes } from "../lib/v3store"
 
 export default function SearchPage() {
   const [q, setQ] = useState("")
+  const [debouncedQ, setDebouncedQ] = useState("")
   const [files, setFiles] = useState<any[]>([])
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+
   useEffect(() => {
     window.electronAPI?.telegram?.listFiles?.().then((r: any) => { if (r?.success) setFiles(r.data || []) })
   }, [])
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedQ(q), 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [q])
+
   const results = useMemo(() => {
-    if (!q.trim()) return []
-    const ql = q.toLowerCase()
+    if (!debouncedQ.trim()) return []
+    const ql = debouncedQ.toLowerCase()
     return files.filter((f: any) => {
       const name = (f.fileName || "").toLowerCase()
       const tags = v3store.tagsForFile(f.messageId).join(" ").toLowerCase()
       const note = v3store.noteFor(f.messageId)?.markdown.toLowerCase() || ""
       return name.includes(ql) || tags.includes(ql) || note.includes(ql)
-    })
-  }, [q, files])
+    }).slice(0, 100)
+  }, [debouncedQ, files])
   return (
     <div className="v3-page" data-testid="search-page">
       <h1 className="v3-h1">Поиск</h1>

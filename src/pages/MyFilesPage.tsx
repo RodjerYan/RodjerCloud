@@ -60,9 +60,12 @@ export default function MyFilesPage() {
   const [favs, setFavs] = useState<any[]>([])
 
   const [files, setFiles] = useState<any[]>([])
-  const [visibleCount, setVisibleCount] = useState(20)
+  const [visibleCount, setVisibleCount] = useState(30)
   const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const nextOffsetIdRef = useRef<number | null>(null)
+  const totalFilesRef = useRef<number>(0)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
@@ -97,6 +100,8 @@ export default function MyFilesPage() {
   const selectionStart = useRef<{ x: number, y: number, scrollY: number } | null>(null)
   const selectedRef = useRef(selected)
   const initialSelectedOnDrag = useRef<Set<number>>(new Set())
+  const elementRectsRef = useRef<Map<Element, DOMRect>>(new Map())
+  const rafRef = useRef<number>(0)
 
   useEffect(() => { selectedRef.current = selected }, [selected])
 
@@ -104,45 +109,53 @@ export default function MyFilesPage() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isSelecting.current || !selectionStart.current) return
       
-      const container = document.querySelector('.v2-main')
-      const currentScroll = container ? container.scrollTop : 0
-      const scrollDiff = currentScroll - selectionStart.current.scrollY
-      const adjustedStartY = selectionStart.current.y - scrollDiff
-      
-      const newBox = {
-        startX: selectionStart.current.x,
-        startY: adjustedStartY,
-        endX: e.clientX,
-        endY: e.clientY
-      }
-      setSelectionBox(newBox)
-      
-      const left = Math.min(newBox.startX, newBox.endX)
-      const right = Math.max(newBox.startX, newBox.endX)
-      const top = Math.min(newBox.startY, newBox.endY)
-      const bottom = Math.max(newBox.startY, newBox.endY)
-      
-      const elements = document.querySelectorAll('[data-mid]')
-      const nextSelected = new Set(initialSelectedOnDrag.current)
-      
-      elements.forEach(el => {
-        const section = el.closest('.mf-section-body')
-        if (section && !section.classList.contains('open')) return
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        const container = document.querySelector('.v2-main')
+        const currentScroll = container ? container.scrollTop : 0
+        const scrollDiff = currentScroll - selectionStart.current!.scrollY
+        const adjustedStartY = selectionStart.current!.y - scrollDiff
         
-        const rect = el.getBoundingClientRect()
-        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
-          const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
-          if (mid) nextSelected.add(mid)
+        const newBox = {
+          startX: selectionStart.current!.x,
+          startY: adjustedStartY,
+          endX: e.clientX,
+          endY: e.clientY
         }
+        setSelectionBox(newBox)
+        
+        const left = Math.min(newBox.startX, newBox.endX)
+        const right = Math.max(newBox.startX, newBox.endX)
+        const top = Math.min(newBox.startY, newBox.endY)
+        const bottom = Math.max(newBox.startY, newBox.endY)
+        
+        if (elementRectsRef.current.size === 0) {
+          const elements = document.querySelectorAll('[data-mid]')
+          elements.forEach(el => {
+            const section = el.closest('.mf-section-body')
+            if (section && !section.classList.contains('open')) return
+            elementRectsRef.current.set(el, el.getBoundingClientRect())
+          })
+        }
+        
+        const nextSelected = new Set(initialSelectedOnDrag.current)
+        elementRectsRef.current.forEach((rect, el) => {
+          if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+            const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
+            if (mid) nextSelected.add(mid)
+          }
+        })
+        
+        setSelected(nextSelected)
       })
-      
-      setSelected(nextSelected)
     }
     const handleMouseUp = () => {
       if (isSelecting.current) {
         isSelecting.current = false
         selectionStart.current = null
         setSelectionBox(null)
+        elementRectsRef.current.clear()
+        cancelAnimationFrame(rafRef.current)
       }
     }
     
@@ -151,6 +164,8 @@ export default function MyFilesPage() {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
+      cancelAnimationFrame(rafRef.current)
+      elementRectsRef.current.clear()
     }
   }, [])
 
@@ -192,15 +207,15 @@ export default function MyFilesPage() {
 
 
   useEffect(() => {
-    setVisibleCount(20)
+    setVisibleCount(30)
   }, [folderDrill, search, sort])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
-  const loadFolders = async () => {
+  const loadFolders = useCallback(async () => {
     const r = await window.electronAPI.folders.list()
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
-  }
+  }, [])
 
   const loadFoldersFromCloud = async () => {
     const r = await window.electronAPI.folders.loadFromTelegram()
@@ -342,8 +357,12 @@ export default function MyFilesPage() {
     if (!silent) setLoading(true)
     setLoadError(null)
     try {
-      const r = await window.electronAPI.telegram.listFilesCached()
-      if (r.success) setFiles(processRawFiles(r.data || []))
+      const r = await window.electronAPI.telegram.listFilesFromCache(30, 0)
+      if (r.success) {
+        setFiles(processRawFiles(r.data || []))
+        nextOffsetIdRef.current = r.nextOffsetId ?? null
+        totalFilesRef.current = r.total ?? 0
+      }
       if (!silent) setLoading(false)
       window.electronAPI.telegram.syncFilesBg()
     } catch (e: any) {
@@ -351,6 +370,25 @@ export default function MyFilesPage() {
       if (!silent) setLoading(false)
     }
   }
+
+  const loadingMoreRef = useRef(false)
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || nextOffsetIdRef.current === null) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const r = await window.electronAPI.telegram.listFilesFromCache(30, nextOffsetIdRef.current)
+      if (r.success && r.data?.length) {
+        const newFiles = processRawFiles(r.data)
+        setFiles(prev => [...prev, ...newFiles])
+        nextOffsetIdRef.current = r.nextOffsetId ?? null
+      } else {
+        nextOffsetIdRef.current = null
+      }
+    } catch {}
+    loadingMoreRef.current = false
+    setLoadingMore(false)
+  }, [])
 
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
@@ -460,8 +498,12 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     const unsub = window.electronAPI.telegram.onFilesChanged(() => {
-      window.electronAPI.telegram.listFilesCached().then((r: any) => {
-        if (r.success) setFiles(processRawFiles(r.data || []))
+      window.electronAPI.telegram.listFilesFromCache(30, 0).then((r: any) => {
+        if (r.success) {
+          setFiles(processRawFiles(r.data || []))
+          nextOffsetIdRef.current = r.nextOffsetId ?? null
+          totalFilesRef.current = r.total ?? 0
+        }
       })
       loadFolders()
     })
@@ -489,13 +531,17 @@ export default function MyFilesPage() {
     const container = document.querySelector('.v2-main')
     if (!container) return
     const handleScroll = () => {
-      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 200) {
-        setVisibleCount(prev => Math.min(prev + 20, filtered.length))
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 300) {
+        if (filtered.length > 0 && visibleCount >= filtered.length && nextOffsetIdRef.current !== null) {
+          loadMore()
+        } else if (filtered.length > 0) {
+          setVisibleCount(prev => Math.min(prev + 30, filtered.length))
+        }
       }
     }
     container.addEventListener('scroll', handleScroll, { passive: true })
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [filtered.length])
+  }, [filtered.length, visibleCount, loadMore])
 
   const currentLevelFolders = useMemo(() => folders.filter(f => (f.parentId || null) === (folderDrill || null)), [folders, folderDrill])
   const currentFiles = useMemo(() => {
@@ -898,11 +944,23 @@ export default function MyFilesPage() {
     return directFiles + childFolders.reduce((sum, cf) => sum + countFilesRecursive(cf.id), 0)
   }, [files, fileFolders, folders])
 
-  const getFolderFilesRecursive = useCallback((folderId: string): any[] => {
-    const direct = files.filter((f: any) => fileFolders[f.messageId] === folderId)
-    const childFolders = folders.filter(f => f.parentId === folderId)
-    return [...direct, ...childFolders.flatMap(cf => getFolderFilesRecursive(cf.id))]
+  const folderFilesCache = useMemo(() => {
+    const cache = new Map<string, any[]>()
+    const build = (folderId: string): any[] => {
+      if (cache.has(folderId)) return cache.get(folderId)!
+      const direct = files.filter((f: any) => fileFolders[f.messageId] === folderId)
+      const childFolders = folders.filter(f => f.parentId === folderId)
+      const result = [...direct, ...childFolders.flatMap(cf => build(cf.id))]
+      cache.set(folderId, result)
+      return result
+    }
+    for (const f of folders) build(f.id)
+    return cache
   }, [files, fileFolders, folders])
+
+  const getFolderFilesRecursive = useCallback((folderId: string): any[] => {
+    return folderFilesCache.get(folderId) || files.filter((f: any) => fileFolders[f.messageId] === folderId)
+  }, [folderFilesCache, files, fileFolders])
 
   return (
     <div className={"mf-root mf-hide-checks" + (isDragOver ? " drag-over" : "")}
@@ -1216,6 +1274,11 @@ export default function MyFilesPage() {
                   <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,200,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🐤</div>
                 )}
                 <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Нет файлов</span>
+              </div>
+            )}
+            {loadingMore && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
+                <div style={{ width: 24, height: 24, border: '2px solid rgba(124,131,255,0.2)', borderTopColor: '#7c83ff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
               </div>
             )}
           </div>

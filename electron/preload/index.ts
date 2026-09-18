@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
     listFilesCached: () => ipcRenderer.invoke('telegram:list-files-cached'),
+    listFilesFromCache: (limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-files-from-cache', limit, offsetId),
     listFilesPaginated: (limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-files-paginated', limit, offsetId),
     syncFilesBg: () => ipcRenderer.invoke('telegram:sync-files-bg'),
     onSyncProgress: (cb: (data: { fileCount: number; scannedMessages: number }) => void) => {

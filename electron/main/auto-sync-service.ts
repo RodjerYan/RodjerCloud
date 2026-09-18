@@ -33,6 +33,7 @@ export class AutoSyncService {
   private onEvent: ((e: SyncEvent) => void) | null = null
   private uploadedIndex: Set<string> = new Set()
   private trackerDirty = false
+  private static MAX_UPLOADED_INDEX = 50000
 
   constructor(tg: TelegramService) { this.tg = tg; this.setDefaults() }
 
@@ -68,6 +69,10 @@ export class AutoSyncService {
 
   private markUploaded(fp: string) {
     this.uploadedIndex.add(this.fileKey(fp))
+    if (this.uploadedIndex.size > AutoSyncService.MAX_UPLOADED_INDEX) {
+      const arr = Array.from(this.uploadedIndex)
+      this.uploadedIndex = new Set(arr.slice(arr.length - AutoSyncService.MAX_UPLOADED_INDEX))
+    }
     this.trackerDirty = true
     this.saveTracker()
   }
