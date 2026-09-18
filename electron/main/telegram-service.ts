@@ -1051,6 +1051,18 @@ export class TelegramService {
     return this.listFilesPromise
   }
 
+  private matchCategory(fileName: string, category: string): boolean {
+    const ext = (fileName.split('.').pop() || '').toLowerCase()
+    switch (category) {
+      case 'Изображения': return ['jpg','jpeg','png','gif','webp','heic','heif','bmp','svg','avif'].includes(ext)
+      case 'Видео': return ['mp4','mov','avi','mkv','webm','flv'].includes(ext)
+      case 'Аудио': return ['mp3','wav','ogg','flac','m4a','aac'].includes(ext)
+      case 'Документы': return ['pdf','doc','docx','xls','xlsx','ppt','pptx','txt','rtf','csv','djvu','epub','fb2'].includes(ext)
+      case 'Архивы': return ['zip','rar','7z','tar','gz'].includes(ext)
+      default: return !['Изображения','Видео','Аудио','Документы','Архивы'].includes(category)
+    }
+  }
+
   getFileCategoryCounts(): Record<string, number> {
     const all = this.getCachedFilesInstant()
     const counts: Record<string, number> = { Изображения: 0, Видео: 0, Аудио: 0, Документы: 0, Архивы: 0, Другое: 0 }
@@ -1064,6 +1076,12 @@ export class TelegramService {
       else counts['Другое']++
     }
     return counts
+  }
+
+  getFilesByCategory(category: string): any[] {
+    const all = this.getCachedFilesInstant()
+    if (category === 'Недавние') return all
+    return all.filter(f => this.matchCategory(f.fileName || '', category))
   }
 
   async listFilesFromCache(limit: number, offsetId: number = 0): Promise<{ files: any[]; nextOffsetId: number | null; total: number }> {

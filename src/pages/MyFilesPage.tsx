@@ -76,6 +76,9 @@ export default function MyFilesPage() {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
   const [drillDown, setDrillDown] = useState<string | null>(null)
+  const [drillFiles, setDrillFiles] = useState<any[]>([])
+  const [drillLoading, setDrillLoading] = useState(false)
+  const [expandedCatFiles, setExpandedCatFiles] = useState<Record<string, any[]>>({})
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [folders, setFolders] = useState<any[]>([])
@@ -508,6 +511,28 @@ export default function MyFilesPage() {
   useEffect(() => { load(); loadFolders() }, [])
 
   useEffect(() => {
+    if (!drillDown) { setDrillFiles([]); setDrillLoading(false); return }
+    if (drillDown === 'Недавние') return
+    setDrillLoading(true)
+    window.electronAPI.telegram.getFilesByCategory(drillDown).then((r: any) => {
+      setDrillFiles(processRawFiles(r.data || []))
+      setDrillLoading(false)
+    }).catch(() => setDrillLoading(false))
+  }, [drillDown])
+
+  const loadExpandedCatFiles = useCallback(async (cat: string) => {
+    const r = await window.electronAPI.telegram.getFilesByCategory(cat)
+    if (r.success) setExpandedCatFiles(prev => ({ ...prev, [cat]: processRawFiles(r.data || []) }))
+  }, [])
+
+  useEffect(() => {
+    const CATS_TO_LOAD = ['Документы', 'Архивы', 'Другое']
+    for (const cat of CATS_TO_LOAD) {
+      if (expanded.has(cat) && !expandedCatFiles[cat]) loadExpandedCatFiles(cat)
+    }
+  }, [expanded])
+
+  useEffect(() => {
     const unsub = window.electronAPI.telegram.onFilesChanged(() => {
       window.electronAPI.telegram.listFilesFromCache(30, 0).then((r: any) => {
         if (r.success) {
@@ -518,6 +543,7 @@ export default function MyFilesPage() {
       })
       loadCategoryCounts()
       loadFolders()
+      setExpandedCatFiles({})
     })
     return unsub
   }, [loadFolders, loadCategoryCounts])
@@ -581,19 +607,24 @@ export default function MyFilesPage() {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
     map['Недавние'] = recentFiles
+    const drillable = new Set(['Изображения', 'Видео', 'Аудио'])
     filtered.forEach(f => {
-      map[typeOf(f.fileName)]?.push(f)
+      const cat = typeOf(f.fileName)
+      if (drillable.has(cat)) map[cat]?.push(f)
     })
+    for (const [cat, files] of Object.entries(expandedCatFiles)) {
+      if (!drillable.has(cat) && files.length) map[cat] = files
+    }
     return map
-  }, [filtered, recentFiles, now, fileFolders])
+  }, [filtered, recentFiles, now, fileFolders, expandedCatFiles])
 
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
     if (drillDown === 'Недавние') {
       return recentFiles
     }
-    return filtered.filter(f => typeOf(f.fileName) === drillDown)
-  }, [drillDown, filtered, recentFiles, now, fileFolders])
+    return drillFiles
+  }, [drillDown, drillFiles, recentFiles, now])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
@@ -1225,7 +1256,11 @@ export default function MyFilesPage() {
                   ))}
                 </tbody>
               </table>
-              {galleryFiles.length === 0 && (
+              {drillLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                  <div className="v3-spinner" />
+                </div>
+              ) : galleryFiles.length === 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
                   {duckAnim ? (
                     <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />
@@ -1278,7 +1313,12 @@ export default function MyFilesPage() {
                 ) : null}
               </div>
             )}
-            {galleryFiles.length === 0 && drillDown !== 'Аудио' && (
+            {drillLoading && galleryFiles.length === 0 && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="v3-spinner" />
+              </div>
+            )}
+            {!drillLoading && galleryFiles.length === 0 && drillDown !== 'Аудио' && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 8 }}>
                 {duckAnim ? (
                   <Player autoplay loop src={duckAnim} style={{ width: 80, height: 80 }} />

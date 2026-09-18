@@ -629,6 +629,12 @@ ipcMain.handle('telegram:get-category-counts', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:get-files-by-category', async (_, category: string) => {
+  try {
+    return { success: true, data: telegramService.getFilesByCategory(category) }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:list-files', async () => {
   try {
     const files = await telegramService.listFilesCached()

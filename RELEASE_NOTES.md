@@ -1,15 +1,15 @@
-## Что нового в v1.0.255
+## Что нового в v1.0.259
 
-- Исправлен краш при массовой загрузке файлов — дедупликация очереди uploads
-- Увеличен throttle прогресса загрузки до 300ms для снижения нагрузки на UI
-- Обновления теперь проверяются напрямую через GitHub API (без Vercel proxy)
-- Скачивание обновлений напрямую с GitHub Releases (без Vercel proxy)
+- Исправлено отображение файлов в виртуальных папках (Видео, Аудио, Изображения) — теперь загружаются все файлы категории из полного кэша, а не только из 30 загруженных
+- Добавлен IPC getFilesByCategory для загрузки файлов по типу из полного кэша
+- Исправлено отображение в раскрывающихся категориях (Документы, Архивы, Другое) — загрузка при раскрытии из полного кэша
+- Добавлен индикатор загрузки при переходе в виртуальную папку
 
 ---
 
-## What's new in v1.0.255
+## What's new in v1.0.259
 
-- Fixed crash during bulk file upload — deduplicated upload queue
-- Increased upload progress throttle to 300ms to reduce UI load
-- Update checks now use GitHub API directly (no Vercel proxy)
-- Update downloads use GitHub Releases directly (no Vercel proxy)
+- Fixed file display in virtual folders (Video, Audio, Images) — now loads all files from full cache, not just 30 loaded files
+- Added getFilesByCategory IPC for loading files by type from full cache
+- Fixed display in expandable categories (Documents, Archives, Other) — loads from full cache on expand
+- Added loading indicator when entering virtual folders

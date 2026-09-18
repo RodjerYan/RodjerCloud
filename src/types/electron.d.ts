@@ -16,6 +16,7 @@ declare global {
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
         getCategoryCounts: () => Promise<{ success: boolean; data?: Record<string, number>; error?: string }>
+        getFilesByCategory: (category: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
         downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
         onThumbnailReady: (cb: (data: { messageId: number; path: string }) => void) => () => void
