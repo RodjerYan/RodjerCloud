@@ -55,6 +55,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('files:changed', listener)
       return () => ipcRenderer.removeListener('files:changed', listener)
     },
+    getUploadState: () => ipcRenderer.invoke('telegram:get-upload-state'),
+    onQueueState: (cb: (data: any) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('telegram:queue-state', listener)
+      return () => ipcRenderer.removeListener('telegram:queue-state', listener)
+    },
     logout: () => ipcRenderer.invoke('telegram:logout'),
     getUserInfo: () => ipcRenderer.invoke('telegram:get-user-info'),
 

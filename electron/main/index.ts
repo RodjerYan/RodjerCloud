@@ -16,8 +16,9 @@ import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
-app.commandLine.appendSwitch('enable-precise-memory-info')
 app.commandLine.appendSwitch('disable-gpu-compositing')
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -120,6 +121,7 @@ function createWindow() {
     log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode} activeUploads=${activeUploads}`)
     if (details.reason === 'oom' || details.reason === 'crashed') {
       log('warn', `[render-process-gone] auto-recovering in 2s...`)
+      if (uploadsInProgress) autoReconnectTelegram()
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           log('warn', `[render-process-gone] reloading window`)
@@ -131,17 +133,6 @@ function createWindow() {
 
   mainWindow.webContents.on('unresponsive', async () => {
     log('error', `[unresponsive] renderer became unresponsive! activeUploads=${activeUploads}`)
-    try {
-      const rmem = await mainWindow?.webContents?.executeJavaScript(`
-        (function() {
-          try { 
-            const r = window.electronAPI?.window?.getMemoryInfo?.();
-            return r && r.then ? null : JSON.stringify(r);
-          } catch(e) { return null }
-        })()
-      `)
-      if (rmem) { const m = JSON.parse(rmem); log('error', `[unresponsive] renderer memory: usedHeap=${(m.usedJSHeapSize / 1024 / 1024).toFixed(0)}MB totalHeap=${(m.totalJSHeapSize / 1024 / 1024).toFixed(0)}MB limit=${(m.jsHeapSizeLimit / 1024 / 1024).toFixed(0)}MB`) }
-    } catch {}
     const mem = process.memoryUsage()
     log('error', `[unresponsive] main process: heap=${(mem.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mem.rss / 1024 / 1024).toFixed(0)}MB`)
   })
@@ -537,39 +528,50 @@ ipcMain.handle('telegram:get-user-info', async () => {
 })
 
 // ===== Upload queue =====
-type UploadJob = { id: string; filePath: string; encrypt?: boolean; customFileName?: string; event: { sender: { send: (c: string, d: any) => void } } }
+type UploadJob = { id: string; filePath: string; fileName: string; fileSize: number; encrypt?: boolean; customFileName?: string; resolve: (v: any) => void }
 const uploadQueue: UploadJob[] = []
 let activeUploads = 0
 let uploadsInProgress = false
 const uploadCancelled = new Set<string>()
-let rendererMemMonitor: ReturnType<typeof setInterval> | null = null
-function startRendererMemMonitor() {
-  if (rendererMemMonitor) return
-  rendererMemMonitor = setInterval(async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    try {
-      const rmem = await mainWindow.webContents.executeJavaScript(`
-        (function() {
-          try { 
-            const r = window.electronAPI?.window?.getMemoryInfo?.();
-            return r && r.then ? null : JSON.stringify(r);
-          } catch(e) { return null }
-        })()
-      `)
-      const mm = process.memoryUsage()
-      if (rmem) {
-        const m = JSON.parse(rmem)
-        log('warn', `[renderer-mem] renderer: usedHeap=${(m.usedJSHeapSize / 1024 / 1024).toFixed(0)}MB totalHeap=${(m.totalJSHeapSize / 1024 / 1024).toFixed(0)}MB limit=${(m.jsHeapSizeLimit / 1024 / 1024).toFixed(0)}MB | main: heap=${(mm.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mm.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
-      } else {
-        log('warn', `[renderer-mem] performance.memory unavailable | main: heap=${(mm.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mm.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
-      }
-    } catch (e) { log('warn', `[renderer-mem] error: ${e}`) }
-  }, 15000)
+
+function broadcastUploadState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const activeJobs = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, status: 'waiting' as const, percent: 0 }))
+  try { mainWindow.webContents.send('telegram:queue-state', { queue: activeJobs, activeUploads }) } catch {}
 }
-function stopRendererMemMonitor() {
-  if (rendererMemMonitor && activeUploads === 0) {
-    clearInterval(rendererMemMonitor)
-    rendererMemMonitor = null
+function persistUploadQueue() {
+  try {
+    const state = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, encrypt: j.encrypt, customFileName: j.customFileName }))
+    fs.writeFileSync(path.join(app.getPath('userData'), 'upload-queue.json'), JSON.stringify(state))
+  } catch {}
+}
+function clearPersistedQueue() {
+  try { fs.unlinkSync(path.join(app.getPath('userData'), 'upload-queue.json')) } catch {}
+}
+function loadPersistedQueue(): Array<{ id: string; filePath: string; fileName: string; fileSize: number; encrypt?: boolean; customFileName?: string }> {
+  try {
+    const p = path.join(app.getPath('userData'), 'upload-queue.json')
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'))
+      return Array.isArray(data) ? data : []
+    }
+  } catch {}
+  return []
+}
+
+let tgReconnectTimer: ReturnType<typeof setTimeout> | null = null
+async function autoReconnectTelegram() {
+  if (tgReconnectTimer) return
+  tgReconnectTimer = setTimeout(async () => { tgReconnectTimer = null }, 30000)
+  try {
+    const sessionData = await storageService.getSession()
+    if (!sessionData) { log('error', '[reconnect] no session found'); return }
+    log('warn', '[reconnect] reconnecting Telegram client...')
+    await telegramService.reconnect(sessionData.session)
+    log('info', '[reconnect] Telegram reconnected successfully')
+    if (uploadsInProgress) processQueue()
+  } catch (e) {
+    log('error', '[reconnect] failed: ' + (e as Error).message)
   }
 }
 async function getConcurrency(): Promise<number> {
@@ -591,8 +593,9 @@ async function processQueue() {
     uploadQueue.shift()!
     activeUploads++
     uploadsInProgress = true
-    startRendererMemMonitor()
-    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) uploadsInProgress = false; stopRendererMemMonitor(); processQueue() })
+    persistUploadQueue()
+    broadcastUploadState()
+    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) { uploadsInProgress = false; clearPersistedQueue() }; persistUploadQueue(); broadcastUploadState(); processQueue() })
   }
 }
 async function runUpload(job: UploadJob): Promise<void> {
@@ -605,7 +608,7 @@ async function runUpload(job: UploadJob): Promise<void> {
   try {
     log('info', `[upload] start: ${job.filePath} (id=${job.id})`)
     let lastSend = 0
-    const THROTTLE_MS = 1000
+    const THROTTLE_MS = 2000
     const isCancelled = () => uploadCancelled.has(job.id)
     const sendProgress = (sent: number, total: number) => {
       if (isCancelled()) return
@@ -613,9 +616,9 @@ async function runUpload(job: UploadJob): Promise<void> {
       if (now - lastSend < THROTTLE_MS && sent < total) return
       lastSend = now
       const pct = total > 0 ? Math.floor((sent / total) * 100) : 0
-      try {
-        job.event.sender.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct })
-      } catch {}
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct }) } catch {}
+      }
     }
     sendProgress(0, 1)
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
@@ -623,19 +626,35 @@ async function runUpload(job: UploadJob): Promise<void> {
     }, job.encrypt, job.customFileName, isCancelled)
     if (isCancelled()) {
       log('info', `[upload] cancelled: ${job.filePath}`)
-      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' }) } catch {}
+      }
       uploadCancelled.delete(job.id)
       return
     }
     sendProgress(result.fileSize, result.fileSize)
     log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes, ${Math.floor((Date.now() - startTime) / 1000)}s)`)
-    job.event.sender.send('telegram:upload-complete', { id: job.id, success: true, data: result })
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: true, data: result }) } catch {}
+    }
+    job.resolve({ success: true, data: result })
   } catch (error) {
-    log('error', `[upload] FAILED: ${job.filePath} — ${(error as Error)?.message || String(error)}`)
+    const errMsg = (error as Error)?.message || String(error)
+    log('error', `[upload] FAILED: ${job.filePath} — ${errMsg}`)
     if (!uploadCancelled.has(job.id)) {
-      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: (error as Error).message })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: false, error: errMsg }) } catch {}
+      }
+      job.resolve({ success: false, error: errMsg })
+      if (errMsg.includes('disconnected') || errMsg.includes('disconnect')) {
+        log('warn', `[upload] Telegram disconnected during upload, attempting reconnect...`)
+        autoReconnectTelegram()
+      }
     } else {
-      job.event.sender.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' }) } catch {}
+      }
+      job.resolve({ success: false, error: 'cancelled' })
     }
     uploadCancelled.delete(job.id)
   } finally {
@@ -646,17 +665,11 @@ async function runUpload(job: UploadJob): Promise<void> {
 ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => {
   try {
     const jobId = id || Math.random().toString(36).slice(2)
+    let fileName = path.basename(filePath)
+    let fileSize = 0
+    try { const st = fs.statSync(filePath); fileSize = st.size } catch {}
     return await new Promise((resolve) => {
-      uploadQueue.push({ id: jobId, filePath, encrypt, customFileName, event: {
-        sender: {
-          send: (channel: string, data: any) => {
-            event.sender.send(channel, data)
-            if (channel === 'telegram:upload-complete' && data.id === jobId) {
-              resolve(data.success ? { success: true, data: data.data } : { success: false, error: data.error })
-            }
-          }
-        }
-      }})
+      uploadQueue.push({ id: jobId, filePath, fileName, fileSize, encrypt, customFileName, resolve })
       processQueue()
     })
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -1084,6 +1097,11 @@ ipcMain.on('app:log', (_, level: string, msg: string) => {
 
 ipcMain.on('renderer:mem-report', (_, data: { usedHeap: number; totalHeap: number; limit: number; domNodes: number; eventListeners: number }) => {
   log('warn', `[renderer-self] usedHeap=${(data.usedHeap / 1024 / 1024).toFixed(0)}MB totalHeap=${(data.totalHeap / 1024 / 1024).toFixed(0)}MB limit=${(data.limit / 1024 / 1024).toFixed(0)}MB domNodes=${data.domNodes} listeners=${data.eventListeners} activeUploads=${activeUploads}`)
+})
+
+ipcMain.handle('telegram:get-upload-state', () => {
+  const activeJobs = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, status: 'waiting' as const, percent: 0 }))
+  return { success: true, data: { queue: activeJobs, activeUploads, uploadsInProgress } }
 })
 
 const GITHUB_REPO = 'RodjerYan/RodjerCloud'

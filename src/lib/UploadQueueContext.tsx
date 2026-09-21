@@ -41,6 +41,41 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
   const TG_LIMIT = 2 * 1024 * 1024 * 1024
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.electronAPI.telegram.getUploadState?.()
+        if (r?.success && r.data?.queue?.length > 0) {
+          const restored: QueueItem[] = r.data.queue.map((j: any) => ({
+            id: j.id, filePath: j.filePath, fileName: j.fileName || j.filePath?.split(/[/\\]/).pop() || '',
+            fileSize: j.fileSize || 0, status: 'uploading', percent: 0, sent: 0, total: j.fileSize || 0
+          }))
+          setQueue(prev => {
+            const existingIds = new Set(prev.map(p => p.id))
+            const newItems = restored.filter((r: QueueItem) => !existingIds.has(r.id))
+            return newItems.length > 0 ? [...prev, ...newItems] : prev
+          })
+        }
+      } catch {}
+    })()
+  }, [])
+
+  useEffect(() => {
+    const off = window.electronAPI.telegram.onQueueState?.((data: any) => {
+      if (!data?.queue) return
+      setQueue(prev => {
+        const mainIds = new Set(data.queue.map((j: any) => j.id))
+        const mainItems: QueueItem[] = data.queue.map((j: any) => ({
+          id: j.id, filePath: j.filePath, fileName: j.fileName || j.filePath?.split(/[/\\]/).pop() || '',
+          fileSize: j.fileSize || 0, status: j.status || 'waiting', percent: j.percent || 0, sent: j.sent || 0, total: j.fileSize || j.total || 0
+        }))
+        const localOnly = prev.filter(q => !mainIds.has(q.id) && q.status !== 'done' && q.status !== 'failed')
+        return [...localOnly, ...mainItems]
+      })
+    })
+    return () => { off && off() }
+  }, [])
+
   const addFiles = (files: Array<{ filePath: string; fileName: string; fileSize: number }>, encryptNext: boolean) => {
     const items: QueueItem[] = files.map(f => ({
       id: Math.random().toString(36).slice(2),
@@ -125,26 +160,6 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
       if (off) off();
       if (rafId) cancelAnimationFrame(rafId);
     }
-  }, [])
-
-  useEffect(() => {
-    const memInterval = setInterval(() => {
-      const q = queueRef.current
-      const activeCount = q.filter(i => i.status === 'uploading' || i.status === 'waiting').length
-      if (activeCount === 0) return
-      try {
-        const m = (performance as any).memory
-        const domNodes = document.querySelectorAll('*').length
-        window.electronAPI.window?.reportMemory?.({
-          usedHeap: m?.usedJSHeapSize || 0,
-          totalHeap: m?.totalJSHeapSize || 0,
-          limit: m?.jsHeapSizeLimit || 0,
-          domNodes,
-          eventListeners: 0
-        })
-      } catch {}
-    }, 10000)
-    return () => clearInterval(memInterval)
   }, [])
 
   const pickFolder = async (encryptNext: boolean) => {
