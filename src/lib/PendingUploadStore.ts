@@ -8,6 +8,23 @@ export interface PendingUpload {
   objectUrl?: string;
 }
 
+let _progressUnsub: (() => void) | null = null
+
+function ensureProgressListener() {
+  if (_progressUnsub) return
+  if (typeof window === 'undefined' || !window.electronAPI) return
+  _progressUnsub = window.electronAPI.telegram.onUploadProgress((d: any) => {
+    if (d.id) pendingStore.updateProgress(d)
+  }) ?? null
+}
+
+function stopProgressListenerIfIdle() {
+  if (pendingStore.uploads.length === 0 && _progressUnsub) {
+    _progressUnsub()
+    _progressUnsub = null
+  }
+}
+
 export const pendingStore = {
   uploads: [] as PendingUpload[],
   listeners: new Set<Function>(),
@@ -17,11 +34,13 @@ export const pendingStore = {
   },
   add(items: PendingUpload[]) {
     this.uploads.push(...items)
+    ensureProgressListener()
     this.notify()
   },
   remove(id: string) {
     this.uploads = this.uploads.filter(u => u.id !== id)
     this.notify()
+    stopProgressListenerIfIdle()
   },
   updateProgress(d: any) {
     const idx = this.uploads.findIndex(p => p.id === d.id)
@@ -39,10 +58,4 @@ export const pendingStore = {
     const copy = [...this.uploads]
     for (const l of this.listeners) l(copy)
   }
-}
-
-if (typeof window !== 'undefined' && window.electronAPI) {
-  window.electronAPI.telegram.onUploadProgress((d: any) => {
-    if (d.id) pendingStore.updateProgress(d)
-  })
 }

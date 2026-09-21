@@ -174,6 +174,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     forceQuit: () => ipcRenderer.invoke('window:force-quit'),
+    getMemoryInfo: () => {
+      try {
+        const m = (performance as any).memory
+        if (m) return { usedJSHeapSize: m.usedJSHeapSize, totalJSHeapSize: m.totalJSHeapSize, jsHeapSizeLimit: m.jsHeapSizeLimit }
+      } catch {}
+      return null
+    },
     onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('app:close-blocked', listener)

@@ -16,6 +16,7 @@ import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 app.commandLine.appendSwitch('enable-transparent-visuals')
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -128,8 +129,19 @@ function createWindow() {
     }
   })
 
-  mainWindow.webContents.on('unresponsive', () => {
+  mainWindow.webContents.on('unresponsive', async () => {
     log('error', `[unresponsive] renderer became unresponsive! activeUploads=${activeUploads}`)
+    try {
+      const rmem = await mainWindow?.webContents?.executeJavaScript(`
+        try { 
+          const r = window.electronAPI?.window?.getMemoryInfo?.();
+          return r && r.then ? null : JSON.stringify(r);
+        } catch(e) { return null }
+      `)
+      if (rmem) { const m = JSON.parse(rmem); log('error', `[unresponsive] renderer memory: usedHeap=${(m.usedJSHeapSize / 1024 / 1024).toFixed(0)}MB totalHeap=${(m.totalJSHeapSize / 1024 / 1024).toFixed(0)}MB limit=${(m.jsHeapSizeLimit / 1024 / 1024).toFixed(0)}MB`) }
+    } catch {}
+    const mem = process.memoryUsage()
+    log('error', `[unresponsive] main process: heap=${(mem.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mem.rss / 1024 / 1024).toFixed(0)}MB`)
   })
 
   mainWindow.webContents.on('responsive', () => {
@@ -528,6 +540,34 @@ const uploadQueue: UploadJob[] = []
 let activeUploads = 0
 let uploadsInProgress = false
 const uploadCancelled = new Set<string>()
+let rendererMemMonitor: ReturnType<typeof setInterval> | null = null
+function startRendererMemMonitor() {
+  if (rendererMemMonitor) return
+  rendererMemMonitor = setInterval(async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    try {
+      const rmem = await mainWindow.webContents.executeJavaScript(`
+        try { 
+          const r = window.electronAPI?.window?.getMemoryInfo?.();
+          return r && r.then ? null : JSON.stringify(r);
+        } catch(e) { return null }
+      `)
+      const mm = process.memoryUsage()
+      if (rmem) {
+        const m = JSON.parse(rmem)
+        log('warn', `[renderer-mem] renderer: usedHeap=${(m.usedJSHeapSize / 1024 / 1024).toFixed(0)}MB totalHeap=${(m.totalJSHeapSize / 1024 / 1024).toFixed(0)}MB limit=${(m.jsHeapSizeLimit / 1024 / 1024).toFixed(0)}MB | main: heap=${(mm.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mm.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
+      } else {
+        log('warn', `[renderer-mem] performance.memory unavailable | main: heap=${(mm.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mm.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
+      }
+    } catch (e) { log('warn', `[renderer-mem] error: ${e}`) }
+  }, 30000)
+}
+function stopRendererMemMonitor() {
+  if (rendererMemMonitor && activeUploads === 0) {
+    clearInterval(rendererMemMonitor)
+    rendererMemMonitor = null
+  }
+}
 async function getConcurrency(): Promise<number> {
   const p = await readPrefs()
   const c = parseInt(String(p.uploadConcurrency || 3), 10)
@@ -547,7 +587,8 @@ async function processQueue() {
     uploadQueue.shift()!
     activeUploads++
     uploadsInProgress = true
-    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) uploadsInProgress = false; processQueue() })
+    startRendererMemMonitor()
+    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) uploadsInProgress = false; stopRendererMemMonitor(); processQueue() })
   }
 }
 async function runUpload(job: UploadJob): Promise<void> {
