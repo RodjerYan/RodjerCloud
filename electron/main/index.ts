@@ -15,9 +15,9 @@ import { vaultService } from './vault-service'
 import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
-app.commandLine.appendSwitch('enable-transparent-visuals')
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
 app.commandLine.appendSwitch('enable-precise-memory-info')
+app.commandLine.appendSwitch('disable-gpu-compositing')
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -92,10 +92,9 @@ function createWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 640,
-    backgroundColor: '#00000000', // transparent for Mica to show through
+    backgroundColor: '#0d1117',
     autoHideMenuBar: true,
-    transparent: true,
-    backgroundMaterial: 'mica',
+    transparent: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
