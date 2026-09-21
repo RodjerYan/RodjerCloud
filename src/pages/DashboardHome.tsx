@@ -1,18 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList } from 'recharts'
 import { Upload, HardDrive, FileText, TrendingUp } from 'lucide-react'
 import { fmtSize } from '../lib/utils'
-
-function typeOf(name: string): string {
-  const ext = (name.split('.').pop() || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif'].includes(ext)) return 'Изображения'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return 'Видео'
-  if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) return 'Аудио'
-  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'Документы'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Архивы'
-  return 'Другое'
-}
 
 function timeGreeting(): string {
   const h = new Date().getHours()
@@ -22,46 +12,55 @@ function timeGreeting(): string {
   return 'Доброй ночи'
 }
 
+interface DashboardData {
+  total: number
+  totalSize: number
+  weekFiles: number
+  avgSize: number
+  counts: Record<string, number>
+  recent: any[]
+}
+
 export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: any; userInfo?: { firstName?: string } | null }) {
   const navigate = useNavigate()
-  const [files, setFiles] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<DashboardData | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [countsRes, sizeRes, recentRes] = await Promise.all([
+        window.electronAPI.telegram.getCategoryCounts(),
+        window.electronAPI.telegram.getTotalSize(),
+        window.electronAPI.telegram.listFilesFromCache(5, 0),
+      ])
+      const counts = countsRes?.success ? (countsRes.data || {}) : {}
+      const sizeData = sizeRes?.success ? (sizeRes.data || {}) : {}
+      const totalSize = sizeData.totalSize || 0
+      const totalFromSize = sizeData.total || 0
+      const weekFiles = sizeData.weekFiles || 0
+      const recent = recentRes?.success ? (recentRes.files || []) : []
+      const total = totalFromSize > 0 ? totalFromSize : Object.values(counts).reduce((s: number, v: any) => s + (typeof v === 'number' ? v : 0), 0)
+      const avgSize = total > 0 ? totalSize / total : 0
+      setData({ total, totalSize, weekFiles, avgSize, counts, recent })
+    } catch {}
+  }, [])
 
   useEffect(() => {
     let active = true
     ;(async () => {
-      const cacheRes = await window.electronAPI.telegram.listFilesCached()
-      if (!active) return
-      setFiles(cacheRes.data || [])
-      setLoading(false)
-      window.electronAPI.telegram.syncFilesBg()
+      await loadData()
+      if (active) window.electronAPI.telegram.syncFilesBg()
     })()
     const unsubChanged = window.electronAPI.telegram.onFilesChanged?.(() => {
       if (!active) return
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        window.electronAPI.telegram.listFilesCached().then((r: any) => {
-          if (r.success && active) setFiles(r.data || [])
-        })
-      }, 3000)
+      debounceRef.current = setTimeout(() => { loadData() }, 3000)
     })
     return () => { active = false; unsubChanged?.(); if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [])
+  }, [loadData])
 
-  const total = files.length
-  const totalSize = files.reduce((s, f) => s + (f.fileSize || 0), 0)
-  const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600
-  const weekFiles = files.filter(f => (f.originalDate || f.uploadedAt || 0) >= oneWeekAgo).length
-  const avgSize = total ? totalSize / total : 0
-
-  const typeMap: Record<string, number> = {}
   const CATS = ['Изображения', 'Видео', 'Аудио', 'Документы', 'Архивы', 'Другое']
-  CATS.forEach(c => typeMap[c] = 0)
-  files.forEach(f => { const t = typeOf(f.fileName || ''); typeMap[t] = (typeMap[t] || 0) + 1 })
-  const chartData = CATS.filter(c => typeMap[c] > 0).map(name => ({ name, value: typeMap[name] }))
-
-  const recent = [...files].sort((a, b) => ((b.originalDate || b.uploadedAt) || 0) - ((a.originalDate || a.uploadedAt) || 0)).slice(0, 5)
+  const chartData = CATS.filter(c => (data?.counts?.[c] || 0) > 0).map(name => ({ name, value: data?.counts?.[name] || 0 }))
 
   return (
     <div className="dh-root">
@@ -72,7 +71,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
       </div>
 
       <div className="dh-stats">
-        {loading ? (
+        {!data ? (
           <>
             <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Всего файлов</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:40,height:28}}/></div></div></div>
             <div className="dh-card"><div className="dh-card-icon skeleton" style={{width:42,height:42}}/><div className="dh-card-body"><div className="dh-card-label">Использовано</div><div className="dh-card-value"><div className="skeleton skeleton-text" style={{width:60,height:28}}/></div></div></div>
@@ -83,16 +82,16 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
           <>
             <div className="dh-card"><div className="dh-card-icon"><FileText size={20} /></div>
               <div className="dh-card-body"><div className="dh-card-label">Всего файлов</div>
-                <div className="dh-card-value">{total}</div></div></div>
+                <div className="dh-card-value">{data.total}</div></div></div>
             <div className="dh-card"><div className="dh-card-icon"><HardDrive size={20} /></div>
               <div className="dh-card-body"><div className="dh-card-label">Использовано</div>
-                <div className="dh-card-value">{fmtSize(totalSize)}</div></div></div>
+                <div className="dh-card-value">{fmtSize(data.totalSize)}</div></div></div>
             <div className="dh-card"><div className="dh-card-icon"><TrendingUp size={20} /></div>
               <div className="dh-card-body"><div className="dh-card-label">За неделю</div>
-                <div className="dh-card-value">{weekFiles}</div></div></div>
+                <div className="dh-card-value">{data.weekFiles}</div></div></div>
             <div className="dh-card"><div className="dh-card-icon"><BarChart3Icon /></div>
               <div className="dh-card-body"><div className="dh-card-label">Средний размер</div>
-                <div className="dh-card-value">{fmtSize(avgSize)}</div></div></div>
+                <div className="dh-card-value">{fmtSize(data.avgSize)}</div></div></div>
           </>
         )}
       </div>
@@ -123,9 +122,9 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
 
         <div className="dh-panel">
           <div className="dh-panel-head"><h2>Последние файлы</h2></div>
-          {recent.length === 0 ? <div className="dh-empty">Файлов пока нет</div> : (
+          {!data || data.recent.length === 0 ? <div className="dh-empty">Файлов пока нет</div> : (
             <ul className="dh-recent">
-              {recent.map(f => (
+              {data.recent.map(f => (
                 <li key={f.messageId}>
                   <div className="dh-recent-name" title={f.fileName}>{f.fileName}</div>
                   <div className="dh-recent-meta">{fmtSize(f.fileSize)} • {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</div>

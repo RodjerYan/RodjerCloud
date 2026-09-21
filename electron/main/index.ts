@@ -281,11 +281,15 @@ app.whenReady().then(async () => {
 
   async function adaptiveSync() {
     if (!mainWindow || mainWindow.isDestroyed()) return
+    if (uploadsInProgress) {
+      setTimeout(adaptiveSync, 10000)
+      return
+    }
     try {
       const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
       const after = telegramService.getCachedFilesInstant().length
-      if (!uploadsInProgress && (after > before || after > lastFileCount)) {
+      if (after > before || after > lastFileCount) {
         sendFilesChanged()
         idleCycles = 0
         syncInterval = 3000
@@ -738,8 +742,13 @@ ipcMain.handle('telegram:get-total-size', async () => {
   try {
     const cached = telegramService.getCachedFilesInstant()
     let totalSize = 0
-    for (const f of cached) totalSize += (f as any).fileSize || 0
-    return { success: true, data: { total: cached.length, totalSize } }
+    const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600
+    let weekFiles = 0
+    for (const f of cached) {
+      totalSize += (f as any).fileSize || 0
+      if (((f as any).originalDate || (f as any).uploadedAt || 0) >= oneWeekAgo) weekFiles++
+    }
+    return { success: true, data: { total: cached.length, totalSize, weekFiles } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
