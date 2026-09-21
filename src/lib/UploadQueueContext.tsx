@@ -127,6 +127,26 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     }
   }, [])
 
+  useEffect(() => {
+    const memInterval = setInterval(() => {
+      const q = queueRef.current
+      const activeCount = q.filter(i => i.status === 'uploading' || i.status === 'waiting').length
+      if (activeCount === 0) return
+      try {
+        const m = (performance as any).memory
+        const domNodes = document.querySelectorAll('*').length
+        window.electronAPI.window?.reportMemory?.({
+          usedHeap: m?.usedJSHeapSize || 0,
+          totalHeap: m?.totalJSHeapSize || 0,
+          limit: m?.jsHeapSizeLimit || 0,
+          domNodes,
+          eventListeners: 0
+        })
+      } catch {}
+    }, 10000)
+    return () => clearInterval(memInterval)
+  }, [])
+
   const pickFolder = async (encryptNext: boolean) => {
     const r = await window.electronAPI.dialog.pickFolder()
     if (!r.success || !r.data?.folderPath) return

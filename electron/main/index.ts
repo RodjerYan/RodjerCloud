@@ -17,6 +17,7 @@ import { startVideoStreamServer } from './video-stream-server'
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 app.commandLine.appendSwitch('enable-transparent-visuals')
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
+app.commandLine.appendSwitch('enable-precise-memory-info')
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -133,10 +134,12 @@ function createWindow() {
     log('error', `[unresponsive] renderer became unresponsive! activeUploads=${activeUploads}`)
     try {
       const rmem = await mainWindow?.webContents?.executeJavaScript(`
-        try { 
-          const r = window.electronAPI?.window?.getMemoryInfo?.();
-          return r && r.then ? null : JSON.stringify(r);
-        } catch(e) { return null }
+        (function() {
+          try { 
+            const r = window.electronAPI?.window?.getMemoryInfo?.();
+            return r && r.then ? null : JSON.stringify(r);
+          } catch(e) { return null }
+        })()
       `)
       if (rmem) { const m = JSON.parse(rmem); log('error', `[unresponsive] renderer memory: usedHeap=${(m.usedJSHeapSize / 1024 / 1024).toFixed(0)}MB totalHeap=${(m.totalJSHeapSize / 1024 / 1024).toFixed(0)}MB limit=${(m.jsHeapSizeLimit / 1024 / 1024).toFixed(0)}MB`) }
     } catch {}
@@ -547,10 +550,12 @@ function startRendererMemMonitor() {
     if (!mainWindow || mainWindow.isDestroyed()) return
     try {
       const rmem = await mainWindow.webContents.executeJavaScript(`
-        try { 
-          const r = window.electronAPI?.window?.getMemoryInfo?.();
-          return r && r.then ? null : JSON.stringify(r);
-        } catch(e) { return null }
+        (function() {
+          try { 
+            const r = window.electronAPI?.window?.getMemoryInfo?.();
+            return r && r.then ? null : JSON.stringify(r);
+          } catch(e) { return null }
+        })()
       `)
       const mm = process.memoryUsage()
       if (rmem) {
@@ -560,7 +565,7 @@ function startRendererMemMonitor() {
         log('warn', `[renderer-mem] performance.memory unavailable | main: heap=${(mm.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(mm.rss / 1024 / 1024).toFixed(0)}MB activeUploads=${activeUploads}`)
       }
     } catch (e) { log('warn', `[renderer-mem] error: ${e}`) }
-  }, 30000)
+  }, 15000)
 }
 function stopRendererMemMonitor() {
   if (rendererMemMonitor && activeUploads === 0) {
@@ -1076,6 +1081,10 @@ ipcMain.handle('app:get-version', async () => {
 
 ipcMain.on('app:log', (_, level: string, msg: string) => {
   log(level, '[renderer] ' + msg)
+})
+
+ipcMain.on('renderer:mem-report', (_, data: { usedHeap: number; totalHeap: number; limit: number; domNodes: number; eventListeners: number }) => {
+  log('warn', `[renderer-self] usedHeap=${(data.usedHeap / 1024 / 1024).toFixed(0)}MB totalHeap=${(data.totalHeap / 1024 / 1024).toFixed(0)}MB limit=${(data.limit / 1024 / 1024).toFixed(0)}MB domNodes=${data.domNodes} listeners=${data.eventListeners} activeUploads=${activeUploads}`)
 })
 
 const GITHUB_REPO = 'RodjerYan/RodjerCloud'

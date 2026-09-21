@@ -181,6 +181,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       } catch {}
       return null
     },
+    reportMemory: (data: any) => ipcRenderer.send('renderer:mem-report', data),
     onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('app:close-blocked', listener)
