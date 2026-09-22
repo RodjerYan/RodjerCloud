@@ -80,6 +80,7 @@ export class TelegramService {
   private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
   private processingHeavyQueue = false
   private fileCache: any[] = []
+  private folderIndex: Map<string, Set<number>> = new Map()
   private syncingFiles = false
   private listFilesPromise: Promise<any[]> | null = null
 
@@ -1116,6 +1117,51 @@ export class TelegramService {
     const disk = this.loadFileCache()
     if (disk.length > 0) this.fileCache = disk
     return this.fileCache
+  }
+
+  rebuildFolderIndex(fileFolders: Record<string, string>) {
+    this.folderIndex.clear()
+    for (const [msgId, folderId] of Object.entries(fileFolders)) {
+      if (!this.folderIndex.has(folderId)) {
+        this.folderIndex.set(folderId, new Set())
+      }
+      this.folderIndex.get(folderId)!.add(Number(msgId))
+    }
+  }
+
+  searchInFolder(
+    folderId: string,
+    query: string,
+    limit = 30,
+    offsetId = 0
+  ): { files: any[]; nextOffsetId: number | null; total: number } {
+    const messageIds = this.folderIndex.get(folderId)
+    if (!messageIds) return { files: [], nextOffsetId: null, total: 0 }
+
+    const lowerQuery = query.toLowerCase().trim()
+    if (!lowerQuery) return { files: [], nextOffsetId: null, total: 0 }
+
+    const matched: any[] = []
+    for (const msgId of messageIds) {
+      const file = this.fileCache.find((f: any) => f.messageId === msgId)
+      if (!file) continue
+      const nameMatch = file.fileName?.toLowerCase().includes(lowerQuery)
+      const tagMatch = file.tags?.some((t: string) => t.toLowerCase().includes(lowerQuery))
+      const typeMatch = file.mimeType?.toLowerCase().includes(lowerQuery)
+      if (nameMatch || tagMatch || typeMatch) matched.push(file)
+    }
+
+    matched.sort((a, b) => (b.date || b.uploadedAt || 0) - (a.date || a.uploadedAt || 0))
+
+    const startIdx = offsetId > 0
+      ? matched.findIndex(f => f.messageId === offsetId) + 1
+      : 0
+    const slice = matched.slice(startIdx, startIdx + limit)
+    const nextOffsetId = startIdx + limit < matched.length
+      ? matched[startIdx + limit - 1]?.messageId ?? null
+      : null
+
+    return { files: slice, nextOffsetId, total: matched.length }
   }
 
   async listFilesCached(): Promise<any[]> {

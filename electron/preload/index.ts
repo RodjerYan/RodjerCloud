@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listFiles: () => ipcRenderer.invoke('telegram:list-files'),
     listFilesCached: () => ipcRenderer.invoke('telegram:list-files-cached'),
     listFilesFromCache: (limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-files-from-cache', limit, offsetId),
+    listFolderFilesFromCache: (folderId: string, limit: number, offsetId: number) => ipcRenderer.invoke('telegram:list-folder-files-from-cache', folderId, limit, offsetId),
+    searchFolderFiles: (folderId: string, query: string, limit: number, offsetId: number) => ipcRenderer.invoke('telegram:search-folder-files', folderId, query, limit, offsetId),
     getCategoryCounts: () => ipcRenderer.invoke('telegram:get-category-counts'),
     getTotalSize: () => ipcRenderer.invoke('telegram:get-total-size'),
     getFilesByCategory: (category: string) => ipcRenderer.invoke('telegram:get-files-by-category', category),

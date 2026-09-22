@@ -17,6 +17,8 @@ declare global {
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
+        listFolderFilesFromCache: (folderId: string, limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
+        searchFolderFiles: (folderId: string, query: string, limit?: number, offsetId?: number) => Promise<{ success: boolean; files?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
         getCategoryCounts: () => Promise<{ success: boolean; data?: Record<string, number>; error?: string }>
         getTotalSize: () => Promise<{ success: boolean; data?: { total: number; totalSize: number }; error?: string }>
         getFilesByCategory: (category: string) => Promise<{ success: boolean; data?: any[]; error?: string }>

@@ -837,6 +837,27 @@ ipcMain.handle('telegram:list-files-from-cache', async (_, limit: number, offset
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:list-folder-files-from-cache', async (_, folderId: string, limit: number, offsetId: number) => {
+  try {
+    const allFiles = telegramService.getCachedFilesInstant()
+    const folderData = await readFolders()
+    const fileFoldersMap: Record<string, string> = folderData.fileFolders || {}
+    const folderFiles = allFiles.filter((f: any) => fileFoldersMap[String(f.messageId)] === folderId)
+    const filtered = offsetId > 0
+      ? folderFiles.filter((f: any) => f.messageId < offsetId)
+      : folderFiles
+    const page = filtered.slice(0, limit || 30)
+    const nextOffsetId = page.length >= (limit || 30) ? page[page.length - 1].messageId : null
+    return { success: true, data: page, nextOffsetId, total: folderFiles.length }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:search-folder-files', async (_, folderId: string, query: string, limit: number, offsetId: number) => {
+  try {
+    return { success: true, ...telegramService.searchInFolder(folderId, query, limit || 30, offsetId || 0) }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:get-category-counts', async () => {
   try {
     return { success: true, data: telegramService.getFileCategoryCounts() }
@@ -1365,17 +1386,29 @@ async function withFoldersLock<T>(fn: () => Promise<T>): Promise<T> {
 function foldersPath(): string {
   return path.join(app.getPath('userData'), 'rodjercloud-folders.json')
 }
+let foldersCache: any = null
+let foldersCacheDirty = true
+
+function invalidateFoldersCache() { foldersCacheDirty = true }
+
 async function readFolders(): Promise<any> {
+  if (!foldersCacheDirty && foldersCache) return foldersCache
   try {
-    if (!fs.existsSync(foldersPath())) return { folders: [], fileFolders: {}, trashedFolders: [] }
+    if (!fs.existsSync(foldersPath())) { foldersCache = { folders: [], fileFolders: {}, trashedFolders: [] }; foldersCacheDirty = false; return foldersCache }
     const data = await fs.promises.readFile(foldersPath(), 'utf8')
     const parsed = JSON.parse(data)
     if (!parsed.trashedFolders) parsed.trashedFolders = []
-    return parsed
-  } catch { return { folders: [], fileFolders: {}, trashedFolders: [] } }
+    foldersCache = parsed
+    foldersCacheDirty = false
+    telegramService.rebuildFolderIndex(parsed.fileFolders || {})
+    return foldersCache
+  } catch { foldersCache = { folders: [], fileFolders: {}, trashedFolders: [] }; foldersCacheDirty = false; return foldersCache }
 }
 async function writeFolders(d: any) {
   await fs.promises.writeFile(foldersPath(), JSON.stringify(d, null, 2))
+  foldersCache = d
+  foldersCacheDirty = false
+  telegramService.rebuildFolderIndex(d.fileFolders || {})
 }
 
 let syncPending = false
