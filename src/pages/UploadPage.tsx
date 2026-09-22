@@ -1,43 +1,84 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Loader2, Archive, Lock, Unlock, X } from 'lucide-react'
+import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Clock3, Loader2, Archive, Lock, Unlock, X } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
-import { useUploadQueue } from '../lib/UploadQueueContext'
+import { useUploadQueue, type QueueItem as UploadQueueEntry } from '../lib/UploadQueueContext'
 
 const CHUNK_SIZE = 1 * 1024 * 1024 * 1024
 
-const QueueItem = React.memo(({ q, onCancel }: { q: any; onCancel: (id: string) => void }) => (
-  <li className={'up-item up-item-' + q.status}>
-    <div className="up-item-info">
-      <div className="up-item-name">
-        {q.encrypt && <span title="Будет зашифровано">🔒 </span>}
-        {q.fileName}
-        {q.fileSize > CHUNK_SIZE && (
-          <span className="up-warn"><AlertTriangle size={12} /> Будет разделён на {Math.ceil(q.fileSize / CHUNK_SIZE)} части</span>
+const STATUS_LABELS: Record<UploadQueueEntry['status'], string> = {
+  waiting: 'В очереди',
+  uploading: 'Загружается',
+  done: 'Завершено',
+  failed: 'Ошибка',
+}
+
+const UploadQueueItem = React.memo(({ q, onCancel }: { q: UploadQueueEntry; onCancel: (id: string) => void }) => {
+  const percent = Math.min(100, Math.max(0, Math.round(q.percent || 0)))
+  const total = q.total || q.fileSize || 0
+  const sent = Math.min(total, Math.max(0, q.sent || 0))
+  const totalChunks = Math.max(1, Math.ceil(total / CHUNK_SIZE))
+  const currentChunk = Math.min(totalChunks, Math.max(1, Math.ceil((sent || 1) / CHUNK_SIZE)))
+  const showTransferDetails = q.status === 'uploading' && q.fileSize > 50 * 1024 * 1024 && total > 0
+
+  return (
+    <li className={'up-item up-item-' + q.status} aria-current={q.status === 'uploading' ? 'true' : undefined}>
+      <div className="up-item-state" aria-hidden="true">
+        {q.status === 'uploading' && <Loader2 size={17} className="spin" />}
+        {q.status === 'waiting' && <Clock3 size={17} />}
+        {q.status === 'done' && <CheckCircle2 size={17} />}
+        {q.status === 'failed' && <AlertTriangle size={17} />}
+      </div>
+
+      <div className="up-item-info">
+        <div className="up-item-name-row">
+          {q.encrypt && <span className="up-encrypted" title="Файл зашифрован"><Lock size={13} /></span>}
+          <span className="up-item-name" title={q.fileName}>{q.fileName}</span>
+        </div>
+        <div className="up-item-meta">
+          <span>{fmtSize(q.fileSize)}</span>
+          <span className={'up-status-label up-status-' + q.status}>{STATUS_LABELS[q.status]}</span>
+          {q.fileSize > CHUNK_SIZE && (
+            <span className="up-warn"><AlertTriangle size={11} /> {totalChunks} части</span>
+          )}
+          {q.error && <span className="up-error" title={q.error}>{q.error}</span>}
+        </div>
+      </div>
+
+      <div className="up-item-progress">
+        <div className="up-progress-row">
+          <div
+            className="up-bar"
+            role="progressbar"
+            aria-label={`Прогресс загрузки ${q.fileName}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+          >
+            <div className="up-bar-fill" style={{ width: percent + '%' }} />
+          </div>
+          <span className="up-pct">{percent}%</span>
+        </div>
+        {showTransferDetails && (
+          <div className="up-progress-meta">
+            <span>{fmtSize(sent)} / {fmtSize(total)}</span>
+            <span>Осталось {fmtSize(Math.max(0, total - sent))}</span>
+            {totalChunks > 1 && <span>Часть {currentChunk}/{totalChunks}</span>}
+          </div>
         )}
       </div>
-      <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status === 'done' ? 'готово' : q.status === 'uploading' ? 'загрузка' : q.status === 'waiting' ? 'ожидание' : q.status === 'failed' ? 'ошибка' : q.status}{q.error ? ' - ' + q.error : ''}</div>
-    </div>
-    <div className="up-item-progress">
-      {q.status === 'uploading' && <Loader2 size={16} className="spin" />}
-      {q.status === 'done' && <CheckCircle2 size={16} className="ok" />}
-      {q.status === 'failed' && <AlertTriangle size={16} className="err" />}
-      <div className="up-bar"><div className="up-bar-fill" style={{ width: q.percent + '%' }} /></div>
-      <span className="up-pct">{q.percent}%</span>
-      {q.fileSize > 50 * 1024 * 1024 && q.sent !== undefined && q.total ? (
-        <>
-          <span className="up-detail">{fmtSize(q.sent)} / {fmtSize(q.total)}</span>
-          <span className="up-detail">ост. {fmtSize(Math.max(0, q.total - q.sent))}</span>
-          {(() => { const totalCh = Math.max(1, Math.ceil(q.total / CHUNK_SIZE)); const curCh = Math.min(totalCh, Math.max(1, Math.ceil((q.sent || 1) / CHUNK_SIZE))); return totalCh > 1 ? <span className="up-detail">ч. {curCh}/{totalCh}</span> : null })()}
-        </>
-      ) : null}
-      {(q.status === 'waiting' || q.status === 'uploading') && (
-        <button onClick={() => onCancel(q.id)} title="Отменить"><X size={14} /></button>
-      )}
-    </div>
-  </li>
-))
+
+      <div className="up-item-action">
+        {(q.status === 'waiting' || q.status === 'uploading') && (
+          <button type="button" onClick={() => onCancel(q.id)} title="Отменить" aria-label={`Отменить загрузку ${q.fileName}`}>
+            <X size={15} />
+          </button>
+        )}
+      </div>
+    </li>
+  )
+})
 
 const ALL_STEPS = [
   { key: 'downloading', label: 'Скачивание' },
@@ -82,6 +123,34 @@ export default function UploadPage() {
 
   const doneCount = queue.filter(q => q.status === 'done').length
   const failedCount = queue.filter(q => q.status === 'failed').length
+  const uploadingCount = queue.filter(q => q.status === 'uploading').length
+  const waitingCount = queue.filter(q => q.status === 'waiting').length
+  const hasPending = uploadingCount + waitingCount > 0
+  const visibleQueue = useMemo(() => [
+    ...queue.filter(q => q.status === 'uploading'),
+    ...queue.filter(q => q.status === 'waiting'),
+    ...queue.filter(q => q.status === 'failed'),
+    ...queue.filter(q => q.status === 'done'),
+  ], [queue])
+
+  const handleCancel = useCallback((id: string) => {
+    void window.electronAPI.telegram.cancelUpload(id)
+    removeItem(id)
+  }, [removeItem])
+
+  const toggleEncryption = async () => {
+    const checked = !encryptNext
+    if (checked) {
+      const has = await window.electronAPI.vault.hasPassword()
+      const unlocked = await window.electronAPI.vault.isUnlocked()
+      if (!has || !unlocked) {
+        setShowPwdPrompt(true)
+        return
+      }
+    }
+    setEncryptNext(checked)
+    localStorage.setItem('v3.encryptNext', checked ? '1' : '0')
+  }
 
   const fmtTime = (sec: number) =>
     sec < 60 ? `${sec}с` : `${Math.floor(sec / 60)}м ${sec % 60}с`
@@ -147,100 +216,80 @@ export default function UploadPage() {
         </div>
       </div>
 
-      <div className={'up-drop' + (dragOver ? ' over' : '')}
+      <div className={'up-drop' + (dragOver ? ' over' : '') + (queue.length > 0 ? ' compact' : '')}
         onDragOver={e => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}>
-        <UploadIcon size={48} />
-        <h2>Перетащите файлы сюда</h2>
-        <p>или используйте кнопки ниже</p>
-        <div className="up-actions">
-          <button className="v3-btn primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
-          <button className="v3-btn" onClick={() => pickFolder(encryptNext)}><FolderOpen size={16} /> Выбрать папку</button>
-        </div>
-        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
-          <div 
-            onClick={async (e) => {
-              e.stopPropagation()
-              const checked = !encryptNext
-              if (checked) {
-                const has = await window.electronAPI.vault.hasPassword()
-                const unl = await window.electronAPI.vault.isUnlocked()
-                if (!has || !unl) return setShowPwdPrompt(true)
-              }
-              setEncryptNext(checked)
-              localStorage.setItem('v3.encryptNext', checked ? '1' : '0')
-            }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer',
-              padding: '14px 24px', borderRadius: 20,
-              background: encryptNext ? 'linear-gradient(135deg, rgba(46,204,113,0.08), rgba(39,174,96,0.15))' : 'rgba(255,255,255,0.03)',
-              border: `1px solid ${encryptNext ? 'rgba(46,204,113,0.3)' : 'rgba(255,255,255,0.05)'}`,
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              boxShadow: encryptNext ? '0 8px 32px rgba(46,204,113,0.15), inset 0 1px 0 rgba(255,255,255,0.1)' : 'inset 0 1px 0 rgba(255,255,255,0.02)',
-              backdropFilter: 'blur(10px)'
-            }}
-          >
-            <div style={{
-              width: 44, height: 24, borderRadius: 12, position: 'relative',
-              background: encryptNext ? '#2ecc71' : 'rgba(255,255,255,0.1)',
-              transition: 'background 0.3s',
-            }}>
-              <div style={{
-                width: 20, height: 20, borderRadius: '50%', background: '#fff',
-                position: 'absolute', top: 2, left: encryptNext ? 22 : 2,
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-              }} />
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 15, fontWeight: 600, color: encryptNext ? '#2ecc71' : 'var(--text-main)', transition: 'color 0.3s' }}>
-                Сквозное шифрование (Сейф)
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--text-mute)', marginTop: 2 }}>
-                {encryptNext ? 'Файлы будут зашифрованы локально' : 'Нажмите, чтобы включить защиту'}
-              </span>
-            </div>
-
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 36, height: 36, borderRadius: '50%',
-              background: encryptNext ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.05)',
-              color: encryptNext ? '#2ecc71' : 'var(--text-mute)',
-              transition: 'all 0.3s', marginLeft: 8
-            }}>
-              {encryptNext ? <Lock size={18} /> : <Unlock size={18} />}
-            </div>
+        <div className="up-drop-main">
+          <div className="up-drop-icon"><UploadIcon size={queue.length > 0 ? 22 : 44} /></div>
+          <div className="up-drop-copy">
+            <h2>Перетащите файлы сюда</h2>
+            <p>или добавьте их с компьютера</p>
+          </div>
+          <div className="up-actions">
+            <button type="button" className="v3-btn primary" onClick={pickFiles}><UploadIcon size={16} /> Выбрать файлы</button>
+            <button type="button" className="v3-btn" onClick={() => pickFolder(encryptNext)}><FolderOpen size={16} /> Выбрать папку</button>
           </div>
         </div>
+        <button
+          type="button"
+          className={'up-encryption-toggle' + (encryptNext ? ' active' : '')}
+          role="switch"
+          aria-checked={encryptNext}
+          onClick={toggleEncryption}
+        >
+          <span className="up-toggle-track" aria-hidden="true"><span className="up-toggle-thumb" /></span>
+          <span className="up-encryption-copy">
+            <strong>Сквозное шифрование</strong>
+            <small>{encryptNext ? 'Файлы будут зашифрованы локально' : 'Защита новых файлов отключена'}</small>
+          </span>
+          <span className="up-encryption-icon" aria-hidden="true">{encryptNext ? <Lock size={17} /> : <Unlock size={17} />}</span>
+        </button>
       </div>
 
       {renderArchiveProgress()}
 
       {queue.length > 0 && archiveInfo === null && (
         <div className="up-queue">
-          <div className="up-queue-head">
-            <h2>Очередь загрузки</h2>
-            <button onClick={clearDone}>Очистить завершённые</button>
+          <div className={'up-queue-head' + (hasPending ? ' sticky' : '')}>
+            <div className="up-queue-title">
+              <h2>Очередь загрузки</h2>
+              <div className="up-queue-summary" role="status">
+                {uploadingCount > 0 && <span className="active">{uploadingCount} загружается</span>}
+                {waitingCount > 0 && <span>{waitingCount} в очереди</span>}
+                {failedCount > 0 && <span className="failed">{failedCount} с ошибкой</span>}
+                {doneCount > 0 && <span>{doneCount} готово</span>}
+              </div>
+            </div>
+            <button type="button" onClick={clearDone} disabled={doneCount === 0}><Trash2 size={14} /> Очистить завершённые</button>
           </div>
           <ul>
-            {queue.map(q => (
-              <QueueItem key={q.id} q={q} onCancel={(id) => { window.electronAPI.telegram.cancelUpload(id); removeItem(id) }} />
+            {visibleQueue.map(q => (
+              <UploadQueueItem key={q.id} q={q} onCancel={handleCancel} />
             ))}
           </ul>
         </div>
       )}
 
       {showPwdPrompt && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="v3-card" style={{ padding: 24, width: 400, maxWidth: '90%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0 }}>Настройка Сейфа</h3>
-            <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)' }}>Придумайте мастер-пароль. Он будет надежно сохранен на вашем устройстве.</p>
-            <input type="password" id="vault-pwd" placeholder="Мастер-пароль" style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-main)', width: '100%', boxSizing: 'border-box', fontSize: 16 }} autoFocus />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="v3-btn ghost" onClick={() => setShowPwdPrompt(false)}>Отмена</button>
-              <button className="v3-btn primary" onClick={async () => {
+        <div className="up-vault-overlay" onMouseDown={() => setShowPwdPrompt(false)}>
+          <div className="v3-card up-vault-modal" role="dialog" aria-modal="true" aria-labelledby="up-vault-title" onMouseDown={e => e.stopPropagation()}>
+            <div className="up-vault-icon" aria-hidden="true"><Lock size={21} /></div>
+            <h3 id="up-vault-title">Настройка Сейфа</h3>
+            <p>Придумайте мастер-пароль. Он будет надёжно сохранён на вашем устройстве.</p>
+            <label className="up-field-label" htmlFor="vault-pwd">Мастер-пароль</label>
+            <input
+              type="password"
+              id="vault-pwd"
+              className="v3-input"
+              placeholder="Введите мастер-пароль"
+              autoComplete="new-password"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') document.getElementById('up-vault-save')?.click() }}
+            />
+            <div className="up-vault-actions">
+              <button type="button" className="v3-btn ghost" onClick={() => setShowPwdPrompt(false)}>Отмена</button>
+              <button type="button" id="up-vault-save" className="v3-btn primary" onClick={async () => {
                 const pwd = (document.getElementById('vault-pwd') as HTMLInputElement).value
                 if (!pwd) return
                 await window.electronAPI.vault.setPassword(pwd)

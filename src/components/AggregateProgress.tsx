@@ -19,9 +19,13 @@ export default function AggregateProgress() {
   if (pendingQueue.length === 0 && pendingMyFiles.length === 0) return null
 
   const list = Object.values(items)
-  const active = list.filter(i => !i.finished)
+  const currentUploadIds = new Set([
+    ...queue.filter(q => q.status === 'uploading').map(q => q.id),
+    ...pendingMyFiles.map(p => p.id),
+  ])
+  const active = list.filter(i => !i.finished && currentUploadIds.has(i.id))
   
-  const totalQueueBytes = queue.reduce((s, q) => s + (q.fileSize || 0), 0)
+  const totalQueueBytes = queue.reduce((s, q) => q.status === 'failed' ? s : s + (q.fileSize || 0), 0)
   const totalMyFilesBytes = pendingMyFiles.reduce((s, p) => s + (p.total || 0), 0)
   const totalBytes = totalQueueBytes + totalMyFilesBytes
 
@@ -37,7 +41,7 @@ export default function AggregateProgress() {
   const sentBytes = sentQueueBytes + sentMyFilesBytes
   
   const overall = totalBytes > 0 ? Math.min(100, Math.floor((sentBytes / totalBytes) * 100)) : 0
-  const speed = list.reduce((s, i) => s + (i.speed || 0), 0)
+  const speed = active.reduce((s, i) => s + (i.speed || 0), 0)
   const remaining = Math.max(0, totalBytes - sentBytes)
   const eta = speed > 0 ? (remaining / speed) * 1000 : 0
   
@@ -60,7 +64,9 @@ export default function AggregateProgress() {
             {speed === 0 && <span>Подсчёт…</span>}
           </div>
         </div>
-        <div className="v3-progress"><div className="v3-progress-bar" style={{ width: overall + "%" }}/></div>
+        <div className="v3-progress" role="progressbar" aria-label="Общий прогресс загрузки" aria-valuemin={0} aria-valuemax={100} aria-valuenow={overall}>
+          <div className="v3-progress-bar" style={{ width: overall + "%" }}/>
+        </div>
       </div>
       {active.length > 0 && (
         <div className="v3-tray" data-testid="upload-tray">

@@ -21,7 +21,7 @@ function reducer(state: State, action: Action): State {
   }
   if (action.type === "finish") {
     const it = state.items[action.id]; if (!it) return state
-    return { items: { ...state.items, [action.id]: { ...it, finished: true, percent: 100 } } }
+    return { items: { ...state.items, [action.id]: { ...it, finished: true, percent: 100, speed: 0, eta: 0 } } }
   }
   if (action.type === "clear") { const c = { ...state.items }; delete c[action.id]; return { items: c } }
   return state

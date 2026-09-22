@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef, useEffect } from 'react'
+import React, { createContext, useCallback, useContext, useState, useRef, useEffect } from 'react'
 
 export interface QueueItem {
   id: string
@@ -86,7 +86,6 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
       if (!data?.queue) return
       setQueue(prev => {
         const previousById = new Map(prev.map(item => [item.id, item]))
-        const mainIds = new Set(data.queue.map((j: any) => j.id))
         const mainItems: QueueItem[] = data.queue.map((j: any) => ({
           ...(previousById.get(j.id) || {}),
           id: j.id, filePath: j.filePath, fileName: j.fileName || j.filePath?.split(/[/\\]/).pop() || '',
@@ -95,8 +94,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           sent: previousById.get(j.id)?.sent ?? j.sent ?? 0,
           total: previousById.get(j.id)?.total || j.total || j.fileSize || 0
         }))
-        const localOnly = prev.filter(q => !mainIds.has(q.id))
-        return [...localOnly, ...mainItems]
+        const mainById = new Map(mainItems.map(item => [item.id, item]))
+        const preservedOrder = prev.map(item => mainById.get(item.id) || item)
+        const restoredOnly = mainItems.filter(item => !previousById.has(item.id))
+        return [...preservedOrder, ...restoredOnly]
       })
     })
     return () => { off && off() }
@@ -215,8 +216,8 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     }, 2000)
   }
 
-  const removeItem = (id: string) => setQueue(prev => prev.filter(q => q.id !== id))
-  const clearDone = () => setQueue(prev => prev.filter(q => q.status !== 'done'))
+  const removeItem = useCallback((id: string) => setQueue(prev => prev.filter(q => q.id !== id)), [])
+  const clearDone = useCallback(() => setQueue(prev => prev.filter(q => q.status !== 'done')), [])
 
   return (
     <UploadQueueContext.Provider value={{ queue, archiveInfo, archivePhases, addFiles, removeItem, clearDone, pickFolder }}>
