@@ -123,13 +123,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const unsub = window.electronAPI.window?.onCloseBlocked?.((data: { activeUploads: number }) => {
-      window.electronAPI.app?.log?.('warn', `[renderer] close blocked — ${data.activeUploads} uploads still active`)
-    })
-    return () => { unsub?.() }
-  }, [])
-
-  useEffect(() => {
     const unsub = window.electronAPI.app?.onUpdateAvailable?.((data: { version: string; assetId: number; assetName: string; releaseNotes: string }) => {
       setUpdateData({ version: data.version, assetId: data.assetId, assetName: data.assetName, latestVersion: data.version, releaseNotes: data.releaseNotes || '' })
       smartTimerRef.current = setTimeout(() => {

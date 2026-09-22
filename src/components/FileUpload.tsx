@@ -70,26 +70,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   }
 
   const addFilesToQueue = (files: File[]) => {
-    const TWO_GB = 2 * 1024 * 1024 * 1024
-    const newItems: UploadFileItem[] = files.map(file => {
-      const fileSizeGB = file.size / TWO_GB
-      if (fileSizeGB > 2) {
-        return {
-          file,
-          path: resolvePath(file),
-          status: 'error' as const,
-          progress: 0,
-          error: 'Файл превышает лимит 2GB',
-        }
-      }
-      return {
+    const newItems: UploadFileItem[] = files.map(file => ({
         file,
         path: resolvePath(file),
         status: 'pending' as const,
         progress: 0,
         encrypt: encryptNext,
-      }
-    })
+      }))
     setUploadQueue(prev => [...prev, ...newItems])
   }
 
@@ -207,7 +194,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       <div className="upload-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 className="section-title">⬆️ Загрузка файлов</h2>
-          <p className="upload-subtitle">Перетащите файлы сюда или нажмите для выбора (до 2GB каждый)</p>
+          <p className="upload-subtitle">Перетащите файлы сюда или нажмите для выбора</p>
         </div>
         <label className="encrypt-toggle" onClick={e => e.stopPropagation()}>
           <input type="checkbox" checked={encryptNext} onChange={async (e) => {
@@ -249,7 +236,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
           <div className="dropzone-content">
             <div className="dropzone-icon">📤</div>
             <p className="dropzone-text">Перетащите файлы сюда или нажмите для выбора</p>
-            <p className="dropzone-hint">Максимальный размер: 2GB на файл</p>
+            <p className="dropzone-hint">Большие файлы автоматически делятся на части</p>
           </div>
         ) : (
           <div className="upload-queue">

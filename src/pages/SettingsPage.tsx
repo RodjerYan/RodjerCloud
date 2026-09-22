@@ -151,15 +151,14 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
           <div className="settings-row">
             <div className="settings-info">
               <div className="settings-title">Одновременных загрузок</div>
-              <div className="settings-desc">Количество файлов, загружаемых параллельно (до 5)</div>
+              <div className="settings-desc">По одной — стабильный режим для больших файлов</div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="number" min={1} max={5} value={concurrencyDraft}
-                onChange={e => { const v = Math.max(1, Math.min(5, parseInt(e.target.value) || 1)); setConcurrencyDraft(v); setConcurrencySaved(v === concurrency) }}
+              <input type="number" min={1} max={1} value={1} disabled
                 style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
-              <button onClick={saveConcurrency} disabled={concurrencySaved}
+              <button onClick={saveConcurrency} disabled
                 style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: concurrencySaved ? 'rgba(255,255,255,0.05)' : '#7c83ff', color: concurrencySaved ? 'rgba(255,255,255,0.3)' : '#fff', fontWeight: 600, fontSize: 13, cursor: concurrencySaved ? 'default' : 'pointer', transition: 'all 0.2s' }}>
-                {concurrencySaved ? 'Сохранено' : 'Сохранить'}
+                Стабильный режим
               </button>
             </div>
           </div>

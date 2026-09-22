@@ -5,8 +5,7 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
 import { useUploadQueue } from '../lib/UploadQueueContext'
 
-const TG_LIMIT = 2 * 1024 * 1024 * 1024
-const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
+const CHUNK_SIZE = 1 * 1024 * 1024 * 1024
 
 const QueueItem = React.memo(({ q, onCancel }: { q: any; onCancel: (id: string) => void }) => (
   <li className={'up-item up-item-' + q.status}>
@@ -14,8 +13,8 @@ const QueueItem = React.memo(({ q, onCancel }: { q: any; onCancel: (id: string) 
       <div className="up-item-name">
         {q.encrypt && <span title="Будет зашифровано">🔒 </span>}
         {q.fileName}
-        {q.fileSize > TG_LIMIT && (
-          <span className="up-warn"><AlertTriangle size={12} /> Exceeds Telegram 2GB limit</span>
+        {q.fileSize > CHUNK_SIZE && (
+          <span className="up-warn"><AlertTriangle size={12} /> Будет разделён на {Math.ceil(q.fileSize / CHUNK_SIZE)} части</span>
         )}
       </div>
       <div className="up-item-meta">{fmtSize(q.fileSize)} • {q.status === 'done' ? 'готово' : q.status === 'uploading' ? 'загрузка' : q.status === 'waiting' ? 'ожидание' : q.status === 'failed' ? 'ошибка' : q.status}{q.error ? ' - ' + q.error : ''}</div>

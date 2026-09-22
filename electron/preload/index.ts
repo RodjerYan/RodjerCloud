@@ -188,11 +188,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return null
     },
     reportMemory: (data: any) => ipcRenderer.send('renderer:mem-report', data),
-    onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => {
-      const listener = (_: any, data: any) => cb(data)
-      ipcRenderer.on('app:close-blocked', listener)
-      return () => ipcRenderer.removeListener('app:close-blocked', listener)
-    },
+    reportLag: (data: any) => ipcRenderer.send('renderer:lag-report', data),
   },
   bot: {
     getHashDb: () => ipcRenderer.invoke('bot:get-hash-db'),

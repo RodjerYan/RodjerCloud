@@ -33,7 +33,9 @@ export class AutoSyncService {
   private onEvent: ((e: SyncEvent) => void) | null = null
   private uploadedIndex: Set<string> = new Set()
   private trackerDirty = false
+  private watchUploadChain: Promise<void> = Promise.resolve()
   private static MAX_UPLOADED_INDEX = 50000
+  private static MAX_COMPLETED_QUEUE_ITEMS = 100
 
   constructor(tg: TelegramService) { this.tg = tg; this.setDefaults() }
 
@@ -89,7 +91,16 @@ export class AutoSyncService {
     this.onEvent?.(ev)
   }
 
-  private emitQueue() { this.emit({ type: 'queue', queue: [...this.queue] }) }
+  private trimQueue() {
+    const completed = this.queue.filter(item => item.status === 'done').slice(-AutoSyncService.MAX_COMPLETED_QUEUE_ITEMS)
+    const unfinished = this.queue.filter(item => item.status !== 'done')
+    this.queue = [...unfinished, ...completed]
+  }
+
+  private emitQueue() {
+    this.trimQueue()
+    this.emit({ type: 'queue', queue: [...this.queue] })
+  }
 
   getConfig() { return { ...this.config } }
 
@@ -130,7 +141,7 @@ export class AutoSyncService {
     for (const p of this.config.excludePatterns) { if (fp.includes(p)) return false }
     try {
       const s = fs.statSync(fp)
-      if (s.size === 0 || s.size > 2 * 1024 * 1024 * 1024) return false
+      if (s.size === 0) return false
     } catch { return false }
     return true
   }
@@ -156,7 +167,6 @@ export class AutoSyncService {
     try {
       const s = fs.statSync(fp)
       if (s.size === 0) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: 'Пустой файл' }); return false }
-      if (s.size > 2 * 1024 * 1024 * 1024) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: 'Файл >2GB' }); return false }
     } catch (e) { if (!silent) this.emit({ type: 'skipped', file: path.basename(fp), error: `Ошибка чтения: ${e}` }); return false }
     return true
   }
@@ -180,7 +190,11 @@ export class AutoSyncService {
       await new Promise(r => setTimeout(r, 300))
       if (!fs.existsSync(fp)) { this.queue = this.queue.filter(q => q.id !== id); this.emitQueue(); return }
 
+      let lastProgressEmit = 0
       await this.tg.uploadFile(fp, (sent, total) => {
+        const now = Date.now()
+        if (sent < total && now - lastProgressEmit < 500) return
+        lastProgressEmit = now
         item.percent = Math.round((sent / total) * 100)
         item.sent = sent; item.total = total
         this.emitQueue()
@@ -194,7 +208,6 @@ export class AutoSyncService {
       try { this.tg.invalidateFileCache() } catch {}
     } catch (err: any) {
       console.error(`AutoSync upload error for ${fp}:`, err.message, err.stack)
-      this.markUploaded(fp)
       const item = this.queue.find(q => q.filePath === fp && q.status !== 'done')
       if (item) { item.status = 'failed'; item.error = err.message; this.emitQueue() }
       this.failedCount++
@@ -226,7 +239,11 @@ export class AutoSyncService {
     })
     this.watcher.on('add', (fp: string) => {
       this.emit({ type: 'detected', file: fp })
-      if (this.shouldUploadFile(fp)) this.uploadOne(fp)
+      if (this.shouldUploadFile(fp)) {
+        this.watchUploadChain = this.watchUploadChain
+          .then(() => this.running ? this.uploadOne(fp) : undefined)
+          .catch(err => this.emit({ type: 'error', file: path.basename(fp), error: String(err) }))
+      }
     })
     this.watcher.on('error', (err: unknown) => this.emit({ type: 'error', error: String(err) }))
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net, crashReporter } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, screen, shell, protocol, net } from 'electron'
 import { execSync, spawn } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -15,10 +15,6 @@ import { vaultService } from './vault-service'
 import { startVideoStreamServer } from './video-stream-server'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
-app.commandLine.appendSwitch('disable-gpu-compositing')
-app.disableHardwareAcceleration()
-app.commandLine.appendSwitch('disable-gpu')
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -119,16 +115,6 @@ function createWindow() {
 
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     log('error', `[render-process-gone] reason=${details.reason} exitCode=${details.exitCode} activeUploads=${activeUploads}`)
-    if (details.reason === 'oom' || details.reason === 'crashed') {
-      log('warn', `[render-process-gone] auto-recovering in 2s...`)
-      if (uploadsInProgress) autoReconnectTelegram()
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          log('warn', `[render-process-gone] reloading window`)
-          mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
-        }
-      }, 2000)
-    }
   })
 
   mainWindow.webContents.on('unresponsive', async () => {
@@ -141,16 +127,9 @@ function createWindow() {
     log('warn', `[responsive] renderer became responsive again`)
   })
 
-  mainWindow.on('close', (e) => {
+  mainWindow.on('close', () => {
     const stack = new Error().stack || ''
     log('warn', `[window.close] fired! activeUploads=${activeUploads} uploadsInProgress=${uploadsInProgress}\nStack: ${stack}`)
-    if (activeUploads > 0 && uploadsInProgress) {
-      log('warn', `[window.close] BLOCKING close — ${activeUploads} uploads still active!`)
-      e.preventDefault()
-      if (mainWindow) {
-        mainWindow.webContents.send('app:close-blocked', { activeUploads })
-      }
-    }
   })
 
   mainWindow.on('closed', () => {
@@ -229,13 +208,6 @@ async function checkUpdate() {
     log('error', '[update] check failed: ' + (e as Error).message)
   }
 }
-
-crashReporter.start({
-  submitURL: '',
-  productName: 'RodjerCloud',
-  compress: true,
-  uploadToServer: false,
-})
 
 app.whenReady().then(async () => {
   protocol.handle('local-file', (request) => {
@@ -516,6 +488,7 @@ ipcMain.handle('telegram:reconnect', async () => {
       }
     }
     await telegramService.createCloudFolder()
+    restorePersistedQueue()
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -530,18 +503,31 @@ ipcMain.handle('telegram:get-user-info', async () => {
 // ===== Upload queue =====
 type UploadJob = { id: string; filePath: string; fileName: string; fileSize: number; encrypt?: boolean; customFileName?: string; resolve: (v: any) => void }
 const uploadQueue: UploadJob[] = []
+const activeUploadJobs = new Map<string, UploadJob>()
 let activeUploads = 0
 let uploadsInProgress = false
 const uploadCancelled = new Set<string>()
+let queuePumpRunning = false
+let reconnectAfterUploads = false
 
+function uploadStateSnapshot() {
+  const active = Array.from(activeUploadJobs.values()).map(j => ({
+    id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize,
+    status: 'uploading' as const, percent: 0,
+  }))
+  const waiting = uploadQueue.map(j => ({
+    id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize,
+    status: 'waiting' as const, percent: 0,
+  }))
+  return [...active, ...waiting]
+}
 function broadcastUploadState() {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  const activeJobs = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, status: 'waiting' as const, percent: 0 }))
-  try { mainWindow.webContents.send('telegram:queue-state', { queue: activeJobs, activeUploads }) } catch {}
+  try { mainWindow.webContents.send('telegram:queue-state', { queue: uploadStateSnapshot(), activeUploads }) } catch {}
 }
 function persistUploadQueue() {
   try {
-    const state = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, encrypt: j.encrypt, customFileName: j.customFileName }))
+    const state = [...activeUploadJobs.values(), ...uploadQueue].map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, encrypt: j.encrypt, customFileName: j.customFileName }))
     fs.writeFileSync(path.join(app.getPath('userData'), 'upload-queue.json'), JSON.stringify(state))
   } catch {}
 }
@@ -559,43 +545,86 @@ function loadPersistedQueue(): Array<{ id: string; filePath: string; fileName: s
   return []
 }
 
-let tgReconnectTimer: ReturnType<typeof setTimeout> | null = null
-async function autoReconnectTelegram() {
-  if (tgReconnectTimer) return
-  tgReconnectTimer = setTimeout(async () => { tgReconnectTimer = null }, 30000)
-  try {
-    const sessionData = await storageService.getSession()
-    if (!sessionData) { log('error', '[reconnect] no session found'); return }
-    log('warn', '[reconnect] reconnecting Telegram client...')
-    await telegramService.reconnect(sessionData.session)
-    log('info', '[reconnect] Telegram reconnected successfully')
-    if (uploadsInProgress) processQueue()
-  } catch (e) {
-    log('error', '[reconnect] failed: ' + (e as Error).message)
-  }
-}
-async function getConcurrency(): Promise<number> {
-  const p = await readPrefs()
-  const c = parseInt(String(p.uploadConcurrency || 3), 10)
-  return Math.min(3, Math.max(1, isNaN(c) ? 3 : c))
-}
-async function processQueue() {
-  const baseLimit = await getConcurrency()
-  while (activeUploads < baseLimit && uploadQueue.length > 0) {
-    const job = uploadQueue[0]
-    let limit = baseLimit
+let persistedQueueRestored = false
+function restorePersistedQueue() {
+  if (persistedQueueRestored) return
+  persistedQueueRestored = true
+
+  const restored = loadPersistedQueue()
+  for (const item of restored) {
     try {
-      const st = fs.statSync(job.filePath)
-      if (st.size > 500 * 1024 * 1024) limit = 1
-      else if (st.size > 100 * 1024 * 1024) limit = Math.min(2, baseLimit)
+      const stat = fs.statSync(item.filePath)
+      if (!stat.isFile()) continue
+      if (uploadQueue.some(job => job.id === item.id) || activeUploadJobs.has(item.id)) continue
+      uploadQueue.push({
+        ...item,
+        fileName: item.fileName || path.basename(item.filePath),
+        fileSize: stat.size,
+        resolve: () => {},
+      })
     } catch {}
-    if (activeUploads >= limit) break
-    uploadQueue.shift()!
-    activeUploads++
+  }
+
+  if (uploadQueue.length > 0) {
     uploadsInProgress = true
     persistUploadQueue()
     broadcastUploadState()
-    runUpload(job).finally(() => { activeUploads--; if (activeUploads === 0 && uploadQueue.length === 0) { uploadsInProgress = false; clearPersistedQueue() }; persistUploadQueue(); broadcastUploadState(); processQueue() })
+    void processQueue()
+  } else {
+    clearPersistedQueue()
+  }
+}
+
+let tgReconnectPromise: Promise<void> | null = null
+async function autoReconnectTelegram() {
+  if (tgReconnectPromise) return tgReconnectPromise
+  tgReconnectPromise = (async () => {
+    try {
+      const sessionData = await storageService.getSession()
+      if (!sessionData) { log('error', '[reconnect] no session found'); return }
+      log('warn', '[reconnect] reconnecting Telegram client...')
+      await telegramService.reconnect(sessionData.session)
+      log('info', '[reconnect] Telegram reconnected successfully')
+    } catch (e) {
+      log('error', '[reconnect] failed: ' + (e as Error).message)
+    } finally {
+      tgReconnectPromise = null
+    }
+  })()
+  return tgReconnectPromise
+}
+async function processQueue() {
+  if (queuePumpRunning) return
+  queuePumpRunning = true
+  try {
+    while (uploadQueue.length > 0 && activeUploads === 0) {
+      const job = uploadQueue[0]
+      uploadQueue.shift()
+      activeUploadJobs.set(job.id, job)
+      activeUploads = activeUploadJobs.size
+      uploadsInProgress = true
+      persistUploadQueue()
+      broadcastUploadState()
+      void runUpload(job).finally(async () => {
+        activeUploadJobs.delete(job.id)
+        activeUploads = activeUploadJobs.size
+        if (activeUploads === 0 && reconnectAfterUploads) {
+          reconnectAfterUploads = false
+          await autoReconnectTelegram()
+        }
+        if (activeUploads === 0 && uploadQueue.length === 0) {
+          uploadsInProgress = false
+          clearPersistedQueue()
+        } else {
+          uploadsInProgress = true
+          persistUploadQueue()
+        }
+        broadcastUploadState()
+        void processQueue()
+      })
+    }
+  } finally {
+    queuePumpRunning = false
   }
 }
 async function runUpload(job: UploadJob): Promise<void> {
@@ -629,6 +658,7 @@ async function runUpload(job: UploadJob): Promise<void> {
       if (mainWindow && !mainWindow.isDestroyed()) {
         try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: false, error: 'cancelled' }) } catch {}
       }
+      job.resolve({ success: false, error: 'cancelled' })
       uploadCancelled.delete(job.id)
       return
     }
@@ -647,8 +677,8 @@ async function runUpload(job: UploadJob): Promise<void> {
       }
       job.resolve({ success: false, error: errMsg })
       if (errMsg.includes('disconnected') || errMsg.includes('disconnect')) {
-        log('warn', `[upload] Telegram disconnected during upload, attempting reconnect...`)
-        autoReconnectTelegram()
+        log('warn', `[upload] Telegram disconnected; reconnect deferred until active uploads settle`)
+        reconnectAfterUploads = true
       }
     } else {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -666,17 +696,34 @@ ipcMain.handle('telegram:upload-file', async (event, filePath: string, id?: stri
   try {
     const jobId = id || Math.random().toString(36).slice(2)
     let fileName = path.basename(filePath)
-    let fileSize = 0
-    try { const st = fs.statSync(filePath); fileSize = st.size } catch {}
+    const st = fs.statSync(filePath)
+    if (!st.isFile()) return { success: false, error: 'Selected path is not a file' }
+    const fileSize = st.size
     return await new Promise((resolve) => {
       uploadQueue.push({ id: jobId, filePath, fileName, fileSize, encrypt, customFileName, resolve })
-      processQueue()
+      uploadsInProgress = true
+      persistUploadQueue()
+      broadcastUploadState()
+      void processQueue()
     })
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('telegram:cancel-upload', async (event, id: string) => {
-  uploadCancelled.add(id)
+  const queuedIndex = uploadQueue.findIndex(job => job.id === id)
+  if (queuedIndex !== -1) {
+    const [job] = uploadQueue.splice(queuedIndex, 1)
+    job.resolve({ success: false, error: 'cancelled' })
+    if (activeUploads === 0 && uploadQueue.length === 0) {
+      uploadsInProgress = false
+      clearPersistedQueue()
+    } else {
+      persistUploadQueue()
+    }
+    broadcastUploadState()
+    return { success: true }
+  }
+  if (activeUploadJobs.has(id)) uploadCancelled.add(id)
   return { success: true }
 })
 
@@ -702,7 +749,7 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
         const r = await telegramService.downloadFile(f.messageId, f.fileName)
         if (r?.filePath) {
           const dest = path.join(downloadDir, f.fileName)
-          fs.copyFileSync(r.filePath, dest)
+          await fs.promises.copyFile(r.filePath, dest)
         }
         const p = Math.min(100, Math.floor(((i + 1) / options.files.length) * 100))
         try { event.sender.send('archive-progress', { percent: p, phase: 'downloading' }) } catch {}
@@ -710,17 +757,17 @@ ipcMain.handle('folder:archive-and-upload', async (event, options: {
     }
 
     if (options.folderPath) {
-      function walkDir(dir: string): string[] {
+      async function walkArchiveDir(dir: string): Promise<string[]> {
         const out: string[] = []
-        const items = fs.readdirSync(dir, { withFileTypes: true })
+        const items = await fs.promises.readdir(dir, { withFileTypes: true })
         for (const item of items) {
           const full = path.join(dir, item.name)
-          if (item.isDirectory()) out.push(...walkDir(full))
+          if (item.isDirectory()) out.push(...await walkArchiveDir(full))
           else if (item.isFile()) out.push(full)
         }
         return out
       }
-      const allFiles = walkDir(options.folderPath)
+      const allFiles = await walkArchiveDir(options.folderPath)
       totalFiles = allFiles.length
     }
 
@@ -951,13 +998,13 @@ ipcMain.handle('dialog:pick-folder', async () => {
 })
 
 // ===== V2 handlers =====
-function walkDir(dir: string, exclude: string[] = []): string[] {
+async function walkDir(dir: string, exclude: string[] = []): Promise<string[]> {
   const out: string[] = []
-  const items = fs.readdirSync(dir, { withFileTypes: true })
+  const items = await fs.promises.readdir(dir, { withFileTypes: true })
   for (const item of items) {
     const full = path.join(dir, item.name)
     if (exclude.some(p => full.includes(p))) continue
-    if (item.isDirectory()) out.push(...walkDir(full, exclude))
+    if (item.isDirectory()) out.push(...await walkDir(full, exclude))
     else if (item.isFile()) out.push(full)
   }
   return out
@@ -969,11 +1016,11 @@ ipcMain.handle('dialog:pick-folder-recursive', async () => {
     if (result.canceled || !result.filePaths || result.filePaths.length === 0) return { success: false, error: 'No folder selected' }
     const folder = result.filePaths[0]
     const exclude = ['node_modules', '.git', '.DS_Store']
-    const all = walkDir(folder, exclude)
-    const files = all.map(fp => {
-      const stat = fs.statSync(fp)
+    const all = await walkDir(folder, exclude)
+    const files = await Promise.all(all.map(async fp => {
+      const stat = await fs.promises.stat(fp)
       return { filePath: fp, fileName: path.basename(fp), fileSize: stat.size }
-    })
+    }))
     return { success: true, data: { folderPath: folder, files } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -1042,18 +1089,11 @@ ipcMain.handle('storage:set-download-path', async (_, p: string) => {
 })
 
 ipcMain.handle('storage:get-upload-concurrency', async () => {
-  try { const prefs = await readPrefs(); return { success: true, data: prefs.uploadConcurrency || 5 } }
-  catch (error) { return { success: false, error: (error as Error).message } }
+  return { success: true, data: 1 }
 })
 
 ipcMain.handle('storage:set-upload-concurrency', async (_, n: number) => {
-  try {
-    return await withPrefsLock(async () => {
-      const prefs = await readPrefs(); prefs.uploadConcurrency = Math.min(5, Math.max(1, n)); await writePrefs(prefs)
-      return { success: true }
-    })
-  }
-  catch (error) { return { success: false, error: (error as Error).message } }
+  return { success: true, data: 1 }
 })
 
 ipcMain.handle('storage:get-turbo-mode', async () => {
@@ -1099,9 +1139,12 @@ ipcMain.on('renderer:mem-report', (_, data: { usedHeap: number; totalHeap: numbe
   log('warn', `[renderer-self] usedHeap=${(data.usedHeap / 1024 / 1024).toFixed(0)}MB totalHeap=${(data.totalHeap / 1024 / 1024).toFixed(0)}MB limit=${(data.limit / 1024 / 1024).toFixed(0)}MB domNodes=${data.domNodes} listeners=${data.eventListeners} activeUploads=${activeUploads}`)
 })
 
+ipcMain.on('renderer:lag-report', (_, data: { maxLag: string; avgLag: string; samples: number }) => {
+  log('warn', `[renderer-lag] max=${data.maxLag}ms avg=${data.avgLag}ms samples=${data.samples} activeUploads=${activeUploads}`)
+})
+
 ipcMain.handle('telegram:get-upload-state', () => {
-  const activeJobs = uploadQueue.map(j => ({ id: j.id, filePath: j.filePath, fileName: j.fileName, fileSize: j.fileSize, status: 'waiting' as const, percent: 0 }))
-  return { success: true, data: { queue: activeJobs, activeUploads, uploadsInProgress } }
+  return { success: true, data: { queue: uploadStateSnapshot(), activeUploads, uploadsInProgress } }
 })
 
 const GITHUB_REPO = 'RodjerYan/RodjerCloud'

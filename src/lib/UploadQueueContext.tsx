@@ -1,8 +1,5 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react'
 
-const CHUNK_GB = 1.95
-const CHUNK_SIZE = Math.floor(CHUNK_GB * 1024 * 1024 * 1024)
-
 export interface QueueItem {
   id: string
   filePath: string
@@ -39,8 +36,6 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   const uploadStart = useRef(0)
   const isProcessing = useRef(false)
 
-  const TG_LIMIT = 2 * 1024 * 1024 * 1024
-
   useEffect(() => {
     (async () => {
       try {
@@ -48,7 +43,8 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         if (r?.success && r.data?.queue?.length > 0) {
           const restored: QueueItem[] = r.data.queue.map((j: any) => ({
             id: j.id, filePath: j.filePath, fileName: j.fileName || j.filePath?.split(/[/\\]/).pop() || '',
-            fileSize: j.fileSize || 0, status: 'uploading', percent: 0, sent: 0, total: j.fileSize || 0
+            fileSize: j.fileSize || 0, status: j.status || 'waiting', percent: j.percent || 0,
+            sent: j.sent || 0, total: j.total || j.fileSize || 0
           }))
           setQueue(prev => {
             const existingIds = new Set(prev.map(p => p.id))
@@ -61,15 +57,45 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   }, [])
 
   useEffect(() => {
+    let lastTime = performance.now()
+    let maxLag = 0
+    let samples = 0
+    let totalLag = 0
+    const interval = setInterval(() => {
+      const now = performance.now()
+      const lag = now - lastTime - 1000
+      lastTime = now
+      if (lag > 50) {
+        samples++
+        totalLag += lag
+        if (lag > maxLag) maxLag = lag
+      }
+      if (samples >= 5) {
+        const avg = (totalLag / samples).toFixed(0)
+        try { window.electronAPI?.window?.reportLag?.({ maxLag: maxLag.toFixed(0), avgLag: avg, samples }) } catch {}
+        maxLag = 0
+        samples = 0
+        totalLag = 0
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
     const off = window.electronAPI.telegram.onQueueState?.((data: any) => {
       if (!data?.queue) return
       setQueue(prev => {
+        const previousById = new Map(prev.map(item => [item.id, item]))
         const mainIds = new Set(data.queue.map((j: any) => j.id))
         const mainItems: QueueItem[] = data.queue.map((j: any) => ({
+          ...(previousById.get(j.id) || {}),
           id: j.id, filePath: j.filePath, fileName: j.fileName || j.filePath?.split(/[/\\]/).pop() || '',
-          fileSize: j.fileSize || 0, status: j.status || 'waiting', percent: j.percent || 0, sent: j.sent || 0, total: j.fileSize || j.total || 0
+          fileSize: j.fileSize || 0, status: j.status || 'waiting',
+          percent: previousById.get(j.id)?.percent ?? j.percent ?? 0,
+          sent: previousById.get(j.id)?.sent ?? j.sent ?? 0,
+          total: previousById.get(j.id)?.total || j.total || j.fileSize || 0
         }))
-        const localOnly = prev.filter(q => !mainIds.has(q.id) && q.status !== 'done' && q.status !== 'failed')
+        const localOnly = prev.filter(q => !mainIds.has(q.id))
         return [...localOnly, ...mainItems]
       })
     })
@@ -90,26 +116,12 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   }
 
   const processQueue = async () => {
-    let limit = 3
-    try {
-      const r = await window.electronAPI.storage.getUploadConcurrency()
-      if (r.success && r.data) limit = Math.min(3, Math.max(1, r.data))
-    } catch {}
-
     const processingIds = new Set<string>()
     let active = 0
     const runNext = () => {
-      while (active < limit) {
+      while (active < 1) {
         const it = queueRef.current.find(q => q.status === 'waiting' && !processingIds.has(q.id))
         if (!it) break
-        if (it.fileSize > TG_LIMIT) {
-          setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'failed', error: 'Exceeds 2GB' } : q))
-          continue
-        }
-        let effectiveLimit = limit
-        if (it.fileSize > 500 * 1024 * 1024) effectiveLimit = 1
-        else if (it.fileSize > 100 * 1024 * 1024) effectiveLimit = Math.min(2, limit)
-        if (active >= effectiveLimit) break
         processingIds.add(it.id)
         active++
         setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'uploading' } : q))
@@ -117,7 +129,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           setQueue(prev => prev.map(q => q.id === it.id
             ? { ...q, status: res.success ? 'done' : 'failed', percent: res.success ? 100 : q.percent, error: res.success ? undefined : res.error }
             : q))
-        }).finally(() => { active--; processingIds.delete(it.id); runNext() })
+        }).finally(() => {
+          active--
+          processingIds.delete(it.id)
+          runNext()
+        })
       }
       if (active === 0) isProcessing.current = false
     }

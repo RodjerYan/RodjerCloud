@@ -75,6 +75,7 @@ export class TelegramService {
   private client: TelegramClient | null = null
   private phoneNumber: string = ''
   private channelId: bigint | null = null
+  private uploadChain: Promise<void> = Promise.resolve()
 
   private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
   private processingHeavyQueue = false
@@ -450,7 +451,14 @@ export class TelegramService {
     return await this.createPrivateChannel()
   }
 
-  async uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
+  uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
+    const task = this.uploadChain.then(() => this.uploadFileInternal(filePath, onProgress, encrypt, customFileName, checkCancelled))
+    this.uploadChain = task.then(() => undefined, () => undefined)
+    return task
+  }
+
+  private async uploadFileInternal(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
+    if (checkCancelled?.()) throw new Error('Upload cancelled by user')
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
     const memBefore = process.memoryUsage()
@@ -464,7 +472,7 @@ export class TelegramService {
     if (customFileName) {
       const tempDir = app.getPath('temp')
       const newPath = path.join(tempDir, customFileName)
-      fs.copyFileSync(filePath, newPath)
+      await fs.promises.copyFile(filePath, newPath)
       uploadPath = newPath
       isTemp = true
     }
@@ -661,6 +669,25 @@ export class TelegramService {
         const SEND_TIMEOUT = Math.max(30 * 60 * 1000, Math.ceil(partSizeGB * 20) * 60 * 1000)
         console.log(`[upload] part ${i + 1}/${totalParts}: ${this.formatFileSize(partSizeBytes)}, timeout=${Math.round(SEND_TIMEOUT / 60000)}min, workers=${workersCount}`)
         console.log(`[upload] calling sendFile: ${fileName} part ${i + 1}/${totalParts}, ${this.formatFileSize(partSizeBytes)}, workers=${workersCount}`)
+        const progressCallback: any = (progress: any) => {
+          try {
+            const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
+            const sent = val <= 1 ? Math.round(val * partSizeBytes) : Math.min(val, partSizeBytes)
+            if (sent > partSent) {
+              const diff = sent - partSent
+              totalSent += diff
+              partSent = sent
+              onProgress?.(totalSent, sizeBytes)
+            }
+          } catch (err) {
+            console.error('Progress callback error:', err)
+          }
+        }
+        Object.defineProperty(progressCallback, 'isCanceled', {
+          configurable: true,
+          get: () => checkCancelled?.() === true,
+        })
+
         const sendPromise = this.client!.sendFile(this.channelId as any, {
           file: partPath,
           caption: captionStr,
@@ -668,25 +695,18 @@ export class TelegramService {
           forceDocument: true,
           workers: workersCount,
           thumb: i === 0 ? thumbBuffer : undefined,
-          progressCallback: (progress: any) => {
-            try {
-              const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
-              const sent = val <= 1 ? Math.round(val * partSizeBytes) : Math.min(val, partSizeBytes)
-              if (sent > partSent) {
-                const diff = sent - partSent
-                totalSent += diff
-                partSent = sent
-                onProgress?.(totalSent, sizeBytes)
-              }
-            } catch (err) {
-              console.error('Progress callback error:', err)
-            }
-          },
+          progressCallback,
         } as any)
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`sendFile timeout after ${Math.round(SEND_TIMEOUT / 60000)}min for ${fileName} part ${i + 1}/${totalParts}`)), SEND_TIMEOUT)
-        )
-        const result = await Promise.race([sendPromise, timeoutPromise])
+        let sendTimer: ReturnType<typeof setTimeout> | undefined
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          sendTimer = setTimeout(() => reject(new Error(`sendFile timeout after ${Math.round(SEND_TIMEOUT / 60000)}min for ${fileName} part ${i + 1}/${totalParts}`)), SEND_TIMEOUT)
+        })
+        let result: any
+        try {
+          result = await Promise.race([sendPromise, timeoutPromise])
+        } finally {
+          if (sendTimer) clearTimeout(sendTimer)
+        }
 
         if (isMultipart) {
           try { fs.unlinkSync(partPath) } catch {}

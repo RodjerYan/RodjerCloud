@@ -12,6 +12,8 @@ declare global {
         uploadFile: (filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
         cancelUpload: (id: string) => Promise<{ success: boolean; error?: string }>
         onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => () => void
+        getUploadState: () => Promise<{ success: boolean; data?: { queue: any[]; activeUploads: number; uploadsInProgress: boolean }; error?: string }>
+        onQueueState: (cb: (data: { queue: any[]; activeUploads: number }) => void) => () => void
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
         listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
@@ -123,7 +125,7 @@ declare global {
         maximize: () => Promise<void>
         close: () => Promise<void>
         forceQuit: () => Promise<void>
-        onCloseBlocked: (cb: (data: { activeUploads: number }) => void) => () => void
+        reportLag: (data: { maxLag: string; avgLag: string; samples: number }) => void
       }
     }
   }
