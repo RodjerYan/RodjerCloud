@@ -14,6 +14,8 @@ import { BulkProgressModal } from '../components/BulkProgressModal'
 import '../styles/duplicate-modal.css'
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+const DUP_PAGE_SIZE = 20
+const SCROLL_THRESHOLD = 600
 
 import { fileDate, groupByDay } from '../lib/utils'
 import { FileThumb } from '../components/FileThumb'
@@ -36,8 +38,10 @@ export default function AlbumsPage() {
   const [selectedDupIds, setSelectedDupIds] = useState<Set<number>>(new Set())
   const [dupProgress, setDupProgress] = useState<{ title: string; items: any[]; current: number; total: number; visible: boolean; onClose: () => void } | null>(null)
   const [keepStrategy, setKeepStrategy] = useState<'oldest' | 'newest'>('oldest')
+  const [visibleDupCount, setVisibleDupCount] = useState(DUP_PAGE_SIZE)
 
   const loaderRef = useRef<HTMLDivElement>(null)
+  const dupScrollRafRef = useRef(0)
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -179,7 +183,52 @@ export default function AlbumsPage() {
 
   useEffect(() => {
     setSelectedDupIds(new Set())
+    setVisibleDupCount(DUP_PAGE_SIZE)
   }, [openAlbum, hashTrigger])
+
+  const visibleDupGroups = useMemo(
+    () => dupGroupList.slice(0, visibleDupCount),
+    [dupGroupList, visibleDupCount]
+  )
+
+  const isDuplicatesView = !!(openAlbum && SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates)
+
+  useEffect(() => {
+    if (!isDuplicatesView) return
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      if (dupScrollRafRef.current) return
+      const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      if (distanceToBottom >= SCROLL_THRESHOLD) return
+      if (visibleDupCount >= dupGroupList.length) return
+      dupScrollRafRef.current = requestAnimationFrame(() => {
+        dupScrollRafRef.current = 0
+        setVisibleDupCount(prev => Math.min(prev + DUP_PAGE_SIZE, dupGroupList.length))
+      })
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (dupScrollRafRef.current) {
+        cancelAnimationFrame(dupScrollRafRef.current)
+        dupScrollRafRef.current = 0
+      }
+    }
+  }, [isDuplicatesView, visibleDupCount, dupGroupList.length])
+
+  useEffect(() => {
+    if (!isDuplicatesView) return
+    const el = loaderRef.current
+    if (!el || visibleDupCount >= dupGroupList.length) return
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) {
+        setVisibleDupCount(prev => Math.min(prev + DUP_PAGE_SIZE, dupGroupList.length))
+      }
+    }, { rootMargin: '600px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [isDuplicatesView, visibleDupCount, dupGroupList.length])
 
   const toggleDupSel = (id: number) => {
     setSelectedDupIds(prev => {
@@ -575,7 +624,7 @@ export default function AlbumsPage() {
                       Оригинал: {keepStrategy === 'oldest' ? 'старый файл' : 'новый файл'}
                     </span>
                   </div>
-                  {dupGroupList.map(([key, files]) => {
+                  {visibleDupGroups.map(([key, files]) => {
                     const name = files[0]?.fileName || key
                     const keepId = keepIdForGroup(files)
                     const dropIds = new Set(idsToDrop(files))
@@ -692,6 +741,12 @@ export default function AlbumsPage() {
                     )
                   })}
                 </>
+              )}
+              {visibleDupCount < dupGroupList.length && (
+                <div className="dup-load-more" role="status">
+                  <Loader2 size={16} className="spin" aria-hidden />
+                  <span>Показано {visibleDupCount} из {dupGroupList.length} групп · прокрутите ниже</span>
+                </div>
               )}
               <div ref={loaderRef} style={{ height: 20, flexShrink: 0 }} />
             </>
