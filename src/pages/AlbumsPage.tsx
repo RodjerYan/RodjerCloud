@@ -39,9 +39,12 @@ export default function AlbumsPage() {
   const [dupProgress, setDupProgress] = useState<{ title: string; items: any[]; current: number; total: number; visible: boolean; onClose: () => void } | null>(null)
   const [keepStrategy, setKeepStrategy] = useState<'oldest' | 'newest'>('oldest')
   const [visibleDupCount, setVisibleDupCount] = useState(DUP_PAGE_SIZE)
+  const [visibleAlbumCount, setVisibleAlbumCount] = useState(DUP_PAGE_SIZE)
 
   const loaderRef = useRef<HTMLDivElement>(null)
+  const albumLoaderRef = useRef<HTMLDivElement>(null)
   const dupScrollRafRef = useRef(0)
+  const albumScrollRafRef = useRef(0)
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -119,10 +122,13 @@ export default function AlbumsPage() {
           if (r.success && r.data) v3store.setMeta({ messageId: f.messageId, hash: r.data })
         } catch {}
         done++
-        setHashProgress(prev => ({ ...prev, done }))
+        if (done === total || done % 8 === 0) {
+          setHashProgress(prev => ({ ...prev, done }))
+        }
       }
     }
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker()))
+    setHashProgress(prev => ({ ...prev, done: total }))
     setHashing(false); setAlbums(v3store.getAlbums()); setHashTrigger(prev => prev + 1)
   }, [])
 
@@ -184,6 +190,7 @@ export default function AlbumsPage() {
   useEffect(() => {
     setSelectedDupIds(new Set())
     setVisibleDupCount(DUP_PAGE_SIZE)
+    setVisibleAlbumCount(DUP_PAGE_SIZE)
   }, [openAlbum, hashTrigger])
 
   const visibleDupGroups = useMemo(
@@ -192,6 +199,67 @@ export default function AlbumsPage() {
   )
 
   const isDuplicatesView = !!(openAlbum && SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates)
+
+  const albumFiles = useMemo(() => {
+    if (!currentAlbum) return []
+    const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
+    if (isDuplicates) {
+      const dups: any[] = []
+      hashGroups.forEach(group => { if (group.length > 1) dups.push(...group) })
+      return dups
+    }
+    const smart = SMART_ALBUMS.find(a => a.id === currentAlbum.id)
+    if (smart?.filter) return allFiles.filter(smart.filter)
+    const ua = albums.find(a => a.id === currentAlbum.id)
+    if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
+  }, [currentAlbum, allFiles, albums, hashGroups])
+
+  const sortedAlbumFiles = useMemo(
+    () => [...albumFiles].sort((a, b) => (fileDate(b) - fileDate(a)) || (b.messageId - a.messageId)),
+    [albumFiles]
+  )
+  const visibleAlbumFiles = useMemo(
+    () => sortedAlbumFiles.slice(0, visibleAlbumCount),
+    [sortedAlbumFiles, visibleAlbumCount]
+  )
+  const grouped = useMemo(() => groupByDay(visibleAlbumFiles), [visibleAlbumFiles])
+
+  useEffect(() => {
+    if (isDuplicatesView) return
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      if (albumScrollRafRef.current) return
+      const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      if (distanceToBottom >= SCROLL_THRESHOLD) return
+      if (visibleAlbumCount >= sortedAlbumFiles.length) return
+      albumScrollRafRef.current = requestAnimationFrame(() => {
+        albumScrollRafRef.current = 0
+        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length))
+      })
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (albumScrollRafRef.current) {
+        cancelAnimationFrame(albumScrollRafRef.current)
+        albumScrollRafRef.current = 0
+      }
+    }
+  }, [isDuplicatesView, visibleAlbumCount, sortedAlbumFiles.length])
+
+  useEffect(() => {
+    if (isDuplicatesView) return
+    const el = albumLoaderRef.current
+    if (!el || visibleAlbumCount >= sortedAlbumFiles.length) return
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) {
+        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length))
+      }
+    }, { rootMargin: '600px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [isDuplicatesView, visibleAlbumCount, sortedAlbumFiles.length])
 
   useEffect(() => {
     if (!isDuplicatesView) return
@@ -249,7 +317,7 @@ export default function AlbumsPage() {
       for (const id of idsToDrop(g)) n.add(id)
     }
     setSelectedDupIds(n)
-    toast.success(`Выбрано ${n.size} дубликатов · оригинал сохраняется (${keepStrategy === 'oldest' ? 'старый' : 'новый'})`)
+    toast.success(`Выбрано ${n.size} дубликатов · оригинал сохраняется (${keepStrategy === 'oldest' ? 'более старые' : 'более новые'})`)
   }
 
   const clearSelection = () => setSelectedDupIds(new Set())
@@ -295,15 +363,14 @@ export default function AlbumsPage() {
       if (r.success) {
         setDupProgress(prev => prev ? { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total } : prev)
         toast.success(`Удалено ${ids.length} · освобождено ${fmtSize(space)}`)
-        setTimeout(() => setDupProgress(null), 2000)
       } else {
         toast.error(r.error || 'Ошибка удаления')
-        setTimeout(() => setDupProgress(null), 2500)
+        setDupProgress(prev => prev ? { ...prev, current: prev.total } : prev)
       }
     } catch {
       unsub()
       toast.error('Ошибка удаления')
-      setTimeout(() => setDupProgress(null), 2500)
+      setDupProgress(prev => prev ? { ...prev, current: prev.total } : prev)
     }
     setHashTrigger(prev => prev + 1)
   }
@@ -314,22 +381,6 @@ export default function AlbumsPage() {
     if (ids.length === 0) return
     void bulkDeleteDups(ids, 'Удалить все дубликаты')
   }
-
-  const albumFiles = useMemo(() => {
-    if (!currentAlbum) return []
-    const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
-    if (isDuplicates) {
-      const dups: any[] = []
-      hashGroups.forEach(group => { if (group.length > 1) dups.push(...group) })
-      return dups
-    }
-    const smart = SMART_ALBUMS.find(a => a.id === currentAlbum.id)
-    if (smart?.filter) return allFiles.filter(smart.filter)
-    const ua = albums.find(a => a.id === currentAlbum.id)
-    if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
-  }, [currentAlbum, allFiles, albums, hashGroups])
-
-  const grouped = useMemo(() => groupByDay(albumFiles.slice()), [albumFiles])
 
   useEffect(() => {
     if (openAlbum) {
@@ -402,7 +453,7 @@ export default function AlbumsPage() {
     let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-gm-card') : null;
     let clientX = e ? e.clientX : undefined;
     let clientY = e ? e.clientY : undefined;
-    
+
     if (!(await appConfirm('Удалить ' + f.fileName + '?'))) return
 
     let x = 0.5, y = 0.5
@@ -423,6 +474,8 @@ export default function AlbumsPage() {
       zIndex: 9999
     })
 
+    setDupProgress({ title: 'Перемещение в корзину', items: [{ name: f.fileName, status: 'active' as const }], current: 0, total: 1, visible: true, onClose: () => setDupProgress(null) })
+
     const applyRemove = () => {
       flushSync(() => {
         setAllFiles(prev => prev.filter(x => x.messageId !== f.messageId))
@@ -432,13 +485,18 @@ export default function AlbumsPage() {
     safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
-    if (!r.success) {
+    if (r.success) {
+      setDupProgress(prev => prev ? { ...prev, items: [{ name: f.fileName, status: 'done' as const }], current: 1 } : prev)
+      toast.success('Перемещено в корзину')
+    } else {
+      toast.error('Ошибка удаления')
       const revert = () => {
         flushSync(() => {
           setAllFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
         })
       }
       safeViewTransition(revert)
+      setDupProgress(prev => prev ? { ...prev, items: [{ name: f.fileName, status: 'error' as const }], current: 1 } : prev)
     }
   }
 
@@ -519,8 +577,8 @@ export default function AlbumsPage() {
                   onChange={e => setKeepStrategy(e.target.value as 'oldest' | 'newest')}
                   aria-label="Стратегия сохранения оригинала"
                 >
-                  <option value="oldest">старый (messageId ↑)</option>
-                  <option value="newest">новый (messageId ↓)</option>
+                  <option value="oldest">Более старые</option>
+                  <option value="newest">Более новые</option>
                 </select>
               </label>
 
@@ -621,7 +679,7 @@ export default function AlbumsPage() {
                   <div className="dup-section-head">
                     <span>Группы дубликатов · сортировка по экономии</span>
                     <span className="dup-section-meta">
-                      Оригинал: {keepStrategy === 'oldest' ? 'старый файл' : 'новый файл'}
+                      Оригинал: {keepStrategy === 'oldest' ? 'более старые' : 'более новые'}
                     </span>
                   </div>
                   {visibleDupGroups.map(([key, files]) => {
@@ -768,6 +826,13 @@ export default function AlbumsPage() {
               </div>
             ))
           )}
+          {!isDuplicates && visibleAlbumCount < sortedAlbumFiles.length && (
+            <div className="dup-load-more" role="status">
+              <Loader2 size={16} className="spin" aria-hidden />
+              <span>Показано {visibleAlbumCount} из {sortedAlbumFiles.length} файлов · прокрутите ниже</span>
+            </div>
+          )}
+          {!isDuplicates && <div ref={albumLoaderRef} style={{ height: 20, flexShrink: 0 }} />}
           {albumFiles.length === 0 && !hashing && !isDuplicates && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 12 }}>
               {duckAnim ? (

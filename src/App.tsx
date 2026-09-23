@@ -47,8 +47,16 @@ declare global { interface Window { electronAPI: any } }
 
 function AnimatedRoutes({ channelInfo, userInfo, handleLogout, updateAvailable }: any) {
   const location = useLocation()
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    el.classList.remove('page-enter')
+    void el.offsetWidth
+    el.classList.add('page-enter')
+  }, [location.pathname])
   return (
-    <div key={location.pathname} className="page-enter" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    <div ref={rootRef} className="page-enter" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       <Routes location={location}>
         <Route path="/" element={<DashboardHome channelInfo={channelInfo} userInfo={userInfo} />} />
         <Route path="/files" element={<MyFilesPage />} />
@@ -200,10 +208,35 @@ function App() {
     } catch (e) { console.error("Logout failed:", e) }
   }
 
-  if (showSplash || isLoading) return <ErrorBoundary><SplashScreen /></ErrorBoundary>
-  if (showDuckSplash) return <ErrorBoundary><DuckSplash onDone={handleDuckDone} /></ErrorBoundary>
+  if (showSplash || isLoading) {
+    return (
+      <ErrorBoundary>
+        <div style={{ position: 'relative', height: '100%' }}>
+          <Titlebar />
+          <SplashScreen />
+        </div>
+      </ErrorBoundary>
+    )
+  }
+  if (showDuckSplash) {
+    return (
+      <ErrorBoundary>
+        <div style={{ position: 'relative', height: '100%' }}>
+          <Titlebar />
+          <DuckSplash onDone={handleDuckDone} />
+        </div>
+      </ErrorBoundary>
+    )
+  }
   if (!isAuthenticated) {
-    return <ErrorBoundary><div className="app-container"><LoginScreen onLoginSuccess={handleLoginSuccess} /></div></ErrorBoundary>
+    return (
+      <ErrorBoundary>
+        <div className="app-container" style={{ paddingTop: 32 }}>
+          <Titlebar />
+          <LoginScreen onLoginSuccess={handleLoginSuccess} />
+        </div>
+      </ErrorBoundary>
+    )
   }
 
   return (

@@ -27,6 +27,10 @@ function shareLog(...args: unknown[]) {
 
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
+const APP_LOG_PATH = path.join(app.getPath('userData'), 'rodjercloud.log')
+function appLog(level: string, msg: string) {
+  try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [${level}] ${msg}\n`) } catch {}
+}
 
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -491,7 +495,10 @@ export class TelegramService {
     const fileName = customFileName || path.basename(filePath)
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
-    const CHUNK_SIZE = Math.floor(1 * 1024 * 1024 * 1024) // 1 GB — smaller chunks reduce memory pressure and temp file size
+    // Telegram hard limit ~2GB per document message. GramJS already splits the
+    // upload into 512KB protocol parts that the server reassembles into ONE file.
+    // App-level multipart (separate messages) only kicks in above this limit.
+    const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 
     let turboMode = false
     try {
@@ -657,7 +664,7 @@ export class TelegramService {
         let captionStr = ''
         if (i === 0) {
           // @ts-ignore
-          captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
+          captionStr = `${fileName}\nSize: ${this.formatFileSize(originalSizeBytes)}\n#origsize ${originalSizeBytes}\nUploaded: ${new Date().toISOString()}\nCreated: ${new Date(originalStats.birthtimeMs || originalStats.mtimeMs).toISOString()}`
           if (encrypt) {
             captionStr += `\n#vault ${ivHex}`
           }
@@ -766,6 +773,8 @@ export class TelegramService {
       mimeType: detectedMime,
       hash: fileHash,
       isEncrypted: !!encrypt,
+      isMultipart,
+      multipartIds: [...multipartIds],
     }
   }
 
@@ -827,23 +836,48 @@ export class TelegramService {
     return 0
   }
 
+  private parseCaptionSize(caption: string): number | null {
+    const m = caption.match(/Size:\s*([\d.]+)\s*(Bytes|KB|MB|GB|TB)/i)
+    if (!m) return null
+    const n = parseFloat(m[1])
+    if (!isFinite(n) || n < 0) return null
+    const unit = m[2].toUpperCase()
+    const mult = unit === 'BYTES' ? 1 : unit === 'KB' ? 1024 : unit === 'MB' ? 1024 ** 2 : unit === 'GB' ? 1024 ** 3 : 1024 ** 4
+    return Math.round(n * mult)
+  }
+
+  private resolveFileSize(m: any, caption: string, isMultipart: boolean): number {
+    const origMatch = caption.match(/#origsize\s+(\d+)/)
+    if (origMatch) {
+      const n = Number(origMatch[1])
+      if (isFinite(n) && n > 0) return n
+    }
+    if (isMultipart) {
+      const parsed = this.parseCaptionSize(caption)
+      if (parsed && parsed > 0) return parsed
+      return this.toNum(m.file?.size)
+    }
+    return this.toNum(m.file?.size)
+  }
+
   private parseFileMessage(m: any) {
     const caption = m.message || ''
     const createdMatch = caption.match(/Created:\s*(.+)/)
     const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
     const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+    const isMultipart = !!multipartMatch
     const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
     return {
       messageId: this.msgId(m),
       fileName: m.file?.name || 'Unknown',
-      fileSize: this.toNum(m.file?.size),
+      fileSize: this.resolveFileSize(m, caption, isMultipart),
       mimeType: m.file?.mimeType || 'application/octet-stream',
       uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
       originalDate: originalDate || undefined,
       caption,
       chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
       isEncrypted: !!vaultMatch,
-      isMultipart: !!multipartMatch,
+      isMultipart,
       multipartIds: multipartMatch ? multipartMatch[1].split(',').map(Number) : [],
     }
   }
@@ -950,85 +984,147 @@ export class TelegramService {
 
   async listTrash() {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    return withTimeout(this._listTrashInner(), 60000, 'listTrash overall')
+    const localCount = this.localTrashedIds.size
+    const overallMs = Math.min(180000, 30000 + Math.ceil(localCount / 100) * 4000)
+    return withTimeout(this._listTrashInner(), overallMs, 'listTrash overall')
+  }
+
+  private mapMessageToTrash(m: any) {
+    const caption = m.message || ''
+    const msgId = this.msgId(m)
+    const createdMatch = caption.match(/Created:\s*(.+)/)
+    const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
+    const trashedMatch = caption.match(new RegExp(this.TRASH_MARKER + '(\\d+)'))
+    const trashedAt = trashedMatch ? parseInt(trashedMatch[1], 10) : (this.localTrashedIds.get(msgId) || 0)
+    const isMultipart = /#multipart\s+[\d,]+/.test(caption)
+    return {
+      messageId: msgId,
+      fileName: m.file?.name || 'Unknown',
+      fileSize: this.resolveFileSize(m, caption, isMultipart),
+      mimeType: m.file?.mimeType || 'application/octet-stream',
+      uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
+      originalDate: originalDate || undefined,
+      trashedAt,
+      caption,
+      chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+    }
+  }
+
+  private mapCacheToTrash(f: any, trashedAt: number) {
+    const caption = f.caption || ''
+    const createdMatch = caption.match(/Created:\s*(.+)/)
+    const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : (f.originalDate || 0)
+    const trashedMatch = caption.match(new RegExp(this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)'))
+    const resolvedTrashedAt = trashedMatch ? parseInt(trashedMatch[1], 10) : (trashedAt || 0)
+    return {
+      messageId: f.messageId,
+      fileName: f.fileName || 'Unknown',
+      fileSize: this.resolveFileSize({ file: { size: f.fileSize } }, caption, !!f.isMultipart),
+      mimeType: f.mimeType || 'application/octet-stream',
+      uploadedAt: f.uploadedAt || 0,
+      originalDate: originalDate || undefined,
+      trashedAt: resolvedTrashedAt,
+      caption,
+      chatId: f.chatId || (this.channelId ? String(this.channelId).replace(/^-100/, '') : ''),
+    }
+  }
+
+  private async fetchMessagesByIds(ids: number[]): Promise<any[]> {
+    const out: any[] = []
+    const CHUNK = 100
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK)
+      try {
+        const fetched = await withTimeout(
+          this.client!.getMessages(this.channelId as any, { ids: chunk, waitTime: 0 } as any),
+          10000,
+          `listTrash ids chunk ${i / CHUNK + 1}`
+        )
+        if (fetched) {
+          for (const m of fetched) {
+            if (m && m.file) out.push(m)
+          }
+        }
+      } catch (e: any) {
+        console.warn('[listTrash] ids chunk', i / CHUNK + 1, 'failed:', e.message)
+      }
+    }
+    return out
   }
 
   private async _listTrashInner() {
-      const messages: any[] = []
-      let offsetId = 0
-      const BATCH = 200
-      const MAX_BATCHES = 5
-      let batchCount = 0
-      const scannedIds = new Set<number>()
-      while (batchCount < MAX_BATCHES) {
-        batchCount++
-        let batch: any[]
-        try {
-          batch = await withTimeout(
-            this.client!.getMessages(this.channelId as any, {
-              limit: BATCH,
-              ...(offsetId ? { offsetId } : {}),
-            }),
-            8000,
-            'listTrash batch ' + batchCount
-          )
-        } catch (e: any) {
-          console.warn('[listTrash] batch', batchCount, 'failed:', e.message)
-          break
-        }
-        if (!batch || batch.length === 0) break
-        for (const m of batch) scannedIds.add(this.msgId(m))
-        messages.push(...batch)
-        if (batch.length < BATCH) break
-        offsetId = this.msgId(batch[batch.length - 1])
-      }
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
 
-      // Also fetch all localTrashedIds not in the scan
-      const missingIds = Array.from(this.localTrashedIds.keys()).filter(id => !scannedIds.has(id))
-      if (missingIds.length > 0) {
-        console.log('[listTrash] fetching', missingIds.length, 'missing trashed IDs directly')
-        try {
-          const fetched = await withTimeout(
-            this.client!.getMessages(this.channelId as any, { ids: missingIds }),
-            15000,
-            'listTrash fetch missing IDs'
-          )
-          if (fetched) messages.push(...fetched)
-        } catch (e: any) {
-          console.warn('[listTrash] fetch missing IDs failed:', e.message)
-        }
-      }
+    const byId = new Map<number, any>()
 
-    const result = messages
-      .filter((m: any) => {
-        if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+    for (const [msgId, trashedAt] of this.localTrashedIds) {
+      if (this.localRestoredIds.has(msgId)) continue
+      const cached = this.fileCache.find((f: any) => f.messageId === msgId)
+      if (cached && cached.fileName) {
+        byId.set(msgId, this.mapCacheToTrash(cached, trashedAt))
+      }
+    }
+
+    const missingIds = Array.from(this.localTrashedIds.keys()).filter(id => {
+      if (this.localRestoredIds.has(id)) return false
+      if (byId.has(id)) return false
+      if (this.fileCache.some((f: any) => f.messageId === id && f.fileName)) return false
+      return true
+    })
+    if (missingIds.length > 0) {
+      console.log('[listTrash] fetching', missingIds.length, 'missing trashed IDs in chunks of 100')
+      const fetched = await this.fetchMessagesByIds(missingIds)
+      for (const m of fetched) {
         const msgId = this.msgId(m)
-        if (this.localTrashedIds.has(msgId)) return true
-        if (this.localRestoredIds.has(msgId)) return false
+        if (this.localTrashedIds.has(msgId) && !this.localRestoredIds.has(msgId)) {
+          byId.set(msgId, this.mapMessageToTrash(m))
+        }
+      }
+    }
+
+    let offsetId = 0
+    const BATCH = 200
+    const MAX_BATCHES = 8
+    let batchCount = 0
+    while (batchCount < MAX_BATCHES) {
+      batchCount++
+      let batch: any[]
+      try {
+        batch = await withTimeout(
+          this.client!.getMessages(this.channelId as any, {
+            limit: BATCH,
+            ...(offsetId ? { offsetId } : {}),
+          }),
+          8000,
+          'listTrash batch ' + batchCount
+        )
+      } catch (e: any) {
+        console.warn('[listTrash] batch', batchCount, 'failed:', e.message)
+        break
+      }
+      if (!batch || batch.length === 0) break
+      for (const m of batch) {
+        if (!m || !m.file || m.message === TelegramService.STATE_CAPTION) continue
+        const msgId = this.msgId(m)
+        if (this.localRestoredIds.has(msgId)) continue
         const caption: string = m.message || ''
-        return caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
-      })
-      .map((m: any) => {
-        const caption = m.message || ''
-        const msgId = this.msgId(m)
-        const createdMatch = caption.match(/Created:\s*(.+)/)
-        const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
-        const trashedMatch = caption.match(new RegExp(this.TRASH_MARKER + '(\\d+)'))
-        const trashedAt = trashedMatch ? parseInt(trashedMatch[1], 10) : (this.localTrashedIds.get(msgId) || 0)
-        return {
-          messageId: msgId,
-          fileName: m.file?.name || 'Unknown',
-          fileSize: this.toNum(m.file?.size),
-          mimeType: m.file?.mimeType || 'application/octet-stream',
-          uploadedAt: typeof m.date === 'number' ? m.date : this.toNum(m.date),
-          originalDate: originalDate || undefined,
-          trashedAt,
-          caption,
-          chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+        const isTrashedLocal = this.localTrashedIds.has(msgId)
+        const isTrashedCaption = caption.includes(this.TRASH_MARKER) && !caption.includes('#chunk_of')
+        if (isTrashedLocal || isTrashedCaption) {
+          byId.set(msgId, this.mapMessageToTrash(m))
         }
-      })
-    const count = result.length
-    if (count > 0) console.log('[listTrash] returning', count, 'trashed files')
+      }
+      if (batch.length < BATCH) break
+      offsetId = this.msgId(batch[batch.length - 1])
+    }
+
+    const result = Array.from(byId.values())
+      .filter(x => !!x && Number(x.messageId) > 0)
+      .sort((a, b) => (b.trashedAt || 0) - (a.trashedAt || 0) || (b.messageId || 0) - (a.messageId || 0))
+    console.log('[listTrash] returning', result.length, 'trashed files; local ids', this.localTrashedIds.size, '; scanned batches', batchCount)
     return result
   }
   private localTrashedIds = new Map<number, number>();
@@ -1084,13 +1180,32 @@ export class TelegramService {
     return []
   }
 
-  private saveFileCache(files: any[]) {
+  private saveFileCache(files: any[]): any[] {
     try {
-      const latestId = files.length > 0 ? files.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
+      let out = files
+      if (this.localTrashedIds.size > 0) {
+        const keep = new Map<number, any>()
+        for (const f of this.fileCache) {
+          if (f && this.localTrashedIds.has(f.messageId) && !this.localRestoredIds.has(f.messageId)) {
+            keep.set(f.messageId, f)
+          }
+        }
+        if (keep.size > 0) {
+          const present = new Set(out.map((f: any) => f.messageId))
+          const extras: any[] = []
+          for (const [id, f] of keep) {
+            if (!present.has(id)) extras.push(f)
+          }
+          if (extras.length > 0) out = out.concat(extras)
+        }
+      }
+      const latestId = out.length > 0 ? out.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
       this.cacheMeta = { latestMessageId: latestId, lastSyncAt: Date.now() }
-      const data = { files, latestMessageId: latestId, lastSyncAt: Date.now() }
+      const data = { files: out, latestMessageId: latestId, lastSyncAt: Date.now() }
       fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(data), 'utf-8')
+      return out
     } catch {}
+    return files
   }
 
   invalidateFileCache() {
@@ -1188,13 +1303,11 @@ export class TelegramService {
     if (this.fileCache.length > 0) return this.getCachedFilesInstant()
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
-        this.saveFileCache(files)
-        this.fileCache = files
-        return files
+        this.fileCache = this.saveFileCache(files)
+        return this.fileCache
       }).finally(() => { this.listFilesPromise = null })
     }
-    const files = await this.listFilesPromise
-    this.fileCache = files
+    await this.listFilesPromise
     return this.getCachedFilesInstant()
   }
 
@@ -1260,9 +1373,8 @@ export class TelegramService {
     }
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
-        this.saveFileCache(files)
-        this.fileCache = files
-        return files
+        this.fileCache = this.saveFileCache(files)
+        return this.fileCache
       }).finally(() => { this.listFilesPromise = null })
     }
     const allFiles = (await this.listFilesPromise)
@@ -1283,9 +1395,8 @@ export class TelegramService {
       this.invalidateFileCache()
     }
     this.listFilesPromise = this.listFiles().then(files => {
-      this.saveFileCache(files)
-      this.fileCache = files
-      return files
+      this.fileCache = this.saveFileCache(files)
+      return this.fileCache
     }).finally(() => { this.listFilesPromise = null })
     return this.listFilesPromise
   }
@@ -1345,11 +1456,13 @@ export class TelegramService {
     }
   }
 
-  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string }) {
+  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string; isMultipart?: boolean; multipartIds?: number[] }) {
     if (!result?.messageId) return
     const existing = this.fileCache.find((f: any) => f.messageId === result.messageId)
     if (existing) return
     if (this.fileCache.length === 0) this.getCachedFilesInstant()
+    const isMultipart = !!result.isMultipart
+    const multipartIds = Array.isArray(result.multipartIds) ? result.multipartIds : []
     const entry = {
       messageId: result.messageId,
       fileName: result.fileName,
@@ -1357,11 +1470,11 @@ export class TelegramService {
       mimeType: result.mimeType || 'application/octet-stream',
       uploadedAt: result.uploadedAt || Math.floor(Date.now() / 1000),
       originalDate: undefined as number | undefined,
-      caption: '',
+      caption: isMultipart ? `#origsize ${result.fileSize}\n#multipart ${multipartIds.join(',')}` : `#origsize ${result.fileSize}`,
       chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
       isEncrypted: !!result.isEncrypted,
-      isMultipart: false,
-      multipartIds: [] as number[],
+      isMultipart,
+      multipartIds,
       hash: result.hash,
     }
     this.fileCache.unshift(entry)
@@ -1382,9 +1495,8 @@ export class TelegramService {
       } else {
         if (!this.listFilesPromise) {
           this.listFilesPromise = this.listFiles(onProgress).then(files => {
-            this.saveFileCache(files)
-            this.fileCache = files
-            return files
+            this.fileCache = this.saveFileCache(files)
+            return this.fileCache
           }).finally(() => { this.listFilesPromise = null })
         }
         await this.listFilesPromise
@@ -1493,32 +1605,124 @@ export class TelegramService {
     this.removeIdsFromFileCache(idsToDelete)
   }
 
-  async permanentDeleteBatch(messageIds: number[]) {
+  private expandTrashIdsFromCache(ids: number[]): number[] {
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const set = new Set<number>(ids)
+    const want = new Set<number>(ids)
+    for (const f of this.fileCache) {
+      if (!f || !want.has(f.messageId)) continue
+      if (Array.isArray(f.multipartIds)) {
+        for (const id of f.multipartIds) {
+          const n = Number(id)
+          if (n) set.add(n)
+        }
+      }
+      const caption: string = f.caption || ''
+      const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+      if (multipartMatch) {
+        for (const part of multipartMatch[1].split(',')) {
+          const n = Number(part)
+          if (n) set.add(n)
+        }
+      }
+    }
+    return Array.from(set)
+  }
+
+  private async deleteIdsHard(ids: number[]): Promise<void> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized')
+    const prevThreshold = (this.client as any).floodSleepThreshold
+    ;(this.client as any).floodSleepThreshold = 0
+    try {
+      for (let j = 0; j < ids.length; j += 100) {
+        const chunk = ids.slice(j, j + 100)
+        let lastErr: any = null
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            await this.client.deleteMessages(this.channelId as any, chunk, { revoke: true })
+            lastErr = null
+            break
+          } catch (e: any) {
+            lastErr = e
+            const s = String(e?.message || e?.errorMessage || e || '')
+            const m = s.match(/FLOOD_WAIT_?(\d+)/i)
+            if (m) {
+              const sec = Math.min(parseInt(m[1], 10) || 5, 60)
+              appLog('warn', `[clearTrash] FLOOD_WAIT ${sec}s on delete chunk ${j / 100 + 1}, attempt ${attempt + 1}`)
+              await new Promise<void>(r => setTimeout(r, (sec + 1) * 1000))
+              continue
+            }
+            if (attempt < 3) {
+              await new Promise<void>(r => setTimeout(r, (attempt + 1) * 1500))
+              continue
+            }
+          }
+        }
+        if (lastErr) throw lastErr
+      }
+    } finally {
+      ;(this.client as any).floodSleepThreshold = prevThreshold ?? 120
+    }
+  }
+
+  async permanentDeleteBatch(messageIds: number[], onProgress?: (done: number, total: number) => void): Promise<{ deleted: number; failed: number; failedIds: number[] }> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const BATCH = 100
+    const total = messageIds.length
+    const failedIds: number[] = []
+    let processed = 0
+    appLog('info', `[clearTrash] permanentDeleteBatch start total=${total}`)
+
+    onProgress?.(0, total)
+
     for (let i = 0; i < messageIds.length; i += BATCH) {
       const batch = messageIds.slice(i, i + BATCH)
-      const messages = await withTimeout(
-        this.client.getMessages(this.channelId as any, { ids: batch }),
-        15000,
-        'permanentDeleteBatch getMessages'
-      )
-      const extraIds: number[] = []
-      for (const m of (messages || [])) {
-        const caption = m.message || ''
-        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
-        if (multipartMatch) extraIds.push(...multipartMatch[1].split(',').map(Number))
+      const allIds = this.expandTrashIdsFromCache(batch)
+      try {
+        await this.deleteIdsHard(allIds)
+        for (const id of batch) this.localTrashedIds.delete(id)
+        this.removeIdsFromFileCache(allIds)
+        this.saveTrashState()
+        processed += batch.length
+        appLog('info', `[clearTrash] batch ok ${processed}/${total} (expanded ${allIds.length})`)
+      } catch (e: any) {
+        failedIds.push(...batch)
+        processed += batch.length
+        appLog('error', `[clearTrash] batch fail @${i}: ${e?.message || e}`)
       }
-      const allIds = [...batch, ...extraIds]
-      for (const id of batch) this.localTrashedIds.delete(id)
-      await withTimeout(
-        this.client.deleteMessages(this.channelId as any, allIds, { revoke: true }),
-        15000,
-        'permanentDeleteBatch deleteMessages'
-      )
-      this.removeIdsFromFileCache(allIds)
+      onProgress?.(Math.min(processed, total), total)
+      if (i + BATCH < messageIds.length) await new Promise<void>(r => setTimeout(r, 200))
     }
+
     this.saveTrashState()
+    appLog('info', `[clearTrash] permanentDeleteBatch done deleted=${total - failedIds.length} failed=${failedIds.length}`)
+    return { deleted: total - failedIds.length, failed: failedIds.length, failedIds }
+  }
+
+  async clearTrash(extraIds: number[] = [], onProgress?: (done: number, total: number) => void): Promise<{ deleted: number; failed: number; total: number }> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const idSet = new Set<number>()
+    for (const id of this.localTrashedIds.keys()) idSet.add(id)
+    for (const id of extraIds) if (id) idSet.add(id)
+    for (const f of this.fileCache) {
+      const caption: string = f.caption || ''
+      if (caption.includes(this.TRASH_MARKER)) idSet.add(f.messageId)
+    }
+    const ids = Array.from(idSet)
+    appLog('info', `[clearTrash] begin files=${extraIds.length} local=${this.localTrashedIds.size} set=${ids.length}`)
+    if (ids.length === 0) {
+      onProgress?.(0, 0)
+      return { deleted: 0, failed: 0, total: 0 }
+    }
+    const result = await this.permanentDeleteBatch(ids, onProgress)
+    return { deleted: result.deleted, failed: result.failed, total: ids.length }
   }
 
   async cleanupGhosts() {

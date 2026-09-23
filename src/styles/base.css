@@ -8,14 +8,8 @@ body {
     radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.12), transparent 40%),
     radial-gradient(circle at 50% 80%, rgba(59, 130, 246, 0.12), transparent 40%);
   background-size: 200% 200%;
-  animation: meshGradient 25s ease-in-out infinite;
   color: var(--text);
   overflow: hidden;
-}
-body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%27160%27 height=%27160%27><filter id=%27n%27><feTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%272%27 stitchTiles=%27stitch%27/></filter><rect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27 opacity=%270.06%27/></svg>");
-  opacity: .35; mix-blend-mode: overlay;
 }
 .app-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 
@@ -31,7 +25,6 @@ body::before {
 @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
 @keyframes spin { to { transform: rotate(360deg) } }
 @keyframes shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(200%) } }
-@keyframes meshGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 @keyframes skeletonShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 .spin { animation: spin 1s linear infinite; }
 
@@ -97,9 +90,16 @@ button:active, a:active { transform: scale(0.97); }
 /* Safety: never let view transitions hang (frozen dim overlay) */
 ::view-transition-group(*),
 ::view-transition-old(*),
-::view-transition-new(*) {
-  animation-duration: 0.2s !important;
+::view-transition-new(*),
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.1s !important;
   animation-delay: 0s !important;
+}
+::view-transition {
+  animation-duration: 0.1s !important;
+  pointer-events: none !important;
 }
 
 /* Hide number input spin buttons globally */

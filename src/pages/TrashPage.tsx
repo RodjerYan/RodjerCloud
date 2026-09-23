@@ -92,12 +92,6 @@ export default function TrashPage() {
   const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const closeCtx = useCallback(() => setCtxMenu(null), [])
-  const [now, setNow] = useState(Date.now())
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 30000)
-    return () => clearInterval(interval)
-  }, [])
 
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
   const isSelecting = useRef(false)
@@ -108,53 +102,67 @@ export default function TrashPage() {
   useEffect(() => { selectedRef.current = selected }, [selected])
 
   useEffect(() => {
+    let raf = 0
+    let lastEvt: MouseEvent | null = null
     const handleMouseMove = (e: MouseEvent) => {
       if (!isSelecting.current || !selectionStart.current) return
-      
-      const container = document.querySelector('.v2-main')
-      const currentScroll = container ? container.scrollTop : 0
-      const scrollDiff = currentScroll - selectionStart.current.scrollY
-      const adjustedStartY = selectionStart.current.y - scrollDiff
-      
-      const newBox = {
-        startX: selectionStart.current.x,
-        startY: adjustedStartY,
-        endX: e.clientX,
-        endY: e.clientY
-      }
-      setSelectionBox(newBox)
-      
-      const left = Math.min(newBox.startX, newBox.endX)
-      const right = Math.max(newBox.startX, newBox.endX)
-      const top = Math.min(newBox.startY, newBox.endY)
-      const bottom = Math.max(newBox.startY, newBox.endY)
-      
-      const elements = document.querySelectorAll('[data-mid]')
-      const nextSelected = new Set(initialSelectedOnDrag.current)
-      
-      elements.forEach(el => {
-        const rect = el.getBoundingClientRect()
-        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
-          const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
-          if (mid) nextSelected.add(mid)
+      lastEvt = e
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const evt = lastEvt
+        if (!evt || !isSelecting.current || !selectionStart.current) return
+
+        const container = document.querySelector('.v2-main')
+        const currentScroll = container ? container.scrollTop : 0
+        const scrollDiff = currentScroll - selectionStart.current.scrollY
+        const adjustedStartY = selectionStart.current.y - scrollDiff
+
+        const newBox = {
+          startX: selectionStart.current.x,
+          startY: adjustedStartY,
+          endX: evt.clientX,
+          endY: evt.clientY
         }
+        setSelectionBox(newBox)
+
+        const left = Math.min(newBox.startX, newBox.endX)
+        const right = Math.max(newBox.startX, newBox.endX)
+        const top = Math.min(newBox.startY, newBox.endY)
+        const bottom = Math.max(newBox.startY, newBox.endY)
+
+        const elements = document.querySelectorAll('[data-mid]')
+        const nextSelected = new Set(initialSelectedOnDrag.current)
+
+        elements.forEach(el => {
+          const rect = el.getBoundingClientRect()
+          if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+            const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
+            if (mid) nextSelected.add(mid)
+          }
+        })
+
+        setSelected(nextSelected)
       })
-      
-      setSelected(nextSelected)
     }
     const handleMouseUp = () => {
       if (isSelecting.current) {
         isSelecting.current = false
         selectionStart.current = null
         setSelectionBox(null)
+        if (raf) {
+          cancelAnimationFrame(raf)
+          raf = 0
+        }
       }
     }
-    
+
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
+      if (raf) cancelAnimationFrame(raf)
     }
   }, [])
 
@@ -240,7 +248,7 @@ export default function TrashPage() {
     const onClick = (e: MouseEvent) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-mid]')
       if (!el) return
-      if ((e.target as HTMLElement).closest('button')) return
+      if ((e.target as HTMLElement).closest('button, input, label')) return
       if ((e.target as HTMLElement).closest('.mf-ctx')) return
       const mid = Number(el.dataset.mid)
       toggleSelect(mid)
@@ -248,6 +256,8 @@ export default function TrashPage() {
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
   }, [files])
+
+  useEffect(() => { setSelected(new Set()) }, [search])
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -334,12 +344,18 @@ export default function TrashPage() {
 
   const handleBulkRestore = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    if (!(await appConfirm(`Восстановить ${selected.size} файлов?`))) return
+    const visibleIds = new Set(filtered.map(f => f.messageId))
+    const ids = Array.from(selected).filter(id => visibleIds.has(id))
+    if (ids.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
+    if (!(await appConfirm(`Восстановить ${ids.length} файлов?`))) return
     let x = 0.5, y = 0.5
     if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
-    const ids = Array.from(selected)
     const filesToRestore = files.filter(f => ids.includes(f.messageId))
     const applyRemove = () => {
       flushSync(() => {
@@ -373,15 +389,21 @@ export default function TrashPage() {
 
   const handleBulkPurge = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    if (!(await appConfirm(`Удалить навсегда ${selected.size} файлов?`))) return
+    const visibleIds = new Set(filtered.map(f => f.messageId))
+    const ids = Array.from(selected).filter(id => visibleIds.has(id))
+    if (ids.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
+    if (!(await appConfirm(`Удалить навсегда ${ids.length} файлов?`))) return
     let x = 0.5, y = 0.5
     if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
-    const ids = Array.from(selected)
     const selectedFiles = files.filter(f => ids.includes(f.messageId))
     const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
-    setProgressModal({ title: 'Удаление навсегда', items, current: 0, total: ids.length, visible: true })
+    setProgressModal({ title: 'Удаление навсегда', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
 
     clearSelection()
     let successCount = 0
@@ -419,15 +441,76 @@ export default function TrashPage() {
 
     setProgressModal(prev => {
       if (!prev) return prev
-      return { ...prev, current: prev.total, onClose: () => setProgressModal(null) }
+      return { ...prev, current: prev.total }
     })
     if (errorCount > 0) toast.error(`Удалено ${successCount}, ошибок ${errorCount}`)
     else toast.success(`Удалено навсегда ${successCount} файлов`)
   }
 
+  const handleClearTrash = async (e?: React.MouseEvent) => {
+    if (files.length === 0) return
+    const count = files.length
+    if (!(await appConfirm(`Удалить навсегда все файлы из корзины (${count})?\nВосстановить их после этого будет невозможно.`))) return
+    let x = 0.5, y = 0.5
+    if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
+    confetti({ particleCount: count > 200 ? 40 : 120, spread: 100, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+
+    const snapshot = files
+    const items = snapshot.map(f => ({ name: f.fileName, status: 'pending' as const }))
+    flushSync(() => {
+      setFiles([])
+      clearSelection()
+      setProgressModal({ title: 'Очистка корзины', items, current: 0, total: count, visible: true, onClose: () => setProgressModal(null) })
+    })
+
+    const onProgress = (data: { kind: string; index: number; total: number }) => {
+      if (data.kind !== 'purge-all') return
+      setProgressModal(prev => {
+        if (!prev) return prev
+        const next = Math.max(prev.current, data.index)
+        if (next === prev.current && (data.total || prev.total) === prev.total) return prev
+        return { ...prev, current: next, total: data.total || prev.total }
+      })
+    }
+    const unsub = window.electronAPI.telegram.onBulkProgress(onProgress)
+    try {
+      const ids = snapshot.map(f => f.messageId)
+      const r = await window.electronAPI.telegram.clearTrash(ids)
+      unsub()
+      if (r.success) {
+        const deleted = r.data?.deleted ?? count
+        const failed = r.data?.failed ?? 0
+        setProgressModal(prev => prev ? { ...prev, current: prev.total, items: prev.items.map((it, i) => ({ ...it, status: i < deleted ? 'done' as const : failed > 0 ? 'error' as const : 'done' as const })) } : prev)
+        if (failed > 0) {
+          toast.error(`Удалено ${deleted} из ${count} · не удалось ${failed}`)
+          load()
+        } else {
+          toast.success(`Корзина очищена · удалено ${deleted}`)
+        }
+      } else {
+        toast.error(r.error || 'Ошибка очистки корзины')
+        setProgressModal(prev => prev ? { ...prev, current: prev.total } : prev)
+        load()
+      }
+    } catch {
+      unsub()
+      toast.error('Ошибка очистки корзины')
+      setProgressModal(prev => prev ? { ...prev, current: prev.total } : prev)
+      load()
+    }
+  }
+
   const handleBulkDownload = async () => {
     if (selected.size === 0) return
-    const items = files.filter(f => selected.has(f.messageId)).map(f => ({ messageId: f.messageId, fileName: f.fileName }))
+    const visibleIds = new Set(filtered.map(f => f.messageId))
+    const items = files
+      .filter(f => selected.has(f.messageId) && visibleIds.has(f.messageId))
+      .map(f => ({ messageId: f.messageId, fileName: f.fileName }))
+    if (items.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
     toast.loading('Скачивание ' + items.length + ' файлов…')
     await window.electronAPI.telegram.bulkDownload(items)
     toast.success('Скачивание завершено')
@@ -500,6 +583,12 @@ export default function TrashPage() {
         <span>Корзина · {files.length} файлов · {trashedFolders.length} папок</span>
         <span style={{ fontSize: 11, opacity: 0.7 }}>— удаляются через 3 дня автоматически</span>
         <div style={{ flex: 1 }} />
+        <button
+          className="v3-btn ghost"
+          disabled={files.length === 0}
+          style={{ fontSize: 12, padding: '4px 8px', color: '#f87171', opacity: files.length === 0 ? 0.4 : 1 }}
+          onClick={handleClearTrash}
+        >Очистить корзину</button>
         <button className="v3-btn ghost" style={{ fontSize: 12, padding: '4px 8px', color: '#f87171' }} onClick={async () => {
           if (!(await appConfirm('Выполнить глубокую очистку канала от "призраков"? Это удалит все осиротевшие части файлов и зависшие файлы корзины.'))) return
           toast.loading('Очистка канала...')
@@ -596,7 +685,20 @@ export default function TrashPage() {
           )}
         <table className="mf-table" style={{ marginTop: 12 }}>
           <thead><tr>
-            <th><input type="checkbox" onChange={() => filtered.forEach(f => toggleSelect(f.messageId))} /></th>
+            <th>
+              <input
+                type="checkbox"
+                checked={filtered.length > 0 && filtered.every(f => selected.has(f.messageId))}
+                onChange={e => {
+                  const checked = e.target.checked
+                  setSelected(prev => {
+                    const s = new Set(prev)
+                    filtered.forEach(f => { checked ? s.add(f.messageId) : s.delete(f.messageId) })
+                    return s
+                  })
+                }}
+              />
+            </th>
             <th></th><th>Имя</th><th>Размер</th><th>Удалён</th><th>Действия</th>
           </tr></thead>
           <tbody>
@@ -625,7 +727,7 @@ export default function TrashPage() {
       )}
 
       {ctxMenu && createPortal(
-        <div className="mf-ctx" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+        <div className="mf-ctx" style={{ position: 'fixed', left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 180) }}>
           <button onClick={() => { toggleSelect(ctxMenu.file.messageId); closeCtx() }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {selected.has(ctxMenu.file.messageId)

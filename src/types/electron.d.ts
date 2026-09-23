@@ -29,8 +29,10 @@ declare global {
         listTrash: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         permDeleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        clearTrash: (messageIds: number[]) => Promise<{ success: boolean; data?: { deleted: number; failed: number; total: number }; error?: string }>
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
+        cleanupGhosts: () => Promise<{ success: boolean; deletedCount?: number; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>
         getUserInfo: () => Promise<{ success: boolean; data?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }; error?: string }>
         searchGlobal: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>

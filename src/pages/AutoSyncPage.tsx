@@ -185,7 +185,7 @@ export default function AutoSyncPage() {
               <div key={item.id} style={{
                 display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderRadius: 12,
                 background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
-                transition: 'all 0.2s'
+                transition: 'background 0.2s, border-color 0.2s'
               }}>
                 <span style={{ fontSize: 20, flexShrink: 0, filter: item.status === 'uploading' ? 'drop-shadow(0 0 8px rgba(124, 200, 255, 0.5))' : 'none' }}>
                   {item.status === 'done' ? '✅' : item.status === 'failed' ? '❌' : item.status === 'uploading' ? '📤' : '⏳'}
@@ -278,7 +278,7 @@ export default function AutoSyncPage() {
         </div>
         <div className="settings-body" style={{ padding: '24px' }}>
           <div style={{ display: 'flex', gap: 20 }}>
-            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'default' ? 'rgba(34, 211, 238, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'default' ? '#22d3ee' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'default' ? '0 0 30px rgba(34, 211, 238, 0.2), inset 0 0 20px rgba(34, 211, 238, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'default' ? 'scale(1.02)' : 'scale(1)' }}>
+            <div onClick={() => save({ ...config, mode: 'default' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'default' ? 'rgba(34, 211, 238, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'default' ? '#22d3ee' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'default' ? '0 0 30px rgba(34, 211, 238, 0.2), inset 0 0 20px rgba(34, 211, 238, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'background 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'default' ? 'scale(1.02)' : 'scale(1)' }}>
               <div style={{ fontSize: 32, marginBottom: 16, filter: config.mode === 'default' ? 'drop-shadow(0 0 12px rgba(34, 211, 238, 0.6))' : 'none' }}>📁</div>
               <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6, color: config.mode === 'default' ? '#fff' : 'var(--text)' }}>Стандартные</div>
               <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 16, lineHeight: 1.4 }}>Автоматически собираем файлы из базовых папок системы: Documents, Downloads, Pictures, Desktop.</div>
@@ -288,7 +288,7 @@ export default function AutoSyncPage() {
                 ))}
               </div>
             </div>
-            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'custom' ? 'rgba(168, 85, 247, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'custom' ? '#a855f7' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'custom' ? '0 0 30px rgba(168, 85, 247, 0.2), inset 0 0 20px rgba(168, 85, 247, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'custom' ? 'scale(1.02)' : 'scale(1)' }}>
+            <div onClick={() => save({ ...config, mode: 'custom' })} style={{ flex: 1, padding: 24, borderRadius: 20, cursor: 'pointer', background: config.mode === 'custom' ? 'rgba(168, 85, 247, 0.08)' : 'rgba(255,255,255,0.02)', border: `2px solid ${config.mode === 'custom' ? '#a855f7' : 'rgba(255,255,255,0.05)'}`, boxShadow: config.mode === 'custom' ? '0 0 30px rgba(168, 85, 247, 0.2), inset 0 0 20px rgba(168, 85, 247, 0.1)' : 'none', backdropFilter: 'blur(12px)', transition: 'background 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)', transform: config.mode === 'custom' ? 'scale(1.02)' : 'scale(1)' }}>
               <div style={{ fontSize: 32, marginBottom: 16, filter: config.mode === 'custom' ? 'drop-shadow(0 0 12px rgba(168, 85, 247, 0.6))' : 'none' }}>📂</div>
               <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6, color: config.mode === 'custom' ? '#fff' : 'var(--text)' }}>Свои папки</div>
               <div style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.4 }}>Выберите конкретные папки вручную. Мы будем следить только за ними и игнорировать остальные.</div>

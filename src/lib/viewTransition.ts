@@ -15,12 +15,15 @@ export function safeViewTransition(update: () => void): void {
   }
 
   try {
-    const t: any = (document as any).startViewTransition(() => runUpdate())
+    const t: any = (document as any).startViewTransition(() => {
+      runUpdate()
+    })
+    // Safety: if the transition hangs (frozen dim overlay), skip after 400ms
     const timer = setTimeout(() => {
       runUpdate()
       try { t?.skipTransition?.() } catch {}
       active = false
-    }, 350)
+    }, 400)
     const finish = () => {
       clearTimeout(timer)
       runUpdate()
@@ -32,7 +35,6 @@ export function safeViewTransition(update: () => void): void {
       finish()
     }
   } catch {
-    clearTimeout(undefined as any)
     runUpdate()
     active = false
   }

@@ -213,7 +213,8 @@
   justify-content: flex-end;
 }
 
-.ap-track-row:hover .ap-track-actions {
+.ap-track-row:hover .ap-track-actions,
+.ap-track-row:focus-within .ap-track-actions {
   opacity: 1;
 }
 

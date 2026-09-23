@@ -5,7 +5,7 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
 import { useUploadQueue, type QueueItem as UploadQueueEntry } from '../lib/UploadQueueContext'
 
-const CHUNK_SIZE = 1 * 1024 * 1024 * 1024
+const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 
 const STATUS_LABELS: Record<UploadQueueEntry['status'], string> = {
   waiting: 'В очереди',

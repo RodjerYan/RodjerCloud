@@ -1008,6 +1008,21 @@ ipcMain.handle('telegram:cleanup-ghosts', async () => {
   return await telegramService.cleanupGhosts()
 })
 
+ipcMain.handle('telegram:clear-trash', async (event, messageIds: number[]) => {
+  try {
+    log('info', `[clearTrash] IPC start ids=${messageIds?.length || 0}`)
+    const stats = await telegramService.clearTrash(messageIds || [], (done, total) => {
+      try { event.sender.send('telegram:bulk-progress', { kind: 'purge-all', index: done, total }) } catch {}
+    })
+    sendFilesChanged()
+    log('info', `[clearTrash] IPC done deleted=${stats.deleted} failed=${stats.failed} total=${stats.total}`)
+    return { success: true, data: stats }
+  } catch (error) {
+    log('error', `[clearTrash] IPC error: ${(error as Error).message}`)
+    return { success: false, error: (error as Error).message }
+  }
+})
+
 ipcMain.handle('telegram:logout', async () => {
   try {
     await telegramService.logout()

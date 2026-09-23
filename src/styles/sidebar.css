@@ -1,4 +1,6 @@
-.v2-sidebar { width: 200px; background: rgba(15,18,30,0.4); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+:root { --sidebar-w: 200px; }
+body.compact { --sidebar-w: 170px; }
+.v2-sidebar { width: var(--sidebar-w); background: rgba(15,18,30,0.4); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; display: flex; flex-direction: column;
   padding: 16px 10px; flex-shrink: 0; margin: 16px 0 16px 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); z-index: 10; }
@@ -18,7 +20,7 @@
 .v2-sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; padding: 4px; margin: -4px; }
 .v2-sidebar-nav::-webkit-scrollbar { display: none; }
 .v2-sidebar-link { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px;
-  color: var(--text-dim); text-decoration: none; font-size: 13px; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); border: 1px solid transparent; }
+  color: var(--text-dim); text-decoration: none; font-size: 13px; transition: background 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.2s, box-shadow 0.2s; border: 1px solid transparent; }
 .v2-sidebar-link:hover { background: rgba(255,255,255,0.04); color: var(--text); transform: translateX(4px); }
 .v2-sidebar-link.active { background: linear-gradient(135deg, #7c83ff, #5a44d4); color: #fff; font-weight: 600; border: 1px solid rgba(124,131,255,0.3); box-shadow: 0 4px 20px rgba(124,131,255,0.25), inset 0 1px 0 rgba(255,255,255,0.1); }
 .v2-sidebar-link.active svg { color: #fff; filter: drop-shadow(0 0 8px rgba(124,131,255,0.6)); }
@@ -26,7 +28,7 @@
 .v2-sidebar-channel { padding: var(--space-sm) 10px; border-radius: var(--radius-md); background: rgba(255,255,255,0.03); }
 .v2-sidebar-channel-name { font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v2-sidebar-channel-sub { font-size: var(--text-xs); color: var(--success); }
-body.compact .v2-sidebar { width: 170px; }
+body.compact .v2-sidebar { width: var(--sidebar-w); }
 .v2-sidebar-link-wrap { position: relative; display: inline-flex; }
 .update-badge { position: absolute; top: -3px; right: -6px; width: 7px; height: 7px; background: #ef4444; border-radius: 999px; animation: badgeBlink 2s ease-in-out infinite; }
 @keyframes badgeBlink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }

@@ -1,4 +1,4 @@
-.mf-cat-anim { animation: pulse 2.5s ease-in-out infinite; filter: drop-shadow(0 0 4px currentColor); }
+.mf-cat-anim { animation: pulse 2.5s ease-in-out 3; filter: drop-shadow(0 0 4px currentColor); }
 .mf-root { animation: fadeInUp 0.3s ease both; flex: 1; }
 .mf-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .mf-search { display: flex; align-items: center; gap: var(--space-sm); background: var(--panel);
@@ -15,7 +15,7 @@
   box-shadow: 0 16px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06); }
 .mf-bulkbar > span { font-weight: 600; font-size: var(--text-base); color: var(--text); margin-right: 8px; letter-spacing: 0.3px; }
 .mf-bulkbar button { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); color: var(--text);
-  padding: 8px 14px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: all 0.2s; }
+  padding: 8px 14px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 500; transition: background 0.2s, border-color 0.2s, transform 0.2s, color 0.2s; }
 .mf-bulkbar button:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.25); transform: translateY(-1px); }
 .mf-bulkbar button.danger { color: #ff8787; background: rgba(255, 107, 107, 0.12); border-color: rgba(255, 107, 107, 0.2); }
 .mf-bulkbar button.danger:hover { background: rgba(255, 107, 107, 0.25); border-color: rgba(255, 107, 107, 0.35); }
@@ -165,7 +165,7 @@ animation: dropIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
   z-index: 1;
   color: var(--accent);
   filter: drop-shadow(0 0 16px rgba(124, 131, 255, 0.4));
-  animation: folderFloat 3s ease-in-out infinite;
+  animation: folderFloat 3s ease-in-out 2;
 }
 .mf-folder-empty-icon::after {
   content: '';
@@ -199,10 +199,12 @@ animation: dropIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: all 0.2s;
+  transition: opacity 0.2s, background 0.2s, color 0.2s;
   padding: 0;
 }
-.mf-folder-card:hover .mf-folder-menu {
+.mf-folder-card:hover .mf-folder-menu,
+.mf-folder-card:focus-within .mf-folder-menu,
+.mf-folder-menu:focus-visible {
   opacity: 1;
 }
 .mf-folder-menu:hover {
@@ -294,7 +296,8 @@ body.compact .mf-card-icon { height: 60px; }
 .mf-section .mf-grid { padding: 6px 0 var(--space-sm) 0; margin: 0; }
 .mf-section .mf-table { border-radius: 0; border: none; margin: var(--space-xs) 0 var(--space-sm) 0; }
 .mf-section-drill { font-size: var(--text-xs); color: var(--cat-color); opacity: 0.6; }
-.mf-section-head:hover .mf-section-drill { opacity: 1; }
+.mf-section-head:hover .mf-section-drill,
+.mf-section-head:focus-within .mf-section-drill { opacity: 1; }
 
 /* ── Gallery drill-down ── */
 .mf-gallery { animation: fadeInUp 0.25s ease both; }
@@ -441,7 +444,7 @@ background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent);
 
 .mf-move-btn {
   position: relative;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .mf-move-btn:hover {
   background: rgba(255, 255, 255, 0.05) !important;
@@ -472,7 +475,7 @@ background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent);
 .mf-empty-icon {
   margin-bottom: 24px;
   opacity: 0.8;
-  animation: float 3s ease-in-out infinite;
+  animation: float 3s ease-in-out 3;
 }
 @keyframes float {
   0%, 100% { transform: translateY(0); }

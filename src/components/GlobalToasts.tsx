@@ -14,7 +14,11 @@ export default function GlobalToasts() {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{
+    <div
+      aria-live="polite"
+      aria-atomic="false"
+      role="status"
+      style={{
       position: 'fixed',
       bottom: 24,
       right: 24,
@@ -64,7 +68,9 @@ export default function GlobalToasts() {
             gap: 12,
             minWidth: 280,
             maxWidth: 400,
-            animation: 'toastSpringIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards'
+            animation: t.exiting
+              ? 'toastSpringOut 0.22s ease forwards'
+              : 'toastSpringIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards'
           }}>
             <div style={{ flexShrink: 0, display: 'flex' }}>
               {icon}

@@ -1,6 +1,6 @@
 .st-root { animation: fadeInUp 0.3s ease both; }
 .st-root h1 { margin: 0 0 18px; font-size: var(--text-2xl); letter-spacing: -0.3px; }
-.st-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+.st-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }
 .st-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-md) 18px; backdrop-filter: blur(20px); }
 .st-card-label { color: var(--text-dim); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; }
 .st-card-value { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.3px; margin-top: var(--space-xs); }

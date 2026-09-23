@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState, useCallback, ReactNode } from 'react'
+import React, { createContext, useContext, useRef, useState, useCallback, useEffect, ReactNode } from 'react'
 
 interface Track { messageId: number; fileName: string; fileSize: number; uploadedAt?: number }
 
@@ -8,6 +8,8 @@ interface AudioPlayerCtx {
   currentTime: number
   duration: number
   queue: Track[]
+  volume: number
+  muted: boolean
   play: (track: Track, queue: Track[]) => void
   togglePlay: () => void
   playNext: () => void
@@ -16,10 +18,37 @@ interface AudioPlayerCtx {
   close: () => void
   setTime: (t: number) => void
   setDuration: (d: number) => void
+  setVolume: (v: number) => void
+  toggleMute: () => void
   audioRef: React.RefObject<HTMLAudioElement | null>
 }
 
 const AudioPlayerContext = createContext<AudioPlayerCtx>(null!)
+
+const VOLUME_KEY = 'rodjer.player.volume'
+const MUTED_KEY = 'rodjer.player.muted'
+
+function readStoredNumber(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw == null) return fallback
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return fallback
+    return Math.min(max, Math.max(min, n))
+  } catch {
+    return fallback
+  }
+}
+
+function readStoredBool(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw == null) return fallback
+    return raw === '1' || raw === 'true'
+  } catch {
+    return fallback
+  }
+}
 
 export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -28,7 +57,34 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [cacheUrls, setCacheUrls] = useState<Record<number, string>>({})
+  const [volume, setVolumeState] = useState(() => readStoredNumber(VOLUME_KEY, 0.8, 0, 1))
+  const [muted, setMuted] = useState(() => readStoredBool(MUTED_KEY, false))
   const queueRef = useRef<Track[]>([])
+
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    el.volume = muted ? 0 : volume
+    el.muted = muted
+  }, [volume, muted])
+
+  const setVolume = useCallback((v: number) => {
+    const next = Math.min(1, Math.max(0, Number(v) || 0))
+    setVolumeState(next)
+    if (next > 0 && muted) setMuted(false)
+    try {
+      localStorage.setItem(VOLUME_KEY, String(next))
+      if (next > 0) localStorage.setItem(MUTED_KEY, '0')
+    } catch {}
+  }, [muted])
+
+  const toggleMute = useCallback(() => {
+    setMuted(prev => {
+      const next = !prev
+      try { localStorage.setItem(MUTED_KEY, next ? '1' : '0') } catch {}
+      return next
+    })
+  }, [])
 
   const play = useCallback(async (track: Track, q: Track[]) => {
     queueRef.current = q
@@ -85,8 +141,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   return (
     <AudioPlayerContext.Provider value={{
       currentTrack, playing, currentTime, duration, queue: queueRef.current,
-      play, togglePlay, playNext, playPrev, seek, close,
-      setTime: setCurrentTime, setDuration,
+      volume, muted, play, togglePlay, playNext, playPrev, seek, close,
+      setTime: setCurrentTime, setDuration, setVolume, toggleMute,
       audioRef,
     }}>
       {children}

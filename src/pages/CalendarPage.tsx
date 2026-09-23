@@ -6,18 +6,24 @@ export default function CalendarPage() {
   useEffect(() => { window.electronAPI?.telegram?.listFiles?.().then((r: any) => { if (r?.success) setFiles(r.data || []) }) }, [])
   const grid = useMemo(() => {
     const days: Record<string, number> = {}
+    const dayKey = (date: Date) => {
+      const y = date.getFullYear()
+      const m = String(date.getMonth() + 1).padStart(2, "0")
+      const d = String(date.getDate()).padStart(2, "0")
+      return `${y}-${m}-${d}`
+    }
     files.forEach((f: any) => {
       const d = new Date((f.date || 0) * 1000); if (!isFinite(d.getTime())) return
-      const k = d.toISOString().slice(0, 10); days[k] = (days[k] || 0) + 1
+      const k = dayKey(d); days[k] = (days[k] || 0) + 1
     })
     v3store.getActivity().filter(a => a.type === "upload").forEach(a => {
-      const k = new Date(a.ts).toISOString().slice(0,10); days[k] = (days[k] || 0) + 1
+      const k = dayKey(new Date(a.ts)); days[k] = (days[k] || 0) + 1
     })
     const out: Array<{ d: string; n: number }> = []
     const now = new Date()
     for (let i = 365; i >= 0; i--) {
       const d = new Date(now); d.setDate(now.getDate() - i)
-      const k = d.toISOString().slice(0, 10); out.push({ d: k, n: days[k] || 0 })
+      const k = dayKey(d); out.push({ d: k, n: days[k] || 0 })
     }
     return out
   }, [files])

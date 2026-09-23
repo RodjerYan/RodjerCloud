@@ -1,6 +1,12 @@
 node_modules/
 out/
 dist/
+dist_build_*/
+dist_new/
+dist_new_locked_*/
+.ai/
+__pycache__/
+*.pyc
 .DS_Store
 *.log
 .env

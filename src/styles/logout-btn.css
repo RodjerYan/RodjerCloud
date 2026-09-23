@@ -18,7 +18,7 @@
 .v2-sidebar-logout-text {
   display: inline-block;
   transform: translateX(4px);
-  transition: all 0.3s;
+  transition: transform 0.3s, opacity 0.3s;
 }
 .v2-sidebar-logout:hover .v2-sidebar-logout-text {
   transform: translateX(48px);
@@ -36,7 +36,7 @@
   height: 100%;
   transform: translateX(48px);
   opacity: 0;
-  transition: all 0.3s;
+  transition: transform 0.3s, opacity 0.3s;
 }
 .v2-sidebar-logout:hover .v2-sidebar-logout-icon-wrap {
   transform: translateX(0);
@@ -50,7 +50,7 @@
   height: 8px;
   border-radius: 4px;
   background: #ef4444;
-  transition: all 0.3s;
+  transition: left 0.3s, top 0.3s, width 0.3s, height 0.3s, border-radius 0.3s, transform 0.3s;
 }
 .v2-sidebar-logout:hover .v2-sidebar-logout-bg {
   left: 0;

@@ -34,7 +34,6 @@
   background: #7c83ff;
   top: -200px;
   right: -100px;
-  animation: loginFloat 8s ease-in-out infinite;
 }
 
 .login-shape-2 {
@@ -43,7 +42,6 @@
   background: #b14aff;
   bottom: -150px;
   left: -100px;
-  animation: loginFloat 10s ease-in-out infinite reverse;
 }
 
 .login-shape-3 {
@@ -52,13 +50,6 @@
   background: #22d3ee;
   top: 40%;
   left: 60%;
-  animation: loginFloat 12s ease-in-out infinite 2s;
-}
-
-@keyframes loginFloat {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(30px, -30px) scale(1.05); }
-  66% { transform: translate(-20px, 20px) scale(0.95); }
 }
 
 .login-card {
@@ -108,7 +99,7 @@
   border-radius: 28px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent), rgba(177,74,255,0.3));
   filter: blur(12px);
-  animation: pulse 3s ease-in-out infinite;
+  animation: pulse 3s ease-in-out 3;
 }
 
 .login-title {
@@ -233,7 +224,7 @@
   border: 1px solid rgba(140,160,220,0.12);
   border-radius: var(--radius-md);
   outline: none;
-  color: transparent;
+  color: var(--text);
   font-size: var(--text-2xl);
   font-weight: 700;
   font-family: var(--font-mono);
@@ -268,7 +259,7 @@
   height: 2px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--text-dim) 20%, transparent);
-  transition: all 0.2s ease;
+  transition: width 0.2s ease, height 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .login-code-dash.filled {

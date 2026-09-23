@@ -4,6 +4,7 @@ export interface ToastMessage {
   id: string;
   message: string;
   type: ToastType;
+  exiting?: boolean;
 }
 
 let toasts: ToastMessage[] = [];
@@ -21,22 +22,28 @@ export const subscribeToasts = (listener: (toasts: ToastMessage[]) => void) => {
   };
 };
 
-const show = (message: string, type: ToastType = 'info', duration: number = 3000) => {
+const show = (message: string, type: ToastType = 'info', duration?: number) => {
   const id = Math.random().toString(36).substring(2, 9);
+  const ms = duration !== undefined ? duration : type === 'error' ? 6000 : type === 'loading' ? 0 : 3000;
   toasts.push({ id, message, type });
   notify();
 
-  if (duration > 0) {
+  if (ms > 0) {
     setTimeout(() => {
       remove(id);
-    }, duration);
+    }, ms);
   }
   return id;
 };
 
 const remove = (id: string) => {
-  toasts = toasts.filter((t) => t.id !== id);
+  const t = toasts.find(x => x.id === id);
+  if (t) t.exiting = true;
   notify();
+  setTimeout(() => {
+    toasts = toasts.filter((x) => x.id !== id);
+    notify();
+  }, 220);
 };
 
 export const toast = {

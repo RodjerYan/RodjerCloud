@@ -31,15 +31,21 @@ export default function FavoritesPage() {
 
   const loadThumbs = React.useCallback(async (files: any[]) => {
     const map: Record<number, string> = {}
-    await Promise.all(files.map(async (f) => {
-      try {
-        const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
-        if (r.success && r.data) {
-          const d = await window.electronAPI.file.getLocalUrl(r.data)
-          if (d.success) map[f.messageId] = d.data
-        }
-      } catch {}
-    }))
+    const CONCURRENCY = 6
+    let idx = 0
+    const worker = async () => {
+      while (idx < files.length) {
+        const f = files[idx++]
+        try {
+          const r = await window.electronAPI.telegram.downloadThumbnail(f.messageId, f.fileName)
+          if (r.success && r.data) {
+            const d = await window.electronAPI.file.getLocalUrl(r.data)
+            if (d.success) map[f.messageId] = d.data
+          }
+        } catch {}
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => worker()))
     setThumbs(prev => {
       Object.keys(map).forEach(key => {
         const oldUrl = prev[Number(key)]

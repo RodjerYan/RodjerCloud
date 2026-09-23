@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback, useEffect } from 'react'
 
 export interface TiltCardProps {
   tiltLimit?: number
@@ -40,6 +40,8 @@ export function TiltCard({
   'data-mid': dataMid,
 }: TiltCardProps) {
   const cardRef = useRef<HTMLDivElement>(null)
+  const rafRef = useRef<number | null>(null)
+  const pendingPosRef = useRef<{ x: number; y: number } | null>(null)
   const [transform, setTransform] = useState(
     `perspective(${perspective}px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`
   )
@@ -50,28 +52,47 @@ export function TiltCard({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      const el = cardRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      const px = (e.clientX - rect.left) / rect.width
-      const py = (e.clientY - rect.top) / rect.height
-      const xRot = (py - 0.5) * (tiltLimit * 2) * dir
-      const yRot = (px - 0.5) * -(tiltLimit * 2) * dir
-      setTransform(
-        `perspective(${perspective}px) rotateX(${xRot}deg) rotateY(${yRot}deg) scale3d(${scale}, ${scale}, ${scale})`
-      )
-      if (spotlight) {
-        setSpotlightPos({ x: px * 100, y: py * 100 })
-      }
+      pendingPosRef.current = { x: e.clientX, y: e.clientY }
+      if (rafRef.current) return
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null
+        const el = cardRef.current
+        const pos = pendingPosRef.current
+        if (!el || !pos) return
+        const rect = el.getBoundingClientRect()
+        if (!rect.width || !rect.height) return
+        const px = (pos.x - rect.left) / rect.width
+        const py = (pos.y - rect.top) / rect.height
+        const xRot = (py - 0.5) * (tiltLimit * 2) * dir
+        const yRot = (px - 0.5) * -(tiltLimit * 2) * dir
+        setTransform(
+          `perspective(${perspective}px) rotateX(${xRot}deg) rotateY(${yRot}deg) scale3d(${scale}, ${scale}, ${scale})`
+        )
+        if (spotlight) {
+          setSpotlightPos({ x: px * 100, y: py * 100 })
+        }
+      })
     },
     [tiltLimit, scale, perspective, dir, spotlight]
   )
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+  }, [])
 
   const handlePointerEnter = useCallback(() => {
     setIsHovered(true)
   }, [])
 
   const handlePointerLeave = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    pendingPosRef.current = null
     setTransform(
       `perspective(${perspective}px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`
     )

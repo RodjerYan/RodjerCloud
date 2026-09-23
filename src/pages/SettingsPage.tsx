@@ -157,7 +157,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
               <input type="number" min={1} max={1} value={1} disabled
                 style={{ width: 60, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px', borderRadius: '8px' }} />
               <button onClick={saveConcurrency} disabled
-                style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: concurrencySaved ? 'rgba(255,255,255,0.05)' : '#7c83ff', color: concurrencySaved ? 'rgba(255,255,255,0.3)' : '#fff', fontWeight: 600, fontSize: 13, cursor: concurrencySaved ? 'default' : 'pointer', transition: 'all 0.2s' }}>
+                style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: concurrencySaved ? 'rgba(255,255,255,0.05)' : '#7c83ff', color: concurrencySaved ? 'rgba(255,255,255,0.3)' : '#fff', fontWeight: 600, fontSize: 13, cursor: concurrencySaved ? 'default' : 'pointer', transition: 'background 0.2s, color 0.2s' }}>
                 Стабильный режим
               </button>
             </div>

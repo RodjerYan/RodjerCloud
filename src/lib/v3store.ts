@@ -52,7 +52,8 @@ function get<T>(k: string, def: T): T {
 function set<T>(k: string, v: T) {
   cache[k] = v
   // Async persist to IndexedDB without blocking UI thread
-  db.kv.put({ key: k, value: JSON.parse(JSON.stringify(v)) }).catch(e => console.error("DB Save Error:", e))
+  const copy = typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v))
+  db.kv.put({ key: k, value: copy }).catch(e => console.error("DB Save Error:", e))
 }
 
 function stateJson(): string {

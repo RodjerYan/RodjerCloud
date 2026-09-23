@@ -29,15 +29,15 @@ export default function StatisticsPage() {
   const totalBytes = files.reduce((s, f) => s + (f.fileSize || 0), 0)
 
   const activity = useMemo(() => {
+    const dayKey = (date: Date) => `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
     const map: Record<string, number> = {}
     for (let i = 29; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i)
-      const k = d.toISOString().slice(5, 10)
-      map[k] = 0
+      map[dayKey(d)] = 0
     }
     files.forEach(f => {
       if (!f.date) return
-      const d = new Date(f.date * 1000); const k = d.toISOString().slice(5, 10)
+      const k = dayKey(new Date(f.date * 1000))
       if (k in map) map[k] += 1
     })
     return Object.entries(map).map(([date, count]) => ({ date, count }))

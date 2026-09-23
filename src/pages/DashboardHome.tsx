@@ -38,7 +38,7 @@ export default function DashboardHome({ channelInfo, userInfo }: { channelInfo: 
       const totalSize = sizeData.totalSize || 0
       const totalFromSize = sizeData.total || 0
       const weekFiles = sizeData.weekFiles || 0
-      const recent = recentRes?.success ? (recentRes.files || []) : []
+      const recent = recentRes?.success ? (recentRes.data || (recentRes as any).files || []) : []
       const total = totalFromSize > 0 ? totalFromSize : Object.values(counts).reduce((s: number, v: any) => s + (typeof v === 'number' ? v : 0), 0)
       const avgSize = total > 0 ? totalSize / total : 0
       setData({ total, totalSize, weekFiles, avgSize, counts, recent })

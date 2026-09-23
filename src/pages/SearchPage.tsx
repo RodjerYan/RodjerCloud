@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from "react"
-import { Search } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { Search, FileText } from "lucide-react"
 import { v3store, fmtBytes } from "../lib/v3store"
 
 export default function SearchPage() {
@@ -7,6 +8,7 @@ export default function SearchPage() {
   const [debouncedQ, setDebouncedQ] = useState("")
   const [files, setFiles] = useState<any[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const nav = useNavigate()
 
   useEffect(() => {
     window.electronAPI?.telegram?.listFiles?.().then((r: any) => { if (r?.success) setFiles(r.data || []) })
@@ -39,11 +41,22 @@ export default function SearchPage() {
           <span className="v3-chip v3-num">{results.length} найдено</span>
         </div>
         <div style={{ marginTop: 14 }}>
+          {results.length === 0 && debouncedQ.trim() && (
+            <div className="v3-sub" style={{ padding: "10px 0" }}>Ничего не найдено</div>
+          )}
           {results.map((f: any) => (
-            <div key={f.messageId} className="v3-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--v3-border-soft)" }}>
-              <div style={{ flex: 1 }}>{f.fileName}</div>
+            <button
+              key={f.messageId}
+              type="button"
+              className="v3-row"
+              style={{ width: "100%", padding: "8px 0", borderBottom: "1px solid var(--v3-border-soft)", background: "transparent", border: "none", color: "inherit", textAlign: "left", cursor: "pointer" }}
+              onClick={() => nav("/files")}
+              title="Открыть «Мои файлы»"
+            >
+              <FileText size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.fileName}</div>
               <div className="v3-sub v3-num">{fmtBytes(f.fileSize || 0)}</div>
-            </div>
+            </button>
           ))}
         </div>
       </div>

@@ -158,10 +158,13 @@ export default function MyFilesPage() {
             elementRectsRef.current.set(el, el.getBoundingClientRect())
           })
         }
-        
+
         const nextSelected = new Set(initialSelectedOnDrag.current)
+        const scrollDelta = scrollDiff
         elementRectsRef.current.forEach((rect, el) => {
-          if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+          const adjTop = rect.top - scrollDelta
+          const adjBottom = rect.bottom - scrollDelta
+          if (rect.left < right && rect.right > left && adjTop < bottom && adjBottom > top) {
             const mid = parseInt(el.getAttribute('data-mid') || '0', 10)
             if (mid) nextSelected.add(mid)
           }
@@ -195,11 +198,18 @@ export default function MyFilesPage() {
     if (!container) return
     const handleGlobalMouseDown = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.mf-card, .mf-folder-card, .mf-table, .v3-btn, button, input, .mf-gm-card')) return
-      if (e.button !== 0) return 
+      if (e.button !== 0) return
       const currentScroll = container.scrollTop
       selectionStart.current = { x: e.clientX, y: e.clientY, scrollY: currentScroll }
       isSelecting.current = true
       initialSelectedOnDrag.current = e.shiftKey || e.ctrlKey || e.metaKey ? new Set(selectedRef.current) : new Set()
+      elementRectsRef.current.clear()
+      const elements = document.querySelectorAll('[data-mid]')
+      elements.forEach(el => {
+        const section = el.closest('.mf-section-body')
+        if (section && !section.classList.contains('open')) return
+        elementRectsRef.current.set(el, el.getBoundingClientRect())
+      })
       setSelectionBox({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
     }
     container.addEventListener('mousedown', handleGlobalMouseDown as EventListener)
@@ -233,7 +243,10 @@ export default function MyFilesPage() {
     setDebouncedQuery('')
     setSearchResults([])
     setSearchTotal(0)
+    setSelected(new Set())
   }, [folderDrill, sort, view])
+
+  useEffect(() => { setSelected(new Set()) }, [searchQuery])
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
@@ -250,12 +263,17 @@ export default function MyFilesPage() {
   }, [duplicatePrompt])
 
   useEffect(() => {
-    if (!progressModal) return
-    if (progressModal.current >= progressModal.total && progressModal.total > 0) {
-      const t = setTimeout(() => setProgressModal(null), 2500)
-      return () => clearTimeout(t)
+    if (!renameTarget && !showCreateFolder && !moveTarget) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      if (renameTarget) setRenameTarget(null)
+      if (showCreateFolder) setShowCreateFolder(false)
+      if (moveTarget) setMoveTarget(null)
     }
-  }, [progressModal])
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [renameTarget, showCreateFolder, moveTarget])
 
   useEffect(() => {
     return () => {
@@ -372,7 +390,18 @@ export default function MyFilesPage() {
       setMoveTarget([messageId])
     }
   }
-  const bulkMoveToFolder = () => { if (selected.size > 0) setMoveTarget(Array.from(selected)) }
+  const bulkMoveToFolder = () => {
+    if (selected.size === 0) return
+    const pool = folderDrill ? folderFiles : files
+    const poolIds = new Set(pool.map((f: any) => f.messageId))
+    const ids = Array.from(selected).filter(id => poolIds.has(id))
+    if (ids.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
+    setMoveTarget(ids)
+  }
   const handleFileDragStart = (e: React.DragEvent, f: any) => {
     e.stopPropagation()
     let payload: any = { type: 'file', id: f.messageId }
@@ -462,6 +491,7 @@ export default function MyFilesPage() {
         const newFiles = processRawFiles(r.data)
         setFiles(prev => [...prev, ...newFiles])
         nextOffsetIdRef.current = r.nextOffsetId ?? null
+        setVisibleCount(prev => prev + newFiles.length)
       } else {
         nextOffsetIdRef.current = null
       }
@@ -502,6 +532,7 @@ export default function MyFilesPage() {
           return fresh.length ? [...prev, ...fresh] : prev
         })
         folderNextOffsetIdRef.current = r.nextOffsetId ?? null
+        setVisibleCount(prev => prev + newFiles.length)
       } else {
         folderNextOffsetIdRef.current = null
       }
@@ -629,6 +660,7 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     if (!folderDrill) { setFolderFiles([]); folderNextOffsetIdRef.current = null; setFolderTotal(0); return }
+    setVisibleCount(FILES_PAGE_SIZE)
     loadFolderFiles(folderDrill)
   }, [folderDrill, loadFolderFiles])
 
@@ -778,6 +810,27 @@ export default function MyFilesPage() {
     }
   }, [filtered.length, currentFiles.length, visibleCount, loadMore, loadMoreFolderFiles, folderDrill, debouncedQuery])
 
+  const listLoaderRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = listLoaderRef.current
+    if (!el) return
+    const totalLen = folderDrill ? currentFiles.length : filtered.length
+    const io = new IntersectionObserver(entries => {
+      if (!entries.some(e => e.isIntersecting)) return
+      if (visibleCount < totalLen) {
+        setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen))
+        return
+      }
+      if (folderDrill) {
+        if (folderNextOffsetIdRef.current !== null && !folderLoadingMoreRef.current && !debouncedQuery.trim()) loadMoreFolderFiles()
+      } else if (nextOffsetIdRef.current !== null && !loadingMoreRef.current) {
+        loadMore()
+      }
+    }, { rootMargin: '600px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [folderDrill, currentFiles.length, filtered.length, visibleCount, loadMore, loadMoreFolderFiles, debouncedQuery, loadingMoreRef])
+
 
   const recentFiles = useMemo(() => {
     return filtered.filter(f => {
@@ -870,11 +923,13 @@ export default function MyFilesPage() {
 
     setDeletingIds(prev => new Set(prev).add(f.messageId))
     toast.info('Перемещение в корзину…')
-    
+    setProgressModal({ title: 'Перемещение в корзину', items: [{ name: f.fileName, status: 'active' as const }], current: 0, total: 1, visible: true, onClose: () => setProgressModal(null) })
+
     const applyRemove = () => {
       locallyDeletedIds.current.add(f.messageId)
       flushSync(() => {
         setFiles(prev => prev.filter(x => x.messageId !== f.messageId))
+        setFolderFiles(prev => prev.filter((x: any) => x.messageId !== f.messageId))
         setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
       })
     }
@@ -884,6 +939,7 @@ export default function MyFilesPage() {
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (r.success) {
       toast.success('Перемещено в корзину')
+      setProgressModal(prev => prev ? { ...prev, items: [{ name: f.fileName, status: 'done' as const }], current: 1 } : prev)
     } else {
       toast.error('Ошибка удаления, отмена операции')
       const revert = () => {
@@ -893,10 +949,17 @@ export default function MyFilesPage() {
             if (prev.find(x => x.messageId === f.messageId)) return prev
             return [...prev, f].sort((a, b) => (b.messageId - a.messageId))
           })
+          if (folderDrill) {
+            setFolderFiles(prev => {
+              if (prev.find((x: any) => x.messageId === f.messageId)) return prev
+              return [...prev, f]
+            })
+          }
           setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
         })
       }
       safeViewTransition(revert)
+      setProgressModal(prev => prev ? { ...prev, items: [{ name: f.fileName, status: 'error' as const }], current: 1 } : prev)
     }
     setIsDragOver(false)
     dragCounter.current = 0
@@ -1008,9 +1071,17 @@ export default function MyFilesPage() {
   }, [preview, navPreview])
   const bulkDelete = async (e?: React.MouseEvent) => {
     if (selected.size === 0) return
-    if (!(await appConfirm(`Переместить ${selected.size} файлов в корзину?`))) return
-    const ids = Array.from(selected)
-    const selectedFiles = files.filter(f => ids.includes(f.messageId))
+    const pool = folderDrill ? folderFiles : files
+    const poolIds = new Set(pool.map((f: any) => f.messageId))
+    const ids = Array.from(selected).filter(id => poolIds.has(id))
+    if (ids.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
+    if (!(await appConfirm(`Переместить ${ids.length} файлов в корзину?`))) return
+    const selectedFiles = pool.filter((f: any) => ids.includes(f.messageId))
+    let hadError = false
     
     let x = 0.5, y = 0.5
     if (e) {
@@ -1027,15 +1098,23 @@ export default function MyFilesPage() {
     })
 
     const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
+    setDeletingIds(prev => {
+      const n = new Set(prev)
+      ids.forEach(id => n.add(id))
+      return n
+    })
+    toast.info('Перемещение в корзину…')
+
     setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
 
-    const filesToRestore = [...selectedFiles]
-    let processed = 0
-    let hadError = false
+    const removeFromLists = (fid: number) => {
+      locallyDeletedIds.current.add(fid)
+      setFiles(prev => prev.filter(x => x.messageId !== fid))
+      setFolderFiles(prev => prev.filter((x: any) => x.messageId !== fid))
+    }
 
     const onProgress = (data: { kind: string; index: number; total: number }) => {
       if (data.kind !== 'delete') return
-      processed = data.index
       setProgressModal(prev => {
         if (!prev) return prev
         const newItems = prev.items.map((it, i) => {
@@ -1046,10 +1125,8 @@ export default function MyFilesPage() {
         })
         return { ...prev, items: newItems, current: data.index }
       })
-      if (processed <= ids.length) {
-        const fid = ids[processed - 1]
-        locallyDeletedIds.current.add(fid)
-        setFiles(prev => prev.filter(x => x.messageId !== fid))
+      if (data.index >= 1 && data.index <= ids.length) {
+        removeFromLists(ids[data.index - 1])
       }
     }
     const unsub = window.electronAPI.telegram.onBulkProgress(onProgress)
@@ -1065,7 +1142,7 @@ export default function MyFilesPage() {
           if (!prev) return prev
           return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total }
         })
-        setTimeout(() => setProgressModal(null), 2500)
+        ids.forEach(removeFromLists)
       } else {
         hadError = true
         setProgressModal(prev => {
@@ -1076,7 +1153,6 @@ export default function MyFilesPage() {
           })
           return { ...prev, items: newItems, current: prev.total }
         })
-        setTimeout(() => setProgressModal(null), 4000)
       }
     } catch (err) {
       unsub()
@@ -1085,15 +1161,28 @@ export default function MyFilesPage() {
         if (!prev) return prev
         return { ...prev, items: prev.items.map(it => ({ ...it, status: 'error' as const })), current: prev.total }
       })
-      setTimeout(() => setProgressModal(null), 4000)
     }
+    if (hadError) toast.error('Часть файлов не удалась')
+    setDeletingIds(prev => {
+      const n = new Set(prev)
+      ids.forEach(id => n.delete(id))
+      return n
+    })
     setIsDragOver(false)
     dragCounter.current = 0
     setSelectionBox(null)
   }
   const bulkDownload = async () => {
     if (selected.size === 0) return
-    const items = files.filter(f => selected.has(f.messageId)).map(f => ({ messageId: f.messageId, fileName: f.fileName }))
+    const pool = folderDrill ? folderFiles : files
+    const items = pool
+      .filter((f: any) => selected.has(f.messageId))
+      .map((f: any) => ({ messageId: f.messageId, fileName: f.fileName }))
+    if (items.length === 0) {
+      toast.info('Нет выбранных файлов в текущем списке')
+      clearSelection()
+      return
+    }
     toast.info('Скачивание ' + items.length + ' файлов…')
     await window.electronAPI.telegram.bulkDownload(items)
     toast.success('Скачивание завершено')
@@ -1264,7 +1353,7 @@ export default function MyFilesPage() {
         transform: dropProgress ? 'translateY(0) scale(1)' : 'translateY(120%) scale(0.9)',
         opacity: dropProgress ? 1 : 0,
         pointerEvents: dropProgress ? 'auto' : 'none',
-        transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+        transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1417,6 +1506,12 @@ export default function MyFilesPage() {
             <div key={i} className="mf-skeleton-card" />
           ))}
         </div>
+      ) : loadError ? (
+        <div className="mf-empty" style={{ paddingTop: 60 }}>
+          <AlertCircle size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+          <div>{loadError}</div>
+          <button className="v3-btn ghost" style={{ marginTop: 12 }} onClick={() => load()}>Повторить</button>
+        </div>
       ) : drillDown ? (
         <div className="mf-gallery">
           <div className="mf-gallery-head" onClick={() => { setDrillDown(null); setVisibleCount(FILES_PAGE_SIZE) }} style={{ '--cat-color': CAT_COLOR[drillDown] } as React.CSSProperties}>
@@ -1429,7 +1524,21 @@ export default function MyFilesPage() {
             {drillDown === 'Аудио' ? (<>
               <table className="mf-table">
                 <thead><tr>
-                  <th><input type="checkbox" onChange={() => galleryFiles.forEach(f => toggleSelect(f.messageId))} /></th>
+                  <th>
+                    <input
+                      type="checkbox"
+                      checked={galleryFiles.length > 0 && galleryFiles.slice(0, visibleCount).every(f => selected.has(f.messageId))}
+                      onChange={e => {
+                        const checked = e.target.checked
+                        const list = galleryFiles.slice(0, visibleCount)
+                        setSelected(prev => {
+                          const s = new Set(prev)
+                          list.forEach(f => { checked ? s.add(f.messageId) : s.delete(f.messageId) })
+                          return s
+                        })
+                      }}
+                    />
+                  </th>
                   <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                 </tr></thead>
                 <tbody>
@@ -1595,7 +1704,21 @@ export default function MyFilesPage() {
                     ) : (
                       <table className="mf-table">
                         <thead><tr>
-                          <th><input type="checkbox" onChange={() => items.forEach(f => toggleSelect(f.messageId))} /></th>
+                          <th>
+                            <input
+                              type="checkbox"
+                              checked={items.length > 0 && items.slice(0, visibleCount).every(f => selected.has(f.messageId))}
+                              onChange={e => {
+                                const checked = e.target.checked
+                                const list = items.slice(0, visibleCount)
+                                setSelected(prev => {
+                                  const s = new Set(prev)
+                                  list.forEach(f => { checked ? s.add(f.messageId) : s.delete(f.messageId) })
+                                  return s
+                                })
+                              }}
+                            />
+                          </th>
                           <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                         </tr></thead>
                         <tbody>
@@ -1720,8 +1843,8 @@ export default function MyFilesPage() {
                                  else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
                                } catch {}
                              }}
-                             onClick={() => setFolderDrill(sf.id)}
-                             onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+                              onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
+                              onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                           <div className="mf-folder-preview">
                             {previewFile ? (
                               <>
@@ -1972,6 +2095,13 @@ export default function MyFilesPage() {
                     <span style={{ color: 'var(--v3-text-dim)', fontSize: 12 }}>Папка пуста. Перетащите файлы сюда.</span>
                   </div>
                 )}
+
+                {((folderDrill && currentFiles.length > visibleCount) || (!folderDrill && filtered.length > visibleCount)) && (
+                  <div className="dup-load-more" role="status">
+                    <span>Показано {Math.min(visibleCount, folderDrill ? currentFiles.length : filtered.length)} из {folderDrill ? currentFiles.length : filtered.length} файлов · прокрутите ниже</span>
+                  </div>
+                )}
+                <div ref={listLoaderRef} style={{ height: 20, flexShrink: 0 }} />
               </div>
             );
           })()}
@@ -2046,7 +2176,7 @@ export default function MyFilesPage() {
             </div>
 
             <button className="v3-btn mf-move-dropzone" onClick={() => confirmMoveFile('cat:root')}
-              style={{ textAlign: 'left', justifyContent: 'center', padding: '14px 16px', borderRadius: 12, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.2s', marginTop: 4 }}>
+              style={{ textAlign: 'left', justifyContent: 'center', padding: '14px 16px', borderRadius: 12, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10, transition: 'background 0.2s, border-color 0.2s, transform 0.2s', marginTop: 4 }}>
               <ArrowLeft size={18} style={{ flexShrink: 0, opacity: 0.8 }} />
               Вынести из папки в корень
             </button>
