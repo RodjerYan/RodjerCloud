@@ -18,14 +18,22 @@ const notify = () => {
 const MAX_LISTENERS = 100;
 export const subscribeDialogs = (listener: (dialogs: DialogState[]) => void) => {
   if (listeners.length >= MAX_LISTENERS) {
-    console.warn('dialogs: too many listeners, removing oldest');
-    listeners.shift();
+    console.warn('dialogs: too many listeners, keeping newest');
+    listeners = listeners.slice(-MAX_LISTENERS + 1);
   }
   listeners.push(listener);
   listener([...dialogs]);
   return () => {
     listeners = listeners.filter(l => l !== listener);
   };
+};
+
+export const forceCloseAllDialogs = () => {
+  if (dialogs.length === 0) return;
+  const pending = dialogs;
+  dialogs = [];
+  notify();
+  pending.forEach(d => d.resolve(false));
 };
 
 export const appConfirm = (message: string): Promise<boolean> => {

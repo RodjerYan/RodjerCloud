@@ -5,6 +5,7 @@ import { Star, Download, Trash2, Eye } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
 import { appConfirm, appAlert } from "../lib/dialogs"
+import { safeViewTransition } from '../lib/viewTransition'
 
 import { fmtSize, typeOf } from '../lib/utils'
 
@@ -101,11 +102,7 @@ export default function FavoritesPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (!r.success) {
@@ -116,11 +113,7 @@ export default function FavoritesPage() {
           setFavs(v3store.getFavs())
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
-        revert()
-      }
+      safeViewTransition(revert)
     }
   }
 
@@ -129,11 +122,7 @@ export default function FavoritesPage() {
       v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() })
       setFavs(v3store.getFavs())
     })
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyToggle)
-    } else {
-      applyToggle()
-    }
+    safeViewTransition(applyToggle)
   }
 
   const handlePreview = (f: any) => {

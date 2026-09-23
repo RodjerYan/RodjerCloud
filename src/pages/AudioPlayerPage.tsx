@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import { Play, Download, Trash2, Music, Clock, Calendar } from 'lucide-react'
 import { useAudioPlayer } from '../lib/AudioPlayerContext'
 import { appConfirm } from '../lib/dialogs'
+import { safeViewTransition } from '../lib/viewTransition'
 
 function fmtSize(n: number) {
   if (!n) return '0 B'
@@ -80,11 +81,7 @@ export default function AudioPlayerPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (!r.success) {
@@ -93,11 +90,7 @@ export default function AudioPlayerPage() {
           setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
-        revert()
-      }
+      safeViewTransition(revert)
     }
   }
 

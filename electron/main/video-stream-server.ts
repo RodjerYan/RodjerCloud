@@ -241,6 +241,13 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
     }
   })
 
+  server.on('error', (err: any) => {
+    const msg = err?.message || String(err)
+    console.error(`[VideoStreamServer] listen error on port ${port}: ${msg}`)
+    slog(`Listen error: ${msg}`)
+    server = null
+  })
+
   server.listen(port, '127.0.0.1', () => {
     console.log(`[VideoStreamServer] Listening on http://127.0.0.1:${port}`)
   })

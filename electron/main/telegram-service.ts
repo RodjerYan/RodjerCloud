@@ -807,6 +807,7 @@ export class TelegramService {
           }
           if (allIdsToDelete.length > 0) {
             await this.client.deleteMessages(this.channelId as any, allIdsToDelete, { revoke: true })
+            this.removeIdsFromFileCache(allIdsToDelete)
           }
         } catch {}
       }
@@ -1112,11 +1113,30 @@ export class TelegramService {
     } catch {}
   }
 
+  private isCachedEntryVisible(f: any): boolean {
+    if (!f || !f.messageId) return false
+    if (this.localTrashedIds.has(f.messageId)) return false
+    if (this.localRestoredIds.has(f.messageId)) return true
+    const caption: string = f.caption || ''
+    if (caption.includes('#chunk_of')) return false
+    if (caption.includes(this.TRASH_MARKER)) return false
+    return true
+  }
+
+  private removeIdsFromFileCache(ids: number[]) {
+    if (this.fileCache.length === 0 || ids.length === 0) return
+    const idSet = new Set(ids)
+    const before = this.fileCache.length
+    this.fileCache = this.fileCache.filter((f: any) => !idSet.has(f.messageId))
+    if (this.fileCache.length !== before) this.saveFileCache(this.fileCache)
+  }
+
   getCachedFilesInstant(): any[] {
-    if (this.fileCache.length > 0) return this.fileCache
-    const disk = this.loadFileCache()
-    if (disk.length > 0) this.fileCache = disk
-    return this.fileCache
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    return this.fileCache.filter((f: any) => this.isCachedEntryVisible(f))
   }
 
   rebuildFolderIndex(fileFolders: Record<string, string>) {
@@ -1165,7 +1185,7 @@ export class TelegramService {
   }
 
   async listFilesCached(): Promise<any[]> {
-    if (this.fileCache.length > 0) return this.fileCache
+    if (this.fileCache.length > 0) return this.getCachedFilesInstant()
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
         this.saveFileCache(files)
@@ -1173,7 +1193,9 @@ export class TelegramService {
         return files
       }).finally(() => { this.listFilesPromise = null })
     }
-    return this.listFilesPromise
+    const files = await this.listFilesPromise
+    this.fileCache = files
+    return this.getCachedFilesInstant()
   }
 
   private matchCategory(fileName: string, category: string): boolean {
@@ -1190,7 +1212,8 @@ export class TelegramService {
 
   getFileCategoryCounts(): Record<string, number> {
     const all = this.getCachedFilesInstant()
-    const counts: Record<string, number> = { Изображения: 0, Видео: 0, Аудио: 0, Документы: 0, Архивы: 0, Другое: 0 }
+    const now = Date.now() / 1000
+    const counts: Record<string, number> = { Изображения: 0, Видео: 0, Аудио: 0, Документы: 0, Архивы: 0, Другое: 0, Недавние: 0 }
     for (const f of all) {
       const name = (f.fileName || '').toLowerCase()
       if (/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg|avif)$/i.test(name)) counts['Изображения']++
@@ -1199,41 +1222,42 @@ export class TelegramService {
       else if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|djvu|epub|fb2)$/i.test(name)) counts['Документы']++
       else if (/\.(zip|rar|7z|tar|gz)$/i.test(name)) counts['Архивы']++
       else counts['Другое']++
+      const fd = f.uploadedAt || f.originalDate || 0
+      if (fd > 0 && now - fd < 6 * 3600) counts['Недавние']++
     }
     return counts
   }
 
   getFilesByCategory(category: string): any[] {
     const all = this.getCachedFilesInstant()
-    if (category === 'Недавние') return all
+    if (category === 'Недавние') {
+      const now = Date.now() / 1000
+      return all
+        .filter(f => {
+          const fd = f.uploadedAt || f.originalDate || 0
+          return fd > 0 && now - fd < 6 * 3600
+        })
+        .sort((a, b) => (b.uploadedAt || b.originalDate || 0) - (a.uploadedAt || a.originalDate || 0))
+    }
     return all.filter(f => this.matchCategory(f.fileName || '', category))
   }
 
   async listFilesFromCache(limit: number, offsetId: number = 0): Promise<{ files: any[]; nextOffsetId: number | null; total: number }> {
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
     if (this.fileCache.length > 0) {
+      const visible = this.fileCache
+        .filter((f: any) => this.isCachedEntryVisible(f))
+        .sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
       const filtered = offsetId > 0
-        ? this.fileCache.filter((f: any) => f.messageId < offsetId)
-        : this.fileCache
+        ? visible.filter((f: any) => f.messageId < offsetId)
+        : visible
       const page = filtered.slice(0, limit)
       const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
-      return { files: page, nextOffsetId, total: this.fileCache.length }
+      return { files: page, nextOffsetId, total: visible.length }
     }
-    try {
-      if (fs.existsSync(FILE_CACHE_PATH)) {
-        const raw = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
-        const allFiles = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.files) ? raw.files : [])
-        if (allFiles.length > 0) {
-          const latestId = allFiles.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0)
-          this.cacheMeta = { latestMessageId: latestId, lastSyncAt: 0 }
-          const filtered = offsetId > 0
-            ? allFiles.filter((f: any) => f.messageId < offsetId)
-            : allFiles
-          const page = filtered.slice(0, limit)
-          const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
-          return { files: page, nextOffsetId, total: allFiles.length }
-        }
-      }
-    } catch {}
     if (!this.listFilesPromise) {
       this.listFilesPromise = this.listFiles().then(files => {
         this.saveFileCache(files)
@@ -1241,19 +1265,29 @@ export class TelegramService {
         return files
       }).finally(() => { this.listFilesPromise = null })
     }
-    const allFiles = await this.listFilesPromise
-    const page = allFiles.slice(0, limit)
+    const allFiles = (await this.listFilesPromise)
+      .filter((f: any) => this.isCachedEntryVisible(f))
+      .sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
+    const filtered = offsetId > 0
+      ? allFiles.filter((f: any) => f.messageId < offsetId)
+      : allFiles
+    const page = filtered.slice(0, limit)
     const nextOffsetId = page.length >= limit ? page[page.length - 1].messageId : null
     return { files: page, nextOffsetId, total: allFiles.length }
   }
 
   async forceRescanFiles(): Promise<any[]> {
     this.invalidateFileCache()
-    this.listFilesPromise = null
-    const files = await this.listFiles()
-    this.saveFileCache(files)
-    this.fileCache = files
-    return files
+    if (this.listFilesPromise) {
+      try { await this.listFilesPromise } catch {}
+      this.invalidateFileCache()
+    }
+    this.listFilesPromise = this.listFiles().then(files => {
+      this.saveFileCache(files)
+      this.fileCache = files
+      return files
+    }).finally(() => { this.listFilesPromise = null })
+    return this.listFilesPromise
   }
 
   private async deltaSync(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
@@ -1306,8 +1340,36 @@ export class TelegramService {
           this.fileCache.push(f)
         }
       }
+      this.fileCache.sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
       this.saveFileCache(this.fileCache)
     }
+  }
+
+  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string }) {
+    if (!result?.messageId) return
+    const existing = this.fileCache.find((f: any) => f.messageId === result.messageId)
+    if (existing) return
+    if (this.fileCache.length === 0) this.getCachedFilesInstant()
+    const entry = {
+      messageId: result.messageId,
+      fileName: result.fileName,
+      fileSize: result.fileSize,
+      mimeType: result.mimeType || 'application/octet-stream',
+      uploadedAt: result.uploadedAt || Math.floor(Date.now() / 1000),
+      originalDate: undefined as number | undefined,
+      caption: '',
+      chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
+      isEncrypted: !!result.isEncrypted,
+      isMultipart: false,
+      multipartIds: [] as number[],
+      hash: result.hash,
+    }
+    this.fileCache.unshift(entry)
+    this.fileCache.sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
+    if (result.messageId > (this.cacheMeta.latestMessageId || 0)) {
+      this.cacheMeta = { ...this.cacheMeta, latestMessageId: result.messageId, lastSyncAt: Date.now() }
+    }
+    this.saveFileCache(this.fileCache)
   }
 
   async syncFilesInBackground(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
@@ -1318,9 +1380,14 @@ export class TelegramService {
       if (this.cacheMeta.latestMessageId > 0 || this.fileCache.length > 0) {
         await this.deltaSync(onProgress)
       } else {
-        const files = await this.listFiles(onProgress)
-        this.saveFileCache(files)
-        this.fileCache = files
+        if (!this.listFilesPromise) {
+          this.listFilesPromise = this.listFiles(onProgress).then(files => {
+            this.saveFileCache(files)
+            this.fileCache = files
+            return files
+          }).finally(() => { this.listFilesPromise = null })
+        }
+        await this.listFilesPromise
       }
     } catch (e) {
       console.warn('[syncFilesInBackground] error:', (e as Error).message)
@@ -1423,6 +1490,7 @@ export class TelegramService {
     this.localTrashedIds.delete(messageId)
     this.saveTrashState()
     await this.client.deleteMessages(this.channelId as any, idsToDelete, { revoke: true })
+    this.removeIdsFromFileCache(idsToDelete)
   }
 
   async permanentDeleteBatch(messageIds: number[]) {
@@ -1448,6 +1516,7 @@ export class TelegramService {
         15000,
         'permanentDeleteBatch deleteMessages'
       )
+      this.removeIdsFromFileCache(allIds)
     }
     this.saveTrashState()
   }
@@ -1611,6 +1680,42 @@ export class TelegramService {
     return tmpFile
   }
 
+  async computePartialHash(messageId: number): Promise<string> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+    if (!messages || messages.length === 0) throw new Error('Message not found')
+    const message: any = messages[0]
+    if (!message.file) throw new Error('No file attached to message')
+
+    const caption = message.message || ''
+    const needsFull = /#vault\s+[a-f0-9]+/.test(caption) || /#multipart\s+[\d,]+/.test(caption)
+    if (needsFull) {
+      const tmpFile = await this.downloadMediaToTemp(messageId)
+      try { return await computeFileHash(tmpFile) }
+      finally { fs.rmSync(tmpFile, { force: true }) }
+    }
+
+    try {
+      const hash = crypto.createHash('sha256')
+      let received = 0
+      const iter = this.client.iterDownload({
+        file: message.media,
+        requestSize: 65536,
+        limit: 1,
+      })
+      for await (const chunk of iter) {
+        hash.update(chunk)
+        received += chunk.length
+        if (received >= 65536) break
+      }
+      return hash.digest('hex') + ':' + this.toNum(message.file.size)
+    } catch {
+      const tmpFile = await this.downloadMediaToTemp(messageId)
+      try { return await computeFileHash(tmpFile) }
+      finally { fs.rmSync(tmpFile, { force: true }) }
+    }
+  }
+
   async downloadThumbnail(messageId: number, fileName?: string): Promise<string | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
@@ -1734,12 +1839,30 @@ export class TelegramService {
         }
       }
 
-      // Search for existing sync messages
-      const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+      // Find existing sync messages (server-side search — recent 200 may miss a buried edit)
       const syncMsgs: any[] = []
-      for (const m of msgs) {
-        if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+      const seenSync = new Set<number>()
+      for (const term of ['RFSYNC:', '__rf__']) {
+        try {
+          const found = await this.client.getMessages(this.channelId as any, { search: term, limit: 30 } as any)
+          for (const m of found || []) {
+            if (!m || !m.message) continue
+            const id = this.msgId(m)
+            if (seenSync.has(id)) continue
+            if (this.parseSyncMessage(m.message) || m.message.startsWith(term)) {
+              seenSync.add(id)
+              syncMsgs.push(m)
+            }
+          }
+        } catch {}
       }
+      if (syncMsgs.length === 0) {
+        const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+        for (const m of msgs) {
+          if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+        }
+      }
+      syncMsgs.sort((a, b) => this.msgId(b) - this.msgId(a))
 
       if (syncMsgs.length > 0) {
         // Use the first (newest) sync message as primary
@@ -1777,11 +1900,28 @@ export class TelegramService {
         } catch {}
         this.folderSyncId = null
       }
-      
-      const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+
       const syncMsgs: any[] = []
-      for (const m of msgs) {
-        if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+      const seenSync = new Set<number>()
+      for (const term of ['RFSYNC:', '__rf__']) {
+        try {
+          const found = await this.client.getMessages(this.channelId as any, { search: term, limit: 30 } as any)
+          for (const m of found || []) {
+            if (!m || !m.message) continue
+            const id = this.msgId(m)
+            if (seenSync.has(id)) continue
+            if (this.parseSyncMessage(m.message) || m.message.startsWith(term)) {
+              seenSync.add(id)
+              syncMsgs.push(m)
+            }
+          }
+        } catch {}
+      }
+      if (syncMsgs.length === 0) {
+        const msgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
+        for (const m of msgs) {
+          if (m.message && this.parseSyncMessage(m.message)) syncMsgs.push(m)
+        }
       }
       if (syncMsgs.length > 0) {
         const dupeIds = syncMsgs.map((m: any) => this.msgId(m))
@@ -1813,51 +1953,112 @@ export class TelegramService {
 
     this.debugLog('loadFoldersFromChannel called')
 
-    // Search backwards until we find the latest sync message
-    let offsetId = 0
-    let foundSyncMsg: any = null
-    const BATCH = 100
-    const MAX_SCAN = 3000
-    let scanned = 0
-    const textMsgs: any[] = []
-
-    while (scanned < MAX_SCAN) {
-      const batch = await this.client.getMessages(this.channelId as any, {
-        limit: BATCH,
-        ...(offsetId ? { offsetId } : {}),
-      })
-      if (batch.length === 0) break
-      scanned += batch.length
-
-      for (const m of batch) {
-        if (m.message && !m.file) {
-          textMsgs.push(m)
+    const tryParseWithChunks = async (m: any): Promise<{ message: string; id: number } | null> => {
+      if (!m || !m.message) return null
+      let text = m.message
+      if (this.parseSyncMessage(text)) return { message: text, id: this.msgId(m) }
+      // Multi-chunk payload: first chunk has the prefix, following chunks are continuation IDs
+      const baseId = this.msgId(m)
+      try {
+        const ids: number[] = []
+        for (let i = 1; i <= 16; i++) ids.push(baseId + i)
+        const nextMsgs = await this.client!.getMessages(this.channelId as any, { ids } as any)
+        const ordered = (nextMsgs || []).filter(Boolean).sort((a: any, b: any) => this.msgId(a) - this.msgId(b))
+        for (const n of ordered) {
+          if (!n.message || n.file) break
+          text += n.message
+          if (this.parseSyncMessage(text)) return { message: text, id: this.msgId(m) }
         }
+      } catch {}
+      return null
+    }
+
+    // Server-side search first — finds a sync message buried under thousands of file posts
+    let candidates: any[] = []
+    for (const term of ['RFSYNC:', '__rf__']) {
+      try {
+        const found = await this.client.getMessages(this.channelId as any, { search: term, limit: 30 } as any)
+        if (found && found.length) candidates.push(...found.filter((m: any) => m && m.message && !m.file))
+      } catch (e) {
+        this.debugLog('search failed ' + term + ': ' + (e as Error).message)
       }
+    }
+    try {
+      const found = await this.client.getMessages(this.channelId as any, { search: 'rf', limit: 50 } as any)
+      if (found && found.length) {
+        candidates.push(...found.filter((m: any) => m && m.message && !m.file && typeof m.message === 'string' && m.message.startsWith('rf')))
+      }
+    } catch (e) {
+      this.debugLog('search failed rf: ' + (e as Error).message)
+    }
 
-      for (let i = 0; i < textMsgs.length; i++) {
-        const m = textMsgs[i]
-        if (m.message && (m.message.startsWith('rf') || m.message.startsWith('RFSYNC:'))) {
-          let concatenated = m.message
-          let parsed = this.parseSyncMessage(concatenated)
+    const seenIds = new Set<number>()
+    candidates = candidates
+      .filter((m: any) => {
+        const id = this.msgId(m)
+        if (seenIds.has(id)) return false
+        seenIds.add(id)
+        return true
+      })
+      .sort((a: any, b: any) => this.msgId(b) - this.msgId(a))
 
-          if (!parsed) {
-            for (let j = i - 1; j >= 0; j--) {
-              concatenated += textMsgs[j].message
-              parsed = this.parseSyncMessage(concatenated)
-              if (parsed) break
+    let foundSyncMsg: any = null
+    for (const m of candidates) {
+      const res = await tryParseWithChunks(m)
+      if (res) {
+        foundSyncMsg = res
+        this.debugLog('Found via search id=' + res.id)
+        break
+      }
+    }
+
+    // Fallback: manual scan (slower; only if search did not yield a parseable payload)
+    if (!foundSyncMsg) {
+      this.debugLog('search miss, falling back to history scan')
+      let offsetId = 0
+      const BATCH = 100
+      const MAX_SCAN = 12000
+      let scanned = 0
+      const textMsgs: any[] = []
+
+      while (scanned < MAX_SCAN) {
+        const batch = await this.client.getMessages(this.channelId as any, {
+          limit: BATCH,
+          ...(offsetId ? { offsetId } : {}),
+        })
+        if (batch.length === 0) break
+        scanned += batch.length
+
+        for (const m of batch) {
+          if (m.message && !m.file) textMsgs.push(m)
+        }
+
+        for (let i = 0; i < textMsgs.length; i++) {
+          const m = textMsgs[i]
+          if (m.message && (m.message.startsWith('rf') || m.message.startsWith('RFSYNC:') || m.message.startsWith('__rf__'))) {
+            const res = await tryParseWithChunks(m)
+            if (res) {
+              foundSyncMsg = res
+              break
+            }
+            let concatenated = m.message
+            let parsed = this.parseSyncMessage(concatenated)
+            if (!parsed) {
+              for (let j = i - 1; j >= 0; j--) {
+                concatenated += textMsgs[j].message
+                parsed = this.parseSyncMessage(concatenated)
+                if (parsed) break
+              }
+            }
+            if (parsed) {
+              foundSyncMsg = { message: concatenated, id: m.id }
+              break
             }
           }
-
-          if (parsed) {
-            foundSyncMsg = { message: concatenated, id: m.id }
-            break
-          }
         }
+        if (foundSyncMsg) break
+        offsetId = this.msgId(batch[batch.length - 1])
       }
-      if (foundSyncMsg) break
-
-      offsetId = this.msgId(batch[batch.length - 1])
     }
 
     if (!foundSyncMsg) {

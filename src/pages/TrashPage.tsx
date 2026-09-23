@@ -7,6 +7,7 @@ import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { toast } from '../lib/toast'
 import { BulkProgressModal } from '../components/BulkProgressModal'
+import { safeViewTransition } from '../lib/viewTransition'
 import { FileThumb } from '../components/FileThumb'
 
 function isMediaFile(f: any): { isImg: boolean; isVid: boolean } {
@@ -282,7 +283,7 @@ export default function TrashPage() {
         setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
       })
     }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.restoreFile(id)
     if (r.success) {
@@ -290,7 +291,7 @@ export default function TrashPage() {
     } else {
       toast.error('Ошибка восстановления')
       const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
-      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
+      safeViewTransition(revert)
     }
   }
 
@@ -319,15 +320,15 @@ export default function TrashPage() {
         setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
       })
     }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.permDeleteFile(id)
     if (r.success) {
-      toast.success('Файл удалён навсегда')
+      toast.success('Удалено навсегда')
     } else {
       toast.error('Ошибка удаления')
       const revert = () => flushSync(() => { if (f) setFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId))) })
-      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
+      safeViewTransition(revert)
     }
   }
 
@@ -346,7 +347,7 @@ export default function TrashPage() {
         clearSelection()
       })
     }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    safeViewTransition(applyRemove)
 
     let allSuccess = true
     for (const id of ids) {
@@ -366,7 +367,7 @@ export default function TrashPage() {
           })
         })
       }
-      if ('startViewTransition' in document) { (document as any).startViewTransition(revert) } else { revert() }
+      safeViewTransition(revert)
     }
   }
 
@@ -449,7 +450,7 @@ export default function TrashPage() {
     confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#4ade80', '#10b981', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
     const f = trashedFolders.find(x => x.id === id)
     const applyRemove = () => { flushSync(() => { setTrashedFolders(prev => prev.filter(x => x.id !== id)) }) }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    safeViewTransition(applyRemove)
     const r = await window.electronAPI.folders.restore(id)
     if (r.success) { toast.success('Папка восстановлена') } else { toast.error('Ошибка восстановления'); load() }
   }
@@ -471,7 +472,7 @@ export default function TrashPage() {
     confetti({ particleCount: 50, spread: 80, origin: { x, y }, colors: ['#f87171', '#ef4444', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
     const f = trashedFolders.find(x => x.id === id)
     const applyRemove = () => { flushSync(() => { setTrashedFolders(prev => prev.filter(x => x.id !== id)) }) }
-    if ('startViewTransition' in document) { (document as any).startViewTransition(applyRemove) } else { applyRemove() }
+    safeViewTransition(applyRemove)
     const r = await window.electronAPI.folders.permDelete(id)
     if (r.success) { toast.success('Папка удалена навсегда') } else { toast.error('Ошибка удаления'); load() }
   }

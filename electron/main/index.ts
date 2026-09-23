@@ -4,7 +4,6 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as https from 'https'
 import * as zlib from 'zlib'
-import * as crypto from 'crypto'
 import * as path from 'path'
 import { ZipArchive } from 'archiver'
 import { TelegramService } from './telegram-service'
@@ -253,7 +252,7 @@ app.whenReady().then(async () => {
   setInterval(checkUpdate, 3600000)
 
   let syncInterval = 3000
-  let lastFileCount = 0
+  let lastFileCount = -1
   let idleCycles = 0
 
   async function adaptiveSync() {
@@ -266,11 +265,14 @@ app.whenReady().then(async () => {
       const before = telegramService.getCachedFilesInstant().length
       await telegramService.syncFilesInBackground()
       const after = telegramService.getCachedFilesInstant().length
-      if (after > before || after > lastFileCount) {
+      const isFirstRun = lastFileCount < 0
+      lastFileCount = after
+      if (!isFirstRun && after !== before) {
+        const d = await readFolders()
+        telegramService.rebuildFolderIndex(d.fileFolders || {})
         sendFilesChanged()
         idleCycles = 0
         syncInterval = 3000
-        lastFileCount = after
       } else {
         idleCycles++
         if (idleCycles > 10) syncInterval = Math.min(syncInterval + 3000, 30000)
@@ -489,6 +491,23 @@ ipcMain.handle('telegram:reconnect', async () => {
     }
     await telegramService.createCloudFolder()
     restorePersistedQueue()
+    try {
+      const local = await readFolders()
+      const hasLocal = local.folders.length > 0 || Object.keys(local.fileFolders || {}).length > 0
+      if (!initialFolderSyncDone && !hasLocal) {
+        const cloud = await telegramService.loadFoldersFromChannel()
+        if (cloud && (cloud.folders.length > 0 || Object.keys(cloud.fileFolders || {}).length > 0)) {
+          if (cloud.botToken && !botService.getToken()) botService.setToken(cloud.botToken)
+          await writeFolders({ folders: cloud.folders, fileFolders: cloud.fileFolders, trashedFolders: local.trashedFolders || [] })
+          log('info', `Folders loaded from channel on reconnect: ${cloud.folders.length}`)
+        } else if (hasLocal) {
+          syncFoldersToTelegram().catch(() => {})
+        }
+        initialFolderSyncDone = true
+      }
+    } catch (e) {
+      log('warn', 'Folder cloud sync on reconnect failed: ' + (e as Error).message)
+    }
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -664,9 +683,11 @@ async function runUpload(job: UploadJob): Promise<void> {
     }
     sendProgress(result.fileSize, result.fileSize)
     log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes, ${Math.floor((Date.now() - startTime) / 1000)}s)`)
+    try { telegramService.addUploadedFileToCache(result) } catch {}
     if (mainWindow && !mainWindow.isDestroyed()) {
       try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: true, data: result }) } catch {}
     }
+    sendFilesChanged()
     job.resolve({ success: true, data: result })
   } catch (error) {
     const errMsg = (error as Error)?.message || String(error)
@@ -842,7 +863,9 @@ ipcMain.handle('telegram:list-folder-files-from-cache', async (_, folderId: stri
     const allFiles = telegramService.getCachedFilesInstant()
     const folderData = await readFolders()
     const fileFoldersMap: Record<string, string> = folderData.fileFolders || {}
-    const folderFiles = allFiles.filter((f: any) => fileFoldersMap[String(f.messageId)] === folderId)
+    const folderFiles = allFiles
+      .filter((f: any) => fileFoldersMap[String(f.messageId)] === folderId)
+      .sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
     const filtered = offsetId > 0
       ? folderFiles.filter((f: any) => f.messageId < offsetId)
       : folderFiles
@@ -897,6 +920,11 @@ ipcMain.handle('telegram:sync-files-bg', async (event) => {
       try {
         event.sender.send('files:sync-progress', { fileCount, scannedMessages })
       } catch {}
+    }).then(async () => {
+      try {
+        const d = await readFolders()
+        telegramService.rebuildFolderIndex(d.fileFolders || {})
+      } catch {}
     })
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -949,6 +977,7 @@ ipcMain.handle('telegram:cache-audio', async (_, messageId: number, fileName: st
 ipcMain.handle('telegram:delete-file', async (_, messageId: number) => {
   try {
     await telegramService.trashFile(messageId)
+    sendFilesChanged()
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -963,6 +992,7 @@ ipcMain.handle('telegram:list-trash', async () => {
 ipcMain.handle('telegram:restore-file', async (_, messageId: number) => {
   try {
     await telegramService.restoreFile(messageId)
+    sendFilesChanged()
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -1428,13 +1458,37 @@ async function syncFoldersToTelegram() {
 }
 
 ipcMain.handle('folders:list', async () => {
-  try { const d = await readFolders(); return { success: true, data: d } }
+  try {
+    const d = await readFolders()
+    const isEmpty = !d || (d.folders || []).length === 0
+    if (isEmpty && !initialFolderSyncDone) {
+      try {
+        const cloud = await telegramService.loadFoldersFromChannel()
+        if (cloud && (cloud.folders.length > 0 || Object.keys(cloud.fileFolders || {}).length > 0)) {
+          if (cloud.botToken && !botService.getToken()) botService.setToken(cloud.botToken)
+          await writeFolders({ folders: cloud.folders, fileFolders: cloud.fileFolders, trashedFolders: d.trashedFolders || [] })
+          initialFolderSyncDone = true
+          return { success: true, data: await readFolders() }
+        }
+        initialFolderSyncDone = true
+      } catch {}
+    }
+    return { success: true, data: d }
+  }
   catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('folders:load-from-telegram', async () => {
   try {
     return await withFoldersLock(async () => {
+      // Fast path: already synced this session and local store has data — skip channel scan
+      if (initialFolderSyncDone) {
+        const localFast: any = await readFolders()
+        if (localFast && ((localFast.folders || []).length > 0 || Object.keys(localFast.fileFolders || {}).length > 0)) {
+          return { success: true, data: localFast }
+        }
+      }
+
       const data = await telegramService.loadFoldersFromChannel()
       if (data) {
         if (data.botToken && !botService.getToken()) {
@@ -2276,15 +2330,7 @@ ipcMain.handle('state:load', async () => {
 
 ipcMain.handle('file:compute-hash', async (_, messageId: number) => {
   try {
-    const tmpFile = await telegramService.downloadMediaToTemp(messageId)
-    const hash = await new Promise<string>((resolve, reject) => {
-      const h = crypto.createHash('sha256')
-      const stream = fs.createReadStream(tmpFile)
-      stream.on('data', chunk => h.update(chunk))
-      stream.on('end', () => resolve(h.digest('hex')))
-      stream.on('error', reject)
-    })
-    fs.rmSync(tmpFile, { force: true })
+    const hash = await telegramService.computePartialHash(messageId)
     return { success: true, data: hash }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })

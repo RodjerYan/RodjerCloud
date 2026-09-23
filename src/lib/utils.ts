@@ -20,7 +20,7 @@ export function typeOf(name: string): string {
 }
 
 export function fileDate(f: any): number {
-  return f.originalDate || f.uploadedAt || 0
+  return f.uploadedAt || f.originalDate || 0
 }
 
 export function groupByDay(items: any[]) {

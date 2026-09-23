@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { X, Check, AlertCircle, Loader2 } from 'lucide-react'
 
 interface ProgressItem {
@@ -16,6 +16,25 @@ interface BulkProgressModalProps {
 }
 
 export function BulkProgressModal({ title, items, current, total, visible, onClose }: BulkProgressModalProps) {
+  useEffect(() => {
+    if (!visible) return
+    if (current >= total && total > 0) {
+      const t = setTimeout(() => onClose?.(), 2000)
+      return () => clearTimeout(t)
+    }
+    const safety = setTimeout(() => onClose?.(), 60000)
+    return () => clearTimeout(safety)
+  }, [visible, current, total, onClose])
+
+  useEffect(() => {
+    if (!visible) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [visible, onClose])
+
   if (!visible) return null
   const pct = total > 0 ? (current / total) * 100 : 0
 
@@ -31,7 +50,7 @@ export function BulkProgressModal({ title, items, current, total, visible, onClo
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>{title}</span>
-          {current >= total && onClose && (
+          {onClose && (
             <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer', padding: 6, borderRadius: 8, display: 'flex' }}>
               <X size={16} />
             </button>

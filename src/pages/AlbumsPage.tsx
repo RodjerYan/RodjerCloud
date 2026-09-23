@@ -2,13 +2,16 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal, flushSync } from 'react-dom'
 import confetti from 'canvas-confetti'
-import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play } from "lucide-react"
+import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play, CheckSquare, Square, ShieldCheck, Layers, ArrowDownUp, Info } from "lucide-react"
 import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS, type SmartAlbum } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from "../lib/dialogs"
 import { toast } from '../lib/toast'
+import { safeViewTransition } from '../lib/viewTransition'
+import { BulkProgressModal } from '../components/BulkProgressModal'
+import '../styles/duplicate-modal.css'
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -22,7 +25,7 @@ export default function AlbumsPage() {
   const [newName, setNewName] = useState('')
   const [openAlbum, setOpenAlbum] = useState<string | null>(null)
   const [hashing, setHashing] = useState(false)
-  const [hashProgress, setHashProgress] = useState({ done: 0, total: 0 })
+  const [hashProgress, setHashProgress] = useState({ done: 0, total: 0, sourceTotal: 0, mediaTotal: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const [renameTarget, setRenameTarget] = useState<any>(null)
   const [renameInput, setRenameInput] = useState('')
@@ -30,7 +33,10 @@ export default function AlbumsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
   const [hashTrigger, setHashTrigger] = useState(0)
-  
+  const [selectedDupIds, setSelectedDupIds] = useState<Set<number>>(new Set())
+  const [dupProgress, setDupProgress] = useState<{ title: string; items: any[]; current: number; total: number; visible: boolean; onClose: () => void } | null>(null)
+  const [keepStrategy, setKeepStrategy] = useState<'oldest' | 'newest'>('oldest')
+
   const loaderRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
@@ -65,38 +71,200 @@ export default function AlbumsPage() {
     ? SMART_ALBUMS.find(a => a.id === openAlbum) || albums.find(a => a.id === openAlbum) || null
     : null
 
-  const computeHashes = useCallback(async (files: any[]) => {
+  const computeHashes = useCallback(async (files: any[], force = false) => {
     let source = files
     if (source.length === 0) {
       const r = await window.electronAPI.telegram.listFiles()
       if (r?.success && r.data) { source = r.data; setAllFiles(r.data) }
     }
     const mediaFiles = source.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
-    let done = 0; const total = mediaFiles.length
-    if (total === 0) { setHashTrigger(prev => prev + 1); return }
-    setHashProgress({ done, total }); setHashing(true)
+    const dupKey = (f: any) => `${(f.fileName || '').toLowerCase()}:${f.fileSize || 0}`
+    const keyCount = new Map<string, number>()
     for (const f of mediaFiles) {
-      const existing = v3store.metaFor(f.messageId)
-      if (existing?.hash) { done++; setHashProgress({ done, total }); continue }
-      try {
-        const r = await window.electronAPI.file.computeHash(f.messageId)
-        if (r.success && r.data) v3store.setMeta({ messageId: f.messageId, hash: r.data })
-      } catch {}
-      done++; setHashProgress({ done, total })
+      const k = dupKey(f)
+      keyCount.set(k, (keyCount.get(k) || 0) + 1)
     }
+    const candidates: any[] = []
+    for (const f of mediaFiles) {
+      if ((keyCount.get(dupKey(f)) || 0) < 2) continue
+      if (!force) {
+        const existing = v3store.metaFor(f.messageId)
+        if (existing?.hash?.includes(':')) continue
+      }
+      candidates.push(f)
+    }
+    const total = candidates.length
+    const sourceTotal = source.length
+    const mediaTotal = mediaFiles.length
+    if (total === 0) {
+      setHashing(false)
+      setHashTrigger(prev => prev + 1)
+      if (force) toast.info('Нет файлов с совпадающими именем и размером — сравнивать нечего')
+      return
+    }
+    setHashProgress({ done: 0, total, sourceTotal, mediaTotal }); setHashing(true)
+    let done = 0
+    let idx = 0
+    const CONCURRENCY = 4
+    const worker = async () => {
+      while (idx < candidates.length) {
+        const i = idx++
+        const f = candidates[i]
+        try {
+          const r = await window.electronAPI.file.computeHash(f.messageId)
+          if (r.success && r.data) v3store.setMeta({ messageId: f.messageId, hash: r.data })
+        } catch {}
+        done++
+        setHashProgress(prev => ({ ...prev, done }))
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker()))
     setHashing(false); setAlbums(v3store.getAlbums()); setHashTrigger(prev => prev + 1)
   }, [])
 
   const hashGroups = useMemo(() => {
-    const metaMap = new Map<number, any>()
-    v3store.getMeta().forEach(m => { if (m.hash) metaMap.set(m.messageId, m) })
     const groups = new Map<string, any[]>()
+    const metaById = new Map<number, string>()
+    v3store.getMeta().forEach(m => { if (m.hash) metaById.set(m.messageId, m.hash) })
     allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-      const m = metaMap.get(f.messageId)
-      if (m?.hash) { const g = groups.get(m.hash) || []; g.push(f); groups.set(m.hash, g) }
+      const hash = metaById.get(f.messageId)
+      if (!hash) return
+      const key = `${(f.fileName || '').toLowerCase()}:${hash}`
+      const g = groups.get(key) || []
+      g.push(f)
+      groups.set(key, g)
     })
     return groups
   }, [allFiles, hashTrigger])
+
+  const dupGroupList = useMemo(() => {
+    const list: [string, any[]][] = []
+    hashGroups.forEach((group, key) => { if (group.length > 1) list.push([key, group]) })
+    list.sort((a, b) => {
+      const sa = (a[1][0]?.fileSize || 0) * (a[1].length - 1)
+      const sb = (b[1][0]?.fileSize || 0) * (b[1].length - 1)
+      if (sb !== sa) return sb - sa
+      return b[1].length - a[1].length
+    })
+    return list
+  }, [hashGroups])
+
+  const sortGroupByStrategy = useCallback((files: any[]) => {
+    const sorted = [...files].sort((a, b) => a.messageId - b.messageId)
+    return keepStrategy === 'oldest' ? sorted : sorted.slice().reverse()
+  }, [keepStrategy])
+
+  const keepIdForGroup = useCallback((files: any[]) => {
+    const sorted = [...files].sort((a, b) => a.messageId - b.messageId)
+    return keepStrategy === 'oldest' ? sorted[0]?.messageId : sorted[sorted.length - 1]?.messageId
+  }, [keepStrategy])
+
+  const dupStats = useMemo(() => {
+    let files = 0, reclaimable = 0, keepBytes = 0
+    for (const [, g] of dupGroupList) {
+      files += g.length
+      const sorted = [...g].sort((a, b) => a.messageId - b.messageId)
+      const drop = keepStrategy === 'oldest' ? sorted.slice(1) : sorted.slice(0, -1)
+      const keep = keepStrategy === 'oldest' ? sorted[0] : sorted[sorted.length - 1]
+      keepBytes += keep?.fileSize || 0
+      for (const f of drop) reclaimable += f.fileSize || 0
+    }
+    return { groups: dupGroupList.length, files, reclaimable, keepBytes }
+  }, [dupGroupList, keepStrategy])
+
+  const selectedSize = useMemo(
+    () => allFiles.filter(f => selectedDupIds.has(f.messageId)).reduce((s, f) => s + (f.fileSize || 0), 0),
+    [allFiles, selectedDupIds]
+  )
+
+  useEffect(() => {
+    setSelectedDupIds(new Set())
+  }, [openAlbum, hashTrigger])
+
+  const toggleDupSel = (id: number) => {
+    setSelectedDupIds(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  const idsToDrop = useCallback((files: any[]) => {
+    const sorted = sortGroupByStrategy(files)
+    return sorted.slice(1).map((f: any) => f.messageId)
+  }, [sortGroupByStrategy])
+
+  const selectDuplicatesOnly = () => {
+    const n = new Set<number>()
+    for (const [, g] of dupGroupList) {
+      for (const id of idsToDrop(g)) n.add(id)
+    }
+    setSelectedDupIds(n)
+    toast.success(`Выбрано ${n.size} дубликатов · оригинал сохраняется (${keepStrategy === 'oldest' ? 'старый' : 'новый'})`)
+  }
+
+  const clearSelection = () => setSelectedDupIds(new Set())
+
+  const bulkDeleteDups = async (ids: number[], title: string) => {
+    if (ids.length === 0) return
+    const selectedFiles = allFiles.filter(f => ids.includes(f.messageId))
+    const space = selectedFiles.reduce((s, f) => s + (f.fileSize || 0), 0)
+    const ok = await appConfirm(
+      `${title}\n\n` +
+      `Файлов: ${ids.length}\n` +
+      `Освободится: ${fmtSize(space)}\n` +
+      `Файлы уйдут в корзину Telegram и их можно восстановить.\n` +
+      `В каждой группе останется хотя бы один оригинал.`
+    )
+    if (!ok) return
+
+    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
+    setDupProgress({ title, items, current: 0, total: ids.length, visible: true, onClose: () => setDupProgress(null) })
+    setSelectedDupIds(new Set())
+
+    const onProgress = (data: { kind: string; index: number; total: number }) => {
+      if (data.kind !== 'delete') return
+      setDupProgress(prev => {
+        if (!prev) return prev
+        const newItems = prev.items.map((it, i) => {
+          if (i < data.index) return { ...it, status: 'done' as const }
+          if (i === data.index - 1) return { ...it, status: 'done' as const }
+          if (i === data.index) return { ...it, status: 'active' as const }
+          return it
+        })
+        return { ...prev, items: newItems, current: data.index }
+      })
+      if (data.index >= 1 && data.index <= ids.length) {
+        const fid = ids[data.index - 1]
+        setAllFiles(prev => prev.filter(x => x.messageId !== fid))
+      }
+    }
+    const unsub = window.electronAPI.telegram.onBulkProgress(onProgress)
+    try {
+      const r = await window.electronAPI.telegram.bulkDelete(ids)
+      unsub()
+      if (r.success) {
+        setDupProgress(prev => prev ? { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total } : prev)
+        toast.success(`Удалено ${ids.length} · освобождено ${fmtSize(space)}`)
+        setTimeout(() => setDupProgress(null), 2000)
+      } else {
+        toast.error(r.error || 'Ошибка удаления')
+        setTimeout(() => setDupProgress(null), 2500)
+      }
+    } catch {
+      unsub()
+      toast.error('Ошибка удаления')
+      setTimeout(() => setDupProgress(null), 2500)
+    }
+    setHashTrigger(prev => prev + 1)
+  }
+
+  const deleteAllDupsKeepOne = () => {
+    const ids: number[] = []
+    for (const [, g] of dupGroupList) ids.push(...idsToDrop(g))
+    if (ids.length === 0) return
+    void bulkDeleteDups(ids, 'Удалить все дубликаты')
+  }
 
   const albumFiles = useMemo(() => {
     if (!currentAlbum) return []
@@ -172,12 +340,8 @@ export default function AlbumsPage() {
         setAlbums(v3store.getAlbums())
       })
     }
-    
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+
+    safeViewTransition(applyRemove)
   }
 
   const handleDownload = async (f: any) => {
@@ -216,11 +380,7 @@ export default function AlbumsPage() {
       })
     }
 
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(applyRemove)
-    } else {
-      applyRemove()
-    }
+    safeViewTransition(applyRemove)
 
     const r = await window.electronAPI.telegram.deleteFile(f.messageId)
     if (!r.success) {
@@ -229,11 +389,7 @@ export default function AlbumsPage() {
           setAllFiles(prev => [...prev, f].sort((a, b) => (b.messageId - a.messageId)))
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
-        revert()
-      }
+      safeViewTransition(revert)
     }
   }
 
@@ -276,40 +432,269 @@ export default function AlbumsPage() {
         <div className="v3-row" style={{ marginBottom: 14 }}>
           <button className="v3-btn ghost" onClick={() => setOpenAlbum(null)}><ArrowLeft size={18} /></button>
           <h1 className="v3-h1" style={{ margin: 0 }}>{currentAlbum.name}</h1>
-          <span className="v3-sub" style={{ marginLeft: 8 }}>{isDuplicates ? `${albumFiles.length} дубликатов` : albumFiles.length}</span>
+          <span className="v3-sub" style={{ marginLeft: 8 }}>
+            {isDuplicates
+              ? (dupGroupList.length
+                  ? `${dupStats.groups} групп · ${dupStats.files} файлов · −${fmtSize(dupStats.reclaimable)}`
+                  : hashing ? 'поиск…' : 'проверка…')
+              : albumFiles.length}
+          </span>
         </div>
+        {isDuplicates && (
+          <div className="dup-toolbar">
+            <div className="dup-kpi">
+              <div className="dup-kpi-item">
+                <span className="dup-kpi-value">{dupGroupList.length}</span>
+                <span className="dup-kpi-label">групп</span>
+              </div>
+              <div className="dup-kpi-item">
+                <span className="dup-kpi-value">{dupStats.files}</span>
+                <span className="dup-kpi-label">файлов</span>
+              </div>
+              <div className="dup-kpi-item dup-kpi-save">
+                <span className="dup-kpi-value">{fmtSize(dupStats.reclaimable)}</span>
+                <span className="dup-kpi-label">можно освободить</span>
+              </div>
+              <div className="dup-kpi-item">
+                <span className="dup-kpi-value">{selectedDupIds.size}</span>
+                <span className="dup-kpi-label">выбрано · {fmtSize(selectedSize)}</span>
+              </div>
+            </div>
+
+            <div className="dup-controls">
+              <label className="dup-strategy" title="Какой файл оставить оригиналом в каждой группе">
+                <ArrowDownUp size={14} aria-hidden />
+                <span>Оригинал</span>
+                <select
+                  value={keepStrategy}
+                  onChange={e => setKeepStrategy(e.target.value as 'oldest' | 'newest')}
+                  aria-label="Стратегия сохранения оригинала"
+                >
+                  <option value="oldest">старый (messageId ↑)</option>
+                  <option value="newest">новый (messageId ↓)</option>
+                </select>
+              </label>
+
+              <div className="dup-criteria" title="Условия: одинаковые имя + размер + SHA-256 содержимого">
+                <Info size={13} aria-hidden />
+                <span>имя + размер + хеш</span>
+              </div>
+
+              <div className="dup-actions">
+                <button
+                  className="v3-btn"
+                  disabled={hashing || dupGroupList.length === 0}
+                  onClick={selectDuplicatesOnly}
+                >
+                  <CheckSquare size={14} /> Выбрать дубликаты
+                </button>
+                <button
+                  className="v3-btn"
+                  disabled={selectedDupIds.size === 0}
+                  onClick={clearSelection}
+                >
+                  <Square size={14} /> Снять
+                </button>
+                <button
+                  className="v3-btn"
+                  disabled={hashing}
+                  onClick={() => { toast.info('Запуск сканирования…'); computeHashes(allFiles, true) }}
+                >
+                  <Layers size={14} /> {hashing ? 'Сканирование…' : 'Сканировать'}
+                </button>
+                <button
+                  className="v3-btn danger dup-btn-bulk"
+                  disabled={hashing || dupGroupList.length === 0}
+                  onClick={deleteAllDupsKeepOne}
+                  title="В каждой группе останется один оригинал, остальные — в корзину"
+                >
+                  <Trash2 size={14} /> Удалить все дубликаты
+                </button>
+              </div>
+            </div>
+
+            {selectedDupIds.size > 0 && (
+              <div className="mf-bulkbar dup-bulkbar" role="toolbar" aria-label="Массовые действия">
+                <span>
+                  Выбрано <b>{selectedDupIds.size}</b> · {fmtSize(selectedSize)}
+                </span>
+                <button onClick={clearSelection} type="button">
+                  <Square size={14} /> Снять выделение
+                </button>
+                <button
+                  className="danger"
+                  type="button"
+                  onClick={() => void bulkDeleteDups(Array.from(selectedDupIds), 'Удалить выбранные')}
+                >
+                  <Trash2 size={14} /> Удалить выбранные
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="mf-gallery-body">
           {isDuplicates ? (
-            <div className="mf-gallery-body">
+            <>
               {hashing ? (
                 <div style={{ textAlign: 'center', padding: 60 }}>
                   <Loader2 size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 16 }} />
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Поиск дубликатов…</div>
-                  <div className="v3-sub">{hashProgress.done} из {hashProgress.total} файлов</div>
+                  <div className="v3-sub">
+                    {hashProgress.done} из {hashProgress.total} кандидатов (совпадают имя и размер)
+                  </div>
+                  <div className="v3-sub" style={{ marginTop: 4, opacity: 0.7 }}>
+                    Всего файлов: {hashProgress.sourceTotal || allFiles.length}
+                    {hashProgress.mediaTotal > 0 ? ` · медиа: ${hashProgress.mediaTotal}` : ''}
+                  </div>
+                  <div className="v3-sub" style={{ marginTop: 4, opacity: 0.7 }}>
+                    Хеш подтверждает содержимое
+                  </div>
                   <div style={{ width: 200, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 99, margin: '16px auto 0', overflow: 'hidden' }}>
                     <div style={{ width: hashProgress.total > 0 ? (hashProgress.done / hashProgress.total) * 100 : 0 + '%', height: '100%', background: 'var(--accent)', borderRadius: 99, transition: 'width 0.3s' }} />
                   </div>
                 </div>
-              ) : (() => {
-                const groups: [string, any[]][] = []
-                hashGroups.forEach((group, hash) => { if (group.length > 1) groups.push([hash, group]) })
-                if (groups.length === 0) {
-                  return (
-                    <div style={{ textAlign: 'center', padding: 40 }}>
-                      <div className="v3-sub" style={{ marginBottom: 12 }}>Дубликаты ещё не найдены</div>
-                      <button className="v3-btn primary" onClick={() => { toast.info('Запуск сканирования...'); computeHashes(allFiles) }}>Сканировать сейчас</button>
-                    </div>
-                  )
-                }
-                return groups.map(([hash, files]) => (
-                  <div key={hash} className="mf-gy">
-                    <div className="mf-gy-title">{files.length} дубликата</div>
-                    <div className="mf-gm-items">{files.map((f: any) => renderCard(f, true, true))}</div>
+              ) : dupGroupList.length === 0 ? (
+                <div className="dup-empty" role="status">
+                  <div className="dup-empty-icon">
+                    <ShieldCheck size={28} aria-hidden />
                   </div>
-                ))
-              })()}
+                  <div className="dup-empty-title">Дубликаты не найдены</div>
+                  <div className="dup-empty-sub">
+                    Совпадают имя, размер и хеш содержимого.
+                    <br />Запустите сканирование, если добавляли файлы.
+                  </div>
+                  <button className="v3-btn primary" onClick={() => { toast.info('Запуск сканирования…'); computeHashes(allFiles, true) }}>
+                    Сканировать сейчас
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="dup-section-head">
+                    <span>Группы дубликатов · сортировка по экономии</span>
+                    <span className="dup-section-meta">
+                      Оригинал: {keepStrategy === 'oldest' ? 'старый файл' : 'новый файл'}
+                    </span>
+                  </div>
+                  {dupGroupList.map(([key, files]) => {
+                    const name = files[0]?.fileName || key
+                    const keepId = keepIdForGroup(files)
+                    const dropIds = new Set(idsToDrop(files))
+                    const groupSel = files.filter(f => selectedDupIds.has(f.messageId)).length
+                    const groupReclaim = files.filter(f => dropIds.has(f.messageId)).reduce((s, f) => s + (f.fileSize || 0), 0)
+                    const ordered = [
+                      ...files.filter(f => f.messageId === keepId),
+                      ...files.filter(f => f.messageId !== keepId),
+                    ]
+                    return (
+                      <section key={key} className="mf-gy dup-group" aria-label={`Группа дубликатов ${name}`}>
+                        <header className="dup-group-head">
+                          <div className="dup-group-title">
+                            <span className="dup-group-name" title={name}>{name}</span>
+                            <span className="dup-group-badge">{files.length}×</span>
+                            <span className="dup-group-meta">
+                              {fmtSize(files[0]?.fileSize || 0)} · к удалению −{fmtSize(groupReclaim)}
+                            </span>
+                          </div>
+                          <div className="dup-group-actions">
+                            <button
+                              className="v3-btn"
+                              type="button"
+                              onClick={() => {
+                                const n = new Set(selectedDupIds)
+                                const allDropSelected = [...dropIds].every(id => n.has(id))
+                                if (allDropSelected) dropIds.forEach(id => n.delete(id))
+                                else dropIds.forEach(id => n.add(id))
+                                setSelectedDupIds(n)
+                              }}
+                              title="Отметить только дубликаты (оригинал не трогается)"
+                            >
+                              <CheckSquare size={13} />
+                              {(() => {
+                                const allDrop = [...dropIds].length > 0 && [...dropIds].every(id => selectedDupIds.has(id))
+                                return allDrop ? 'Снять дубликаты' : 'Выбрать дубликаты'
+                              })()}
+                            </button>
+                            <button
+                              className="v3-btn"
+                              type="button"
+                              onClick={() => {
+                                const n = new Set(selectedDupIds)
+                                if (groupSel === files.length) files.forEach(f => n.delete(f.messageId))
+                                else files.forEach(f => n.add(f.messageId))
+                                setSelectedDupIds(n)
+                              }}
+                            >
+                              {groupSel === files.length ? <Square size={13} /> : <CheckSquare size={13} />}
+                              {groupSel === files.length ? 'Снять все' : 'Все в группе'}
+                            </button>
+                            <button
+                              className="v3-btn danger"
+                              type="button"
+                              disabled={groupSel === 0}
+                              onClick={() => void bulkDeleteDups(files.filter(f => selectedDupIds.has(f.messageId)).map(f => f.messageId), 'Удалить из группы')}
+                            >
+                              <Trash2 size={13} /> Удалить ({groupSel})
+                            </button>
+                          </div>
+                        </header>
+                        <div className="mf-gm-items dup-items">
+                          {ordered.map((f: any) => {
+                            const isKeep = f.messageId === keepId
+                            const isSelected = selectedDupIds.has(f.messageId)
+                            const isVid = f.mimeType?.startsWith('video/')
+                            return (
+                              <article
+                                key={f.messageId}
+                                className={`mf-gm-card${isSelected ? ' selected' : ''}${isKeep ? ' dup-keep' : ''}`}
+                                style={{ viewTransitionName: `card_${f.messageId}` }}
+                                onClick={() => toggleDupSel(f.messageId)}
+                                onDoubleClick={() => handlePreview(f)}
+                                role="checkbox"
+                                aria-checked={isSelected}
+                                aria-label={`${f.fileName}${isKeep ? ', оригинал' : ', дубликат'}`}
+                                tabIndex={0}
+                                onKeyDown={e => {
+                                  if (e.key === ' ' || e.key === 'Enter') {
+                                    e.preventDefault()
+                                    toggleDupSel(f.messageId)
+                                  }
+                                }}
+                              >
+                                <label className="mf-check dup-check" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleDupSel(f.messageId)}
+                                    aria-label={`Выбрать ${f.fileName}`}
+                                  />
+                                </label>
+                                <span className={`dup-keep-badge${isKeep ? ' is-keep' : ' is-dup'}`}>
+                                  {isKeep ? 'Оригинал' : 'Дубликат'}
+                                </span>
+                                <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
+                                  <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} />
+                                </div>
+                                <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
+                                <div className="mf-gm-meta">
+                                  {fmtSize(f.fileSize)}
+                                  <span className="dup-msg"> · #{f.messageId}</span>
+                                </div>
+                                <div className="mf-gm-actions" onClick={e => e.stopPropagation()}>
+                                  <button title="Скачать" type="button" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                                  <button title="Просмотр" type="button" onClick={() => handlePreview(f)}><Eye size={13} /></button>
+                                  <button title="Удалить в корзину" className="danger" type="button" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button>
+                                </div>
+                              </article>
+                            )
+                          })}
+                        </div>
+                      </section>
+                    )
+                  })}
+                </>
+              )}
               <div ref={loaderRef} style={{ height: 20, flexShrink: 0 }} />
-            </div>
+            </>
           ) : (
             Object.entries(grouped).sort(([a], [b]) => +b - +a).map(([year, months]) => (
               <div key={year} className="mf-gy">
@@ -328,8 +713,7 @@ export default function AlbumsPage() {
               </div>
             ))
           )}
-          <div ref={loaderRef} style={{ height: 20, flexShrink: 0 }} />
-          {albumFiles.length === 0 && !hashing && (
+          {albumFiles.length === 0 && !hashing && !isDuplicates && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 22px', gap: 12 }}>
               {duckAnim ? (
                 <Player autoplay loop src={duckAnim} style={{ width: 100, height: 100 }} />
@@ -394,6 +778,17 @@ export default function AlbumsPage() {
             <div className="mf-ctx-divider" />
             <button className="danger" onClick={(e) => { handleDelete(ctxMenu.file, e); closeCtx() }}><Trash2 size={14} /> Удалить</button>
           </div>, document.body
+        )}
+
+        {dupProgress && (
+          <BulkProgressModal
+            title={dupProgress.title}
+            items={dupProgress.items}
+            current={dupProgress.current}
+            total={dupProgress.total}
+            visible={dupProgress.visible}
+            onClose={dupProgress.onClose}
+          />
         )}
       </div>
     )

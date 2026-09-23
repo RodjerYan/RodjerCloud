@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, forwardRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import confetti from 'canvas-confetti'
-import { VirtuosoGrid } from 'react-virtuoso'
 import { createPortal, flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {   Search, Grid, List as ListIcon, Download, Trash2, Copy, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, Play, Star,
@@ -15,6 +14,7 @@ const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 import { FileThumb } from '../components/FileThumb'
 import { TiltCard } from '../components/TiltCard'
 import { BulkProgressModal } from '../components/BulkProgressModal'
+import { safeViewTransition } from '../lib/viewTransition'
 import '../styles/duplicate-modal.css'
 
 function typeOf(name: string): string {
@@ -29,7 +29,7 @@ function typeOf(name: string): string {
 
 const FILES_PAGE_SIZE = 30
 const SCROLL_THRESHOLD = 600
-const TWELVE_HOURS = 86400
+const RECENT_WINDOW_SEC = 6 * 3600
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -69,6 +69,8 @@ export default function MyFilesPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const nextOffsetIdRef = useRef<number | null>(null)
   const totalFilesRef = useRef<number>(0)
+  const filesLenRef = useRef<number>(0)
+  useEffect(() => { filesLenRef.current = files.length }, [files])
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'size' | 'date'>('date')
@@ -97,7 +99,6 @@ export default function MyFilesPage() {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [searchTotal, setSearchTotal] = useState(0)
-  const [hasMore, setHasMore] = useState(true)
   const searchRequestIdRef = useRef(0)
   const [renameId, setRenameId] = useState<string | null>(null)
   const [renameVal, setRenameVal] = useState('')
@@ -236,15 +237,67 @@ export default function MyFilesPage() {
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ file: { filePath: string; fileName: string }, existingId: number, resolve: (choice: 'replace' | 'copy' | 'skip') => void } | null>(null)
 
+  useEffect(() => {
+    if (!duplicatePrompt) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        duplicatePrompt.resolve('skip')
+        setDuplicatePrompt(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [duplicatePrompt])
+
+  useEffect(() => {
+    if (!progressModal) return
+    if (progressModal.current >= progressModal.total && progressModal.total > 0) {
+      const t = setTimeout(() => setProgressModal(null), 2500)
+      return () => clearTimeout(t)
+    }
+  }, [progressModal])
+
+  useEffect(() => {
+    return () => {
+      setProgressModal(null)
+      setPreview(null)
+      setPreviewUrl('')
+      setRenameTarget(null)
+      setMoveTarget(null)
+      setShowCreateFolder(false)
+      setIsDragOver(false)
+      setSelectionBox(null)
+      setCtxMenu(null)
+      dragCounter.current = 0
+      if (filesChangedDebounceRef.current) clearTimeout(filesChangedDebounceRef.current)
+      if (dropDoneRef.current) clearTimeout(dropDoneRef.current)
+      setDuplicatePrompt(prev => {
+        prev?.resolve('skip')
+        return null
+      })
+    }
+  }, [])
+
   const loadFolders = useCallback(async () => {
     const r = await window.electronAPI.folders.list()
     if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
   }, [])
 
-  const loadFoldersFromCloud = async () => {
-    const r = await window.electronAPI.folders.loadFromTelegram()
-    if (r.success) { setFolders(r.data.folders || []); setFileFolders(r.data.fileFolders || {}) }
-  }
+  const loadFoldersFromCloud = useCallback(async () => {
+    try {
+      const r = await window.electronAPI.folders.loadFromTelegram()
+      if (r.success && r.data) {
+        const cloudFolders = r.data.folders || []
+        const cloudFileFolders = r.data.fileFolders || {}
+        if (cloudFolders.length > 0 || Object.keys(cloudFileFolders).length > 0) {
+          setFolders(cloudFolders)
+          setFileFolders(cloudFileFolders as Record<number, string>)
+          return
+        }
+      }
+    } catch {}
+    await loadFolders()
+  }, [loadFolders])
 
   const createFolder = () => { setShowCreateFolder(true); setNewFolderName('') }
   const confirmCreateFolder = async () => {
@@ -301,11 +354,7 @@ export default function MyFilesPage() {
           if (folderToRestore) setFolders(prev => [...prev, folderToRestore])
         })
       }
-      if ('startViewTransition' in document) {
-        (document as any).startViewTransition(revert)
-      } else {
-        revert()
-      }
+      safeViewTransition(revert)
     }
   }
 
@@ -345,12 +394,8 @@ export default function MyFilesPage() {
     
     setMoveTarget(null)
     clearSelection()
-    
-    if ('startViewTransition' in document) {
-      (document as any).startViewTransition(() => setFileFolders(updated))
-    } else {
-      setFileFolders(updated)
-    }
+
+    safeViewTransition(() => setFileFolders(updated))
 
     // 2. Background API call
     try {
@@ -390,7 +435,8 @@ export default function MyFilesPage() {
     try {
       const [r] = await Promise.all([
         window.electronAPI.telegram.listFilesFromCache(FILES_PAGE_SIZE, 0),
-        loadCategoryCounts()
+        loadCategoryCounts(),
+        loadFoldersFromCloud()
       ])
       if (r.success) {
         setFiles(processRawFiles(r.data || []))
@@ -450,7 +496,11 @@ export default function MyFilesPage() {
       const r = await window.electronAPI.telegram.listFolderFilesFromCache(folderDrill, FILES_PAGE_SIZE, folderNextOffsetIdRef.current)
       if (r.success && r.data?.length) {
         const newFiles = processRawFiles(r.data)
-        setFolderFiles(prev => [...prev, ...newFiles])
+        setFolderFiles(prev => {
+          const seen = new Set(prev.map((f: any) => f.messageId))
+          const fresh = newFiles.filter((f: any) => !seen.has(f.messageId))
+          return fresh.length ? [...prev, ...fresh] : prev
+        })
         folderNextOffsetIdRef.current = r.nextOffsetId ?? null
       } else {
         folderNextOffsetIdRef.current = null
@@ -564,11 +614,12 @@ export default function MyFilesPage() {
     await uploadDroppedFiles(pick.data.map((f: any) => ({ filePath: f.filePath, fileName: f.fileName })), folderId)
   }
 
-  useEffect(() => { load(); loadFolders() }, [])
+  useEffect(() => {
+    load()
+  }, [])
 
   useEffect(() => {
     if (!drillDown) { setDrillFiles([]); setDrillLoading(false); return }
-    if (drillDown === 'Недавние') return
     setDrillLoading(true)
     window.electronAPI.telegram.getFilesByCategory(drillDown).then((r: any) => {
       setDrillFiles(processRawFiles(r.data || []))
@@ -595,7 +646,6 @@ export default function MyFilesPage() {
         if (r.success) {
           setSearchResults(processRawFiles(r.files || []))
           setSearchTotal(r.total ?? 0)
-          setHasMore(!!r.nextOffsetId)
         }
       })
     } else {
@@ -610,7 +660,7 @@ export default function MyFilesPage() {
   }, [])
 
   useEffect(() => {
-    const CATS_TO_LOAD = ['Документы', 'Архивы', 'Другое']
+    const CATS_TO_LOAD = ['Документы', 'Архивы', 'Другое', 'Недавние']
     for (const cat of CATS_TO_LOAD) {
       if (expanded.has(cat) && !expandedCatFiles[cat]) loadExpandedCatFiles(cat)
     }
@@ -620,11 +670,28 @@ export default function MyFilesPage() {
     const unsub = window.electronAPI.telegram.onFilesChanged(() => {
       if (filesChangedDebounceRef.current) clearTimeout(filesChangedDebounceRef.current)
       filesChangedDebounceRef.current = setTimeout(() => {
-        window.electronAPI.telegram.listFilesFromCache(FILES_PAGE_SIZE, 0).then((r: any) => {
+        const keep = Math.max(FILES_PAGE_SIZE, filesLenRef.current)
+        window.electronAPI.telegram.listFilesFromCache(keep, 0).then((r: any) => {
           if (r.success) {
-            setFiles(processRawFiles(r.data || []))
+            const incoming = processRawFiles(r.data || [])
+            setFiles(prev => {
+              if (!prev.length) return incoming
+              if (!incoming.length) return prev
+              const prevIds = new Set(prev.map((f: any) => f.messageId))
+              const maxPrev = prev.reduce((m: number, f: any) => Math.max(m, f.messageId || 0), 0)
+              const incById = new Map(incoming.map((f: any) => [f.messageId, f]))
+              const refreshed = prev.map((f: any) => {
+                const upd = incById.get(f.messageId)
+                if (!upd) return f
+                return { ...f, ...upd, fileName: f.fileName }
+              })
+              const newer = incoming.filter((f: any) => !prevIds.has(f.messageId) && (f.messageId || 0) > maxPrev)
+              if (!newer.length) return refreshed
+              return [...newer, ...refreshed]
+            })
             nextOffsetIdRef.current = r.nextOffsetId ?? null
             totalFilesRef.current = r.total ?? 0
+            setVisibleCount(prev => Math.max(prev, FILES_PAGE_SIZE))
           }
         })
         if (folderDrill) loadFolderFiles(folderDrill, true)
@@ -647,8 +714,8 @@ export default function MyFilesPage() {
     if (search) arr = arr.filter(f => (f.fileName || '').toLowerCase().includes(search.toLowerCase()))
     arr.sort((a, b) => {
       if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
-      if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0)
-      return (fileDate(b) || 0) - (fileDate(a) || 0)
+      if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0) || (b.messageId - a.messageId)
+      return (b.messageId - a.messageId)
     })
     return arr
   }, [files, search, sort])
@@ -677,23 +744,26 @@ export default function MyFilesPage() {
   const sortedFiles = useMemo(() => {
     return [...currentFiles].sort((a, b) => {
       if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
-      if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0)
-      return (fileDate(b) || 0) - (fileDate(a) || 0)
+      if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0) || (b.messageId - a.messageId)
+      return (b.messageId - a.messageId)
     })
   }, [currentFiles, sort])
 
   const scrollRafRef = useRef(0)
   useEffect(() => {
-    if (folderDrill) return
     const container = document.querySelector('.v2-main')
     if (!container) return
     const handleScroll = () => {
       if (scrollRafRef.current) return
       const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       if (distanceToBottom >= SCROLL_THRESHOLD) return
-      const totalLen = filtered.length
+      const totalLen = folderDrill ? currentFiles.length : filtered.length
       if (visibleCount >= totalLen) {
-        if (nextOffsetIdRef.current !== null) loadMore()
+        if (folderDrill) {
+          if (folderNextOffsetIdRef.current !== null && !folderLoadingMoreRef.current && !debouncedQuery.trim()) loadMoreFolderFiles()
+        } else if (nextOffsetIdRef.current !== null) {
+          loadMore()
+        }
         return
       }
       scrollRafRef.current = requestAnimationFrame(() => {
@@ -706,27 +776,27 @@ export default function MyFilesPage() {
       container.removeEventListener('scroll', handleScroll)
       if (scrollRafRef.current) { cancelAnimationFrame(scrollRafRef.current); scrollRafRef.current = 0 }
     }
-  }, [filtered.length, visibleCount, loadMore, folderDrill])
+  }, [filtered.length, currentFiles.length, visibleCount, loadMore, loadMoreFolderFiles, folderDrill, debouncedQuery])
 
 
   const recentFiles = useMemo(() => {
     return filtered.filter(f => {
       const fd = f.uploadedAt || fileDate(f)
-      return fd > 0 && (now - fd) < TWELVE_HOURS && (now - fd) > -86400
+      return fd > 0 && (now - fd) < RECENT_WINDOW_SEC && (now - fd) > -86400
     })
   }, [filtered, now])
 
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
     CATEGORIES.forEach(c => { map[c] = [] })
-    map['Недавние'] = recentFiles
+    map['Недавние'] = expandedCatFiles['Недавние']?.length ? expandedCatFiles['Недавние'] : recentFiles
     const drillable = new Set(['Изображения', 'Видео', 'Аудио'])
     filtered.forEach(f => {
       const cat = typeOf(f.fileName)
       if (drillable.has(cat)) map[cat]?.push(f)
     })
     for (const [cat, files] of Object.entries(expandedCatFiles)) {
-      if (!drillable.has(cat) && files.length) map[cat] = files
+      if (cat !== 'Недавние' && !drillable.has(cat) && files.length) map[cat] = files
     }
     return map
   }, [filtered, recentFiles, now, fileFolders, expandedCatFiles])
@@ -734,10 +804,13 @@ export default function MyFilesPage() {
   const galleryFiles = useMemo(() => {
     if (!drillDown) return []
     if (drillDown === 'Недавние') {
-      return recentFiles
+      return drillFiles.filter(f => {
+        const fd = f.uploadedAt || fileDate(f)
+        return fd > 0 && (now - fd) < RECENT_WINDOW_SEC && (now - fd) > -86400
+      })
     }
     return drillFiles
-  }, [drillDown, drillFiles, recentFiles, now])
+  }, [drillDown, drillFiles, now])
 
   const galleryByDay = useMemo(() => groupByDay(galleryFiles), [galleryFiles]);
   const flattenedGallery = useMemo(() => {
@@ -823,8 +896,11 @@ export default function MyFilesPage() {
           setDeletingIds(prev => { const s = new Set(prev); s.delete(f.messageId); return s })
         })
       }
-        revert()
+      safeViewTransition(revert)
     }
+    setIsDragOver(false)
+    dragCounter.current = 0
+    setSelectionBox(null)
   }
   const handleCopyLink = async (f: any) => {
     if (botConfigured && botToken) {
@@ -989,6 +1065,7 @@ export default function MyFilesPage() {
           if (!prev) return prev
           return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total }
         })
+        setTimeout(() => setProgressModal(null), 2500)
       } else {
         hadError = true
         setProgressModal(prev => {
@@ -999,6 +1076,7 @@ export default function MyFilesPage() {
           })
           return { ...prev, items: newItems, current: prev.total }
         })
+        setTimeout(() => setProgressModal(null), 4000)
       }
     } catch (err) {
       unsub()
@@ -1007,7 +1085,11 @@ export default function MyFilesPage() {
         if (!prev) return prev
         return { ...prev, items: prev.items.map(it => ({ ...it, status: 'error' as const })), current: prev.total }
       })
+      setTimeout(() => setProgressModal(null), 4000)
     }
+    setIsDragOver(false)
+    dragCounter.current = 0
+    setSelectionBox(null)
   }
   const bulkDownload = async () => {
     if (selected.size === 0) return
@@ -1038,7 +1120,7 @@ export default function MyFilesPage() {
   }
 
   const toggleCategory = (cat: string) => {
-    if (cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио') {
+    if (cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио' || cat === 'Недавние') {
       setDrillDown(cat); setVisibleCount(FILES_PAGE_SIZE)
       return
     }
@@ -1471,7 +1553,7 @@ export default function MyFilesPage() {
             const displayCount = categoryCounts[cat] ?? items.length
             if (search && items.length === 0) return null
             const open = expanded.has(cat)
-            const isDrillable = cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио'
+            const isDrillable = cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио' || cat === 'Недавние'
             return (
               <div key={cat} className={'mf-section' + (open ? ' open' : '')}>
                 <div className="mf-section-head" onClick={() => toggleCategory(cat)} style={{ '--cat-color': CAT_COLOR[cat] } as React.CSSProperties}>
@@ -1703,56 +1785,34 @@ export default function MyFilesPage() {
                       </div>
                       )}
                       {sortedFiles.length > 0 ? (
-                      <VirtuosoGrid
-                        useWindowScroll
-                        totalCount={sortedFiles.length}
-                        overscan={400}
-                        endReached={() => {
-                          if (folderDrill && !debouncedQuery.trim() && hasMore && !folderLoadingMoreRef.current) loadMoreFolderFiles()
-                          else if (!folderDrill && nextOffsetIdRef.current !== null) loadMore()
-                        }}
-                        components={{
-                          List: forwardRef((props, ref) => (
-                            <div ref={ref} {...props} className="mf-grid" />
-                          )),
-                          Item: ({ children, ...rest }) => (
-                            <div {...rest}>{children}</div>
-                          ),
-                          Footer: () => (loadingMore || folderLoadingMore) ? (
-                            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
-                              <div style={{ width: 24, height: 24, border: '2px solid rgba(124,131,255,0.2)', borderTopColor: '#7c83ff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                            </div>
-                          ) : null
-                        }}
-                        itemContent={(index) => {
-                          const f = sortedFiles[index]
-                          if (!f) return null
+                      <div className="mf-grid">
+                        {sortedFiles.slice(0, visibleCount).map(f => {
                           const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
                           const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
                           return (
-                            <TiltCard data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                                 style={{ viewTransitionName: `card_${f.messageId}` }}
-                                 effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
-                                 onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                                 onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
-                                 onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
-                              <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                              <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
-                                {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
-                              </div>
-                              <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                              <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                              <div className="mf-card-actions">
-                                <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                                <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
-                                {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
-                                <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                                <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
-                              </div>
-                            </TiltCard>
+                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                               style={{ viewTransitionName: `card_${f.messageId}` }}
+                               effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                               onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
+                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                            <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                            </div>
+                            <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                            <div className="mf-card-actions">
+                              <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
+                              <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                            </div>
+                          </TiltCard>
                           )
-                        }}
-                      />
+                        })}
+                      </div>
                       ) : !folderLoading && sortedFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
                         if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
                         return p.folderId === folderDrill
@@ -1799,7 +1859,7 @@ export default function MyFilesPage() {
                             </td>
                           </tr>
                         ))}
-                        {sortedFiles.map(f => {
+                        {sortedFiles.slice(0, visibleCount).map(f => {
                           const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
                           const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
                           return (
@@ -1927,7 +1987,7 @@ export default function MyFilesPage() {
         const currIdx = all.findIndex((x: any) => x === preview.list[preview.idx])
         const currFile = all[currIdx]
         return (
-        <div className="mf-modal" style={{ cursor: 'pointer', viewTransitionName: `folder-${currFile?.messageId}` }} onClick={() => setPreview(null)}>
+        <div className="mf-modal" style={{ cursor: 'pointer' }} onClick={() => setPreview(null)}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'linear-gradient(180deg,rgba(0,0,0,0.5),transparent)', zIndex: 10, userSelect: 'none' }}>
             <span style={{ color: '#fff', fontSize: 13, opacity: 0.9 }}>{currFile?.fileName || ''}</span>
             <span style={{ color: '#fff', fontSize: 12, opacity: 0.6 }}>{currIdx + 1} / {all.length}</span>

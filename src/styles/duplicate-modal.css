@@ -63,3 +63,218 @@
   box-shadow: inset 0 2px 4px rgba(255,255,255,0.05);
 }
 @keyframes pulseGlow { from { opacity: 0.1; transform: scale(0.9); } to { opacity: 0.25; transform: scale(1.1); } }
+
+/* ── Duplicates cleanup UI (Filerev / Files-by-Google pattern) ── */
+.dup-toolbar {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dup-kpi {
+  display: flex; flex-wrap: wrap; gap: 10px;
+}
+.dup-kpi-item {
+  min-width: 110px; padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex; flex-direction: column; gap: 2px;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.dup-kpi-value {
+  font-size: 20px; font-weight: 700; color: var(--text);
+  letter-spacing: -0.3px; line-height: 1.15;
+}
+.dup-kpi-label {
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.dup-kpi-save .dup-kpi-value { color: var(--success); }
+.dup-kpi-save {
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+  background: color-mix(in srgb, var(--success) 8%, var(--panel));
+}
+
+.dup-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+}
+
+.dup-strategy {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 12.5px; cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.dup-strategy:hover { border-color: var(--border-strong); background: var(--panel-hover); }
+.dup-strategy select {
+  background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; padding: 0;
+}
+.dup-strategy select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px;
+}
+.dup-strategy select option { background: var(--panel); color: var(--text); }
+
+.dup-criteria {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text-dim); font-size: 11.5px; font-weight: 600;
+}
+
+.dup-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto;
+}
+.dup-actions .v3-btn {
+  min-height: 36px; padding: 8px 14px; gap: 6px;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+              color var(--transition-fast), transform 150ms ease, opacity var(--transition-fast);
+}
+.dup-actions .v3-btn:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+.dup-btn-bulk {
+  font-weight: 700;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.dup-btn-bulk:hover:not(:disabled) { transform: translateY(-1px); }
+
+.dup-bulkbar {
+  position: sticky; top: 0; z-index: 20;
+  animation: dupBarIn 180ms ease both;
+}
+@keyframes dupBarIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dup-section-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap;
+  font-size: 12px; font-weight: 600; color: var(--text-mute);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  padding-bottom: 4px;
+}
+.dup-section-meta { font-weight: 500; text-transform: none; letter-spacing: 0; }
+
+.dup-group {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.dup-group:hover { border-color: var(--border-strong); }
+.dup-group-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.dup-group-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.dup-group-name {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  max-width: min(420px, 55vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dup-group-badge {
+  font-size: 12px; font-weight: 700; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 2px 8px; border-radius: 999px;
+}
+.dup-group-meta { font-size: 12px; color: var(--text-dim); }
+.dup-group-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dup-group-actions .v3-btn {
+  padding: 7px 12px; font-size: 12.5px; min-height: 32px; gap: 6px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.dup-group-actions .v3-btn.danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.dup-group-actions .v3-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.dup-group-actions .v3-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.dup-items { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }
+.dup-group .mf-gm-card {
+  cursor: pointer; user-select: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+.dup-group .mf-gm-card:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.dup-group .mf-gm-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.dup-group .mf-gm-card.dup-keep {
+  border-color: color-mix(in srgb, var(--success) 50%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.dup-keep-badge {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; pointer-events: none;
+}
+.dup-keep-badge.is-keep {
+  color: #06281a; background: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 70%, #fff);
+}
+.dup-keep-badge.is-dup {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+  border: 1px solid var(--border-strong);
+}
+.dup-msg { color: var(--text-mute); font-variant-numeric: tabular-nums; }
+
+.dup-check { display: flex; align-items: center; justify-content: center; }
+.dup-check input {
+  width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;
+}
+.dup-check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.dup-empty {
+  text-align: center; padding: 48px 24px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.dup-empty-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+  color: var(--success);
+}
+.dup-empty-title {
+  font-size: 16px; font-weight: 700; color: var(--text);
+}
+.dup-empty-sub {
+  font-size: 13px; color: var(--text-dim); line-height: 1.5;
+  max-width: 360px; margin-bottom: 8px;
+}
+
+.v3-row .v3-btn.danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.v3-row .v3-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.v3-row .v3-btn.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 720px) {
+  .dup-actions { margin-left: 0; width: 100%; }
+  .dup-actions .v3-btn { flex: 1 1 auto; justify-content: center; }
+  .dup-group-name { max-width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dup-group, .dup-kpi-item, .dup-bulkbar, .dup-actions .v3-btn { transition: none; animation: none; }
+  .dup-btn-bulk:hover:not(:disabled) { transform: none; }
+}

@@ -94,6 +94,14 @@ button:active, a:active { transform: scale(0.97); }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 
+/* Safety: never let view transitions hang (frozen dim overlay) */
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 0.2s !important;
+  animation-delay: 0s !important;
+}
+
 /* Hide number input spin buttons globally */
 input[type=number]::-webkit-inner-spin-button, 
 input[type=number]::-webkit-outer-spin-button { 

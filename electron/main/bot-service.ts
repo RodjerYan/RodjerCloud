@@ -1,7 +1,6 @@
 import * as https from 'https'
 import * as fs from 'fs'
 import * as path from 'path'
-import * as crypto from 'crypto'
 import { app } from 'electron'
 import { TelegramService } from './telegram-service'
 
@@ -144,35 +143,23 @@ export class BotService {
   getDuplicateGroups(mediaOnly = true): DuplicateGroup[] {
     const groups = new Map<string, HashEntry[]>()
     for (const e of this.hashDb) {
-      if (!e.hash) continue
       if (mediaOnly && !this.isMediaEntry(e)) continue
-      const arr = groups.get(e.hash) || []
+      if (!e.hash) continue
+      const key = `${(e.fileName || '').toLowerCase()}:${e.hash}`
+      const arr = groups.get(key) || []
       arr.push(e)
-      groups.set(e.hash, arr)
+      groups.set(key, arr)
     }
     const result: DuplicateGroup[] = []
-    groups.forEach((files, hash) => {
+    groups.forEach((files, key) => {
       if (files.length > 1)
-        result.push({ hash, files, totalSize: files.reduce((s, f) => s + f.fileSize, 0) })
+        result.push({ hash: key, files, totalSize: files.reduce((s, f) => s + f.fileSize, 0) })
     })
     result.sort((a, b) => b.totalSize - a.totalSize)
     return result
   }
 
   // ── Hashing ──
-  private computeFileHash(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256')
-      const stream = fs.createReadStream(filePath, { start: 0, end: 65535 })
-      stream.on('data', d => hash.update(d))
-      stream.on('end', () => {
-        try { resolve(hash.digest('hex') + ':' + fs.statSync(filePath).size) }
-        catch (e) { reject(e) }
-      })
-      stream.on('error', reject)
-    })
-  }
-
   private cleanupNonMediaEntries() {
     const before = this.hashDb.length
     this.hashDb = this.hashDb.filter(e => this.isMediaEntry(e))
@@ -192,8 +179,20 @@ export class BotService {
       this.saveHashDb()
     }
 
+    const keyCount = new Map<string, number>()
+    const dupKey = (f: any) => `${(f.fileName || '').toLowerCase()}:${f.fileSize || 0}`
+    for (const f of all) {
+      if (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) {
+        const k = dupKey(f)
+        keyCount.set(k, (keyCount.get(k) || 0) + 1)
+      }
+    }
     const hashedIds = new Set(this.hashDb.map(e => e.messageId))
-    const toScan = all.filter((f: any) => !hashedIds.has(f.messageId) && (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')))
+    const toScan = all.filter((f: any) =>
+      !hashedIds.has(f.messageId) &&
+      (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) &&
+      (keyCount.get(dupKey(f)) || 0) >= 2
+    )
     const total = toScan.length
     let done = 0
     let found = 0
@@ -202,9 +201,7 @@ export class BotService {
       const fileName = f.fileName || 'unknown'
       onProgress?.({ done, total, currentFile: fileName })
       try {
-        const tmp = await telegramService.downloadMediaToTemp(f.messageId)
-        const hash = await this.computeFileHash(tmp)
-        fs.rmSync(tmp, { force: true })
+        const hash = await telegramService.computePartialHash(f.messageId)
         this.recordHash({
           messageId: f.messageId,
           fileName: f.fileName || 'unknown',

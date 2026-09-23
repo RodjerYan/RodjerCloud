@@ -7,12 +7,28 @@ export default function GlobalDialogs() {
   const holdIntervalRef = useRef<any>(null)
 
   useEffect(() => {
-    return subscribeDialogs((ds) => {
+    const unsub = subscribeDialogs((ds) => {
       setDialogs(ds)
       setHoldProgress(0)
       if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
     })
+    return () => {
+      unsub()
+      if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
+    }
   }, [])
+
+  useEffect(() => {
+    if (dialogs.length === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const top = dialogs[dialogs.length - 1]
+        top?.resolve(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dialogs])
 
   if (dialogs.length === 0) return null
 
@@ -23,11 +39,13 @@ export default function GlobalDialogs() {
     if (!isDanger) return
     setHoldProgress(0)
     let p = 0
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
     holdIntervalRef.current = setInterval(() => {
       p += 5
       setHoldProgress(p)
       if (p >= 100) {
         clearInterval(holdIntervalRef.current)
+        holdIntervalRef.current = null
         d.resolve(true)
       }
     }, 50) // 1 second total
@@ -35,7 +53,8 @@ export default function GlobalDialogs() {
 
   const stopHold = () => {
     if (!isDanger) return
-    clearInterval(holdIntervalRef.current)
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
+    holdIntervalRef.current = null
     setHoldProgress(0)
   }
 
