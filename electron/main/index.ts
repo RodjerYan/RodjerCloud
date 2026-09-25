@@ -14,7 +14,8 @@ import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 import { vaultService } from './vault-service'
 import { startVideoStreamServer } from './video-stream-server'
-import { convertVideoToMp4, ffmpegLog } from './previewConverter'
+import { convertVideoToMp4, downloadPreviewSourceOnce, ffmpegLog } from './previewConverter'
+import { ensureHlsSession, cleanupHlsForIds, IPC_START_TIMEOUT_MS, setHlsProgressHandler } from './hlsServer'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 
@@ -60,6 +61,8 @@ try {
       if (s.includes('[stream]')) log('info', s)
       // rework S3.1: [ffmpeg]-логи конвертации mov/mkv/avi → mp4 (previewConverter)
       if (s.includes('[ffmpeg]')) log('info', s)
+      // T-20260925-003 S1: [hls]-логи HLS-сессий (hlsServer)
+      if (s.includes('[hls]')) log('info', s)
     } catch {}
   }
 } catch {}
@@ -1982,56 +1985,138 @@ async function ensurePreviewCache(cachedPath: string): Promise<string> {
   return ok ? jpgPath : cachedPath
 }
 
+// ==== T-20260925-010 S2: результат resolvePreviewSrc ====
+// hlsPending=true → main НЕ качивал и НЕ конвертировал (HLS-first): preview
+// сразу уходит в preview:hls-start. Пустой src + hlsPending отличим от ошибки
+// (там просто src=''), preview-скрипт по флагу не показывает «Формат не поддерживается».
+type PreviewSrc = { src: string; hlsPending?: boolean }
+
+// T-20260925-005 S2: отправка фаз download/convert в ИЗВЕСТНОЕ окно сессии
+// (без рассылок). Общая для resolvePreviewSrc, resolvePreviewSlowSrc и
+// preview:convert-fallback.
+function makePreviewProgressSender(sessionId?: string) {
+  return (ev: { phase: 'download' | 'convert'; sent?: number; total?: number }) => {
+    if (!sessionId) return
+    const pw = previewWindows.get(Number(sessionId))
+    if (!pw || pw.isDestroyed() || pw.webContents.isDestroyed()) return
+    try { pw.webContents.send('preview:progress', ev) } catch {}
+  }
+}
+
 // Единый путь получения src для preview:load И preview:navigate (раньше были асимметричны):
 // video → http-stream; изображение → raw-скачивание в cache (без подмены ext) →
 // ensurePreviewCache(raw) → display path (jpg после конверсии) либо raw для jpg/png/…
-async function resolvePreviewSrc(dir: string, f: any): Promise<string> {
+async function resolvePreviewSrc(dir: string, f: any, sessionId?: string): Promise<PreviewSrc> {
+  const sendProgress = makePreviewProgressSender(sessionId)
   const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
   // T-20260925-002 S3: stream-аем только то, что Chromium реально декодирует
   // (mp4=h264/aac, webm=vp8/9/av1).
   if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) {
     // mp4/webm — как раньше, напрямую в http-stream (S3 stream fix, не трогаем)
-    if (['mp4', 'webm'].includes(ext)) return `http://127.0.0.1:14300/stream/${f.messageId}`
-    // rework S3.1: mov/mkv/avi — качаем исходник в preview-cache (тот же
-    // downloadMediaToPath, что у images), remux/transcode ffmpeg-static →
-    // preview-cache\<id>_preview.mp4 → file:// (Chromium его играет).
-    // Лоадер preview-окна крутится, пока идёт скачивание+конвертация.
-    // Нет ffmpeg / конвертация упала → '' → renderMedia покажет старую
-    // понятную ошибку «Формат не поддерживается (нужен mp4/webm)».
-    const srcPath = path.join(dir, `${f.messageId}_${f.fileName}`)
+    if (['mp4', 'webm'].includes(ext)) return { src: `http://127.0.0.1:14300/stream/${f.messageId}` }
+    // ==== T-20260925-010 S2: mov/mkv/avi — НЕ блокируем download+convert ====
+    //   * mp4 уже лежит в preview-cache → мгновенный file:// (как раньше);
+    //   * иначе hlsPending: preview сразу запускает HLS-сессию — hlsServer
+    //     транскодит из http-stream ПОКА файл качается (S1), спиннер + #dl
+    //     показывают «Подготовка потока…»/прогресс; если HLS не стартовал
+    //     (ошибка либо бюджет 20s) → preview:convert-fallback → старый путь.
     const mp4Path = path.join(dir, `${f.messageId}_preview.mp4`)
-    // уже готовый mp4 → не перекачиваем и не переконвертируем исходник
-    // (part+rename гарантирует, что существующий dst цел; старше 7 дней он не
-    // бывает — preview-cache чистится при старте)
     if (fs.existsSync(mp4Path)) {
-      try { if (fs.statSync(mp4Path).size > 0) return pathToFileURL(mp4Path).href } catch {}
+      try { if (fs.statSync(mp4Path).size > 0) return { src: pathToFileURL(mp4Path).href } } catch {}
     }
-    if (!fs.existsSync(srcPath)) {
-      try {
-        ffmpegLog(`download src ${f.fileName} (id=${f.messageId})`)
-        await (telegramService as any).downloadMediaToPath(f.messageId, srcPath)
-      } catch (e) { ffmpegLog(`download fail: ${(e as Error).message}`) }
-    }
-    if (!fs.existsSync(srcPath)) return ''
-    const converted = await convertVideoToMp4(srcPath, mp4Path)
-    if (!converted) return ''
-    // rework: pathToFileURL корректно экранирует пробелы/#/% и Windows-пути
-    return pathToFileURL(converted).href
+    return { src: '', hlsPending: true }
   }
   const rawPath = path.join(dir, `${f.messageId}_${f.fileName}`)
-  if (!fs.existsSync(rawPath)) {
-    try {
-      await (telegramService as any).downloadMediaToPath(f.messageId, rawPath)
-    } catch (e) { console.error('preview download failed', e) }
-  }
-  if (!fs.existsSync(rawPath)) return ''
+  const downloaded = await downloadPreviewSourceOnce(telegramService, f.messageId, rawPath, (sent, total) => {
+    sendProgress({ phase: 'download', sent, total })
+  })
+  if (!downloaded) return { src: '' }
   const displayPath = await ensurePreviewCache(rawPath)
-  if (!fs.existsSync(displayPath)) return ''
+  if (!fs.existsSync(displayPath)) return { src: '' }
   // rework: pathToFileURL корректно экранирует пробелы/#/% иWindows-пути
-  return pathToFileURL(displayPath).href
+  return { src: pathToFileURL(displayPath).href }
+}
+
+// ==== T-20260925-010 S2: СТАРЫЙ путь mov/mkv/avi ====
+// Полное скачивание + convertVideoToMp4 → file://. Используется IPC
+// preview:convert-fallback, когда HLS-first не стартовал (hlsStart {error}
+// либо бюджет 20s в preview-скрипте). Скачка дедуплицируется
+// downloadPreviewSourceOnce — общая с fallback-веткой hlsServer, поэтому
+// двойного скачивания не бывает, а convertVideoToMp4 дедуплицирует конвертацию.
+async function resolvePreviewSlowSrc(dir: string, f: any, sessionId?: string): Promise<string> {
+  const sendProgress = makePreviewProgressSender(sessionId)
+  const srcPath = path.join(dir, `${f.messageId}_${f.fileName}`)
+  const mp4Path = path.join(dir, `${f.messageId}_preview.mp4`)
+  // уже готовый mp4 → не перекачиваем и не переконвертируем исходник
+  // (part+rename гарантирует, что существующий dst цел; старше 7 дней он не
+  // бывает — preview-cache чистится при старте)
+  if (fs.existsSync(mp4Path)) {
+    try { if (fs.statSync(mp4Path).size > 0) return pathToFileURL(mp4Path).href } catch {}
+  }
+  const downloaded = await downloadPreviewSourceOnce(telegramService, f.messageId, srcPath, (sent, total) => {
+    sendProgress({ phase: 'download', sent, total })
+  })
+  if (!downloaded) return ''
+  // фаза convert: событие перед вызовом + «пинг» раз в 1s (percent не нужен —
+  // только текст «Конвертация видео…»); по окончании тикер снимаем.
+  sendProgress({ phase: 'convert' })
+  const convertTick = setInterval(() => sendProgress({ phase: 'convert' }), 1000)
+  let converted: string | null = null
+  try {
+    converted = await convertVideoToMp4(srcPath, mp4Path)
+  } finally {
+    clearInterval(convertTick)
+  }
+  if (!converted) return ''
+  // rework: pathToFileURL корректно экранирует пробелы/#/% и Windows-пути
+  return pathToFileURL(converted).href
+}
+
+// T-20260925-003 S2: содержимое hls.js для инлайна в preview-шаблон.
+// preview-окно грузится из tmp-файла (pw.loadFile → file://), поэтому внешние
+//   <script src="http://127.0.0.1:14300/hls.js"> — не работают (file:// + CORS),
+// а <script src="node_modules/..."> — тоже (нет HTTP-обслуживания файла).
+// Поэтому читаем dist/hls.min.js (~600KB) и встраиваем в HTML один раз:
+//   * require.resolve резолвится и из app.asar (prod-deps в asar, как у heic-convert);
+//   * если резолв не удался (packaged-сборка без hls.js) → '' → preview-скрипт
+//     увидит typeof Hls === 'undefined' и сразу пойдёт на прямой src (fallback).
+// require.resolve — как в heic-convert выше: путь внутри asar читается Electron'ом.
+let hlsJsInline: string | undefined
+function loadHlsJsInline(): string {
+  if (hlsJsInline !== undefined) return hlsJsInline
+  const candidates: string[] = []
+  try { candidates.push(require.resolve('hls.js/dist/hls.min.js')) } catch {}
+  try { candidates.push(path.join(app.getAppPath(), 'node_modules', 'hls.js', 'dist', 'hls.min.js')) } catch {}
+  let code: string | null = null
+  for (const p of candidates) {
+    try {
+      if (!p || !fs.existsSync(p)) continue
+      code = fs.readFileSync(p, 'utf-8')
+      break
+    } catch (e) { console.log(`[hls] read inline failed ${p}: ${(e as Error).message}`) }
+  }
+  // защита от разрыва HTML: строка "</script" внутри minified-кода закрыла бы
+  // наш <script> тег (в hls.min.js её нет — проверено, но оставляем на будущее)
+  hlsJsInline = code ? code.replace(/<\/script/gi, '<\\/script') : ''
+  if (!hlsJsInline) console.log('[hls] hls.js inline unavailable → preview uses direct src only')
+  return hlsJsInline
 }
 
 const previewWindows = new Map<number, BrowserWindow>()
+
+// ==== T-20260925-010 S2: фазы fallback-ветки HLS-сессии → preview-окна ====
+// mov/mkv/avi идут HLS-first (resolvePreviewSrc не блокирует качкой), но сама
+// HLS-сессия может уйти во внутренний fallback hlsServer (probe по stream не
+// удался → скачивание + конвертация). Без этого хука эти фазы были бы для
+// preview-окна невидимы — теперь T-005 progress приходит и из них.
+setHlsProgressHandler((messageId, ev) => {
+  for (const [sid, pw] of previewWindows) {
+    if (pw.isDestroyed() || pw.webContents.isDestroyed()) continue
+    const s = previewSessions.get(String(sid))
+    if (!s || !s.files.some((f: any) => Number(f?.messageId) === Number(messageId))) continue
+    try { pw.webContents.send('preview:progress', ev) } catch {}
+  }
+})
 
 ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
   try {
@@ -2064,7 +2149,25 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
       }
     })
     previewWindows.set(winId, pw)
+    // T-20260925-003 S2: [hls]-логи preview-скрипта (причина fallback, таймауты)
+    // → rodjercloud.log; иначе диагностика «почему не HLS» невозможна (renderer
+    // console в main не попадает, console-override выше работает только для main)
+    pw.webContents.on('console-message', (_e, _lvl, message) => {
+      if (typeof message === 'string' && message.includes('[hls]')) log('info', `[hls] preview: ${message}`)
+    })
     pw.on('closed', () => {
+      // REWORK#1 F2/F3: Alt+F4/закрытие окна напрямую (без IPC preview:close)
+      // — иначе HLS-сессии файлов окна продолжают транскод до TTL 10min.
+      // cleanupHlsForIds идемпотентен (preview:close уже мог почистить).
+      const closedSession = previewSessions.get(winId.toString())
+      if (closedSession) {
+        const closedIds = closedSession.files
+          .map((f: any) => Number(f?.messageId))
+          .filter((n: number) => Number.isInteger(n) && n > 0)
+        if (closedIds.length) {
+          try { cleanupHlsForIds(closedIds) } catch (e) { log('warn', `[hls] cleanup on preview closed err=${(e as Error).message}`) }
+        }
+      }
       previewWindows.delete(winId)
       previewSessions.delete(winId.toString())
       try { fs.unlinkSync(tmpFile) } catch {}
@@ -2089,58 +2192,129 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #progress{flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;cursor:pointer;position:relative;margin:0 8px}
 #progressFill{height:100%;background:#7c83ff;border-radius:3px;width:0%;pointer-events:none}
 #time{font:11px/1 Inter, system-ui, sans-serif;color:rgba(255,255,255,0.45);min-width:70px;text-align:center}
+.mwrap{position:relative;display:flex;align-items:center}
+.menu{display:none;position:absolute;bottom:calc(100% + 8px);right:0;min-width:96px;max-height:236px;overflow-y:auto;background:rgba(18,18,32,0.98);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+.menu.open{display:block}
+.menu div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 10px;border-radius:5px;font:12px/1.2 Inter, system-ui, sans-serif;color:rgba(255,255,255,0.85);cursor:pointer;white-space:nowrap}
+.menu div:hover{background:rgba(255,255,255,0.12)}
+.menu .chk{color:#7c83ff;min-width:11px;text-align:right}
+#muteBtn{min-width:34px;padding:4px 7px}
+#vol{-webkit-appearance:none;appearance:none;width:76px;height:16px;background:transparent;outline:none;cursor:pointer;--vp:100%}
+#vol::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,#7c83ff var(--vp),rgba(255,255,255,0.18) var(--vp))}
+#vol::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;margin-top:-4px;border-radius:50%;background:#7c83ff;border:none;cursor:pointer}
+#vol::-moz-range-track{height:4px;border-radius:2px;background:rgba(255,255,255,0.18)}
+#vol::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#7c83ff;cursor:pointer}
+@media (max-width:640px){#vol{display:none}}
 </style></head>
 <body>
 <div id="top"><span id="fname" style="color:#fff;font:13px/1 Inter, system-ui, sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 Inter, system-ui, sans-serif"></span></div>
 <button id="close" onclick="window.electronAPI.preview.close(sid)">✕</button>
 <div id="loader"></div>
+<div id="dl" style="display:none;position:fixed;top:calc(50% + 34px);left:50%;transform:translateX(-50%);z-index:11;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#fff;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;max-width:88%;overflow:hidden;text-overflow:ellipsis;pointer-events:none"></div>
 <div id="media"></div>
 <div id="error" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f87171;font:14px/1.4 Inter, system-ui, sans-serif;text-align:center;max-width:80%"></div>
-<div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><button id="speedBtn" onclick="cycleSpeed()">1x</button><button onclick="toggleFs()">⛶</button></div>
+<div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><div class="mwrap" id="qualityWrap" style="display:none"><button id="qualityBtn" onclick="toggleQualityMenu()">Авто</button><div class="menu" id="qualityMenu"></div></div><div class="mwrap"><button id="speedBtn" onclick="toggleSpeedMenu()">1x</button><div class="menu" id="speedMenu"></div></div><button id="muteBtn" onclick="toggleMute()" title="Звук (M)">🔊</button><input type="range" id="vol" min="0" max="100" step="1" value="100" aria-label="Громкость" title="Громкость"><button onclick="toggleFs()" title="Во весь экран">⛶</button></div>
+<script>${loadHlsJsInline()}</script>
 <script>
 let sid = '${winId}'
 let total = ${files.length}
 let speed = 1
 let video = null
-function renderMedia(files, idx, src) {
+// ==== T-20260925-003 S2: HLS + громкость + скорость + качество ====
+let hls = null          // текущий экземпляр Hls (null → HLS не активен)
+let loadSeq = 0         // токен навигации: устаревшие async-старты игнорируются
+// REWORK#1 F1/F2: messageId текущего видео — нужен для фонового hlsStart и
+// для hlsDrop (снятие HLS-сессии при уходе на direct)
+let currentMsgId = 0
+// ==== T-20260925-010 S2: HLS-first для mov/mkv/avi (hlsPending) ====
+// pendingSlow: текущий файл стартует через hlsStart, прямого src у него НЕТ →
+// любой «уйди на direct» (нет src) означает fallback на старый путь
+// (preview:convert-fallback), а не ошибку «Формат не поддерживается».
+let pendingSlow = false
+// бюджет готовности HLS для hlsPending-файла: main отвечает ранним master'ом
+// (~2-5s, S1), 20s — запас; по истечении или по {error} → convert-fallback
+const HLS_PENDING_BUDGET_MS = 20000
+let volume = 1
+let muted = false
+let levelPref = 'auto'  // 'auto' | высота уровня (px) — восстановление после переключения файла
+const VOL_KEY = 'rodjer.preview.volume'
+const MUTED_KEY = 'rodjer.preview.muted'
+const SPEED_KEY = 'rodjer.preview.speed'
+const LEVEL_KEY = 'rodjer.preview.level'
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+try { var _pv = parseFloat(localStorage.getItem(VOL_KEY)); if (isFinite(_pv) && _pv >= 0 && _pv <= 1) volume = _pv } catch (e) {}
+try { muted = localStorage.getItem(MUTED_KEY) === '1' } catch (e) {}
+try { var _ps = parseFloat(localStorage.getItem(SPEED_KEY)); if (SPEEDS.indexOf(_ps) >= 0) speed = _ps } catch (e) {}
+try { var _pl = localStorage.getItem(LEVEL_KEY); if (_pl === 'auto') levelPref = 'auto'; else if (parseFloat(_pl) > 0 && isFinite(parseFloat(_pl))) levelPref = parseFloat(_pl) } catch (e) {}
+function renderMedia(files, idx, src, hlsPending) {
   if (!files || !files[idx]) return
   const f = files[idx]
   const vExt = (f.fileName||'').split('.').pop().toLowerCase()
   const isVideo = ['mp4','mov','mkv','avi','webm'].includes(vExt)
+  // T-20260925-003 S2: токен навигации — ответ hlsStart/pro-старты прошлого файла
+  // должны быть проигнорированы (пользователь уже ушёл на другой файл)
+  loadSeq++
+  const token = loadSeq
+  destroyHls()
+  // T-20260925-005 S2: новый файл → сбрасываем #dl (download/convert уже кончились)
+  dlHideNow()
+  // T-20260925-010 S2: hlsPending (mov/mkv/avi без готового mp4) → прямого src
+  // нет, первый кадр придёт из HLS; до тех пор крутится лоадер + #dl
+  pendingSlow = false
+  var slow = !!hlsPending && isVideo
+  var isStreamSrc = slow || (!!src && src.indexOf('http://127.0.0.1') === 0)
+  // mp4/webm stream: progress-событий нет — пока крутится спиннер, показываем
+  // «Буферизация…» (скроется в onplaying/oncanplay); hlsPending → своя фраза
+  if (isVideo && isStreamSrc) dlShow(slow ? 'Подготовка потока…' : 'Буферизация…')
+  var ld = document.getElementById('loader')
+  var err = document.getElementById('error')
+  var el = document.getElementById('media')
+  var bar = document.getElementById('bar')
   // T-20260925-002 S3: нет src (конвертация mov/mkv/avi не удалась / ffmpeg
   // недоступен / сломанный файл) → прячем и loader, иначе спиннер висит вместе
   // с ошибкой (вечный лоадер). Пока src не пришёл (preview:load ждёт скачивание
   // и конвертацию ffmpeg) лоадер крутится по умолчанию — это и есть индикатор
-  // долгой конвертации.
-  var ld = document.getElementById('loader'); if (ld && (!isVideo || !src)) ld.style.display = 'none'
-  var err = document.getElementById('error')
-  var el = document.getElementById('media')
-  if (src) {
+  // долгой конвертации. REWORK#1 F1: для видео с src спиннер снимается по
+  // onplaying/oncanplay ПРЯМОГО src (~1-2s) — HLS больше не блокирует первый
+  // кадр (hlsStart идёт в фоне, upgrade в startPlayback ниже).
+  // T-20260925-010 S2: slow → src у видео появится позже (startHls после
+  // {hlsUrl} либо file:// после convert-fallback) — спиннер НЕ снимаем.
+  currentMsgId = (isVideo && (src || slow)) ? f.messageId : 0
+  if (ld && !isVideo) ld.style.display = 'none'
+  if (src || slow) {
     el.innerHTML = ''
     if (isVideo) {
       var vid = document.createElement('video')
       vid.id = 'pv'
-      vid.src = src
       vid.autoplay = true
+      // T-20260925-003 S3: preload=auto — буферизуем сразу, не дожидаясь play()
+      vid.preload = 'auto'
       vid.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
+      try { vid.volume = volume; vid.muted = muted } catch (e) {}
+      var directTried = false
       vid.onerror = function() {
-        var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
-        var bar = document.getElementById('bar'); if (bar) bar.style.display = 'none'
-        var er = document.getElementById('error')
-        if (er) { er.textContent = 'Не удалось загрузить файл'; er.style.display = 'block' }
+        // media-ошибка при HLS → один раз пробуем прямой src (fallback),
+        // дальше — прежняя ошибка «Не удалось загрузить файл»
+        if (hls && !directTried) { directTried = true; useDirect(vid, src, token); return }
+        if (ld) ld.style.display = 'none'
+        dlHideNow()
+        if (bar) bar.style.display = 'none'
+        if (err) { err.textContent = 'Не удалось загрузить файл'; err.style.display = 'block' }
       }
       el.appendChild(vid)
+      video = vid
     } else {
       var img = document.createElement('img')
       img.src = src
       img.draggable = false
       img.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
       img.onerror = function() {
-        var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
-        var er = document.getElementById('error')
-        if (er) { er.textContent = 'Не удалось загрузить файл'; er.style.display = 'block' }
+        if (ld) ld.style.display = 'none'
+        dlHideNow()
+        if (err) { err.textContent = 'Не удалось загрузить файл'; err.style.display = 'block' }
       }
       el.appendChild(img)
+      video = null
     }
     if (err) err.style.display = 'none'
   } else {
@@ -2148,49 +2322,515 @@ function renderMedia(files, idx, src) {
       err.textContent = (isVideo ? 'Формат не поддерживается в предпросмотре (нужен mp4/webm):\\n' : 'Не удалось загрузить файл\\n') + f.fileName
       err.style.display = 'block'
     }
-    document.getElementById('bar').style.display = 'none'; video = null
+    if (ld) ld.style.display = 'none'
+    if (bar) bar.style.display = 'none'
+    video = null
   }
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
-  if (isVideo) {
-    video = document.getElementById('pv')
-    // T-20260925-002 S3: без <video> (нет src — конвертация упала) — панель не показываем
-    if (video) document.getElementById('bar').style.display = 'flex'
-    if (video) {
-      video.playbackRate = speed
-      video.ontimeupdate = update
-      video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
-      video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
-      video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
-      video.onclick = function(e) { e.stopPropagation(); togglePlay() }
-      video.onwaiting = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block' }
-      video.onplaying = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' }
-      video.oncanplay = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' }
-    }
-  } else {
-    document.getElementById('bar').style.display = 'none'; video = null
+  if (isVideo && video) {
+    bar.style.display = 'flex'
+    video.playbackRate = speed
+    video.ontimeupdate = update
+    video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
+    video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
+    video.onpause = function() { document.getElementById('playBtn').textContent = '▶' }
+    video.onclick = function(e) { e.stopPropagation(); togglePlay() }
+    video.onwaiting = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block'; if (isStreamSrc) dlShow('Буферизация…') }
+    video.onplaying = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; if (isStreamSrc) dlHideNow() }
+    video.oncanplay = function() { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; if (isStreamSrc) dlHideNow() }
+    // REWORK#1 F1: прямой src ставится сразу (первый кадр), HLS upgrade-ится в фоне
+    // T-20260925-010 S2: hlsPending → src нет: сразу в HLS-first (startSlowPlayback)
+    if (slow) startSlowPlayback(video, f.messageId, token)
+    else startPlayback(video, src, f.messageId, token)
+  } else if (!isVideo && bar) {
+    bar.style.display = 'none'
   }
 }
 function showError(msg) {
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  dlHideNow()
   var err = document.getElementById('error'); if (err) { err.textContent = 'Ошибка: ' + msg; err.style.display = 'block' }
 }
-function togglePlay() { if (!video) return; if (video.paused) video.play(); else video.pause() }
-function update() { if (!video||!video.duration) return; document.getElementById('progressFill').style.width = (video.currentTime/video.duration*100)+'%'; document.getElementById('time').textContent = fmt(video.currentTime)+' / '+fmt(video.duration) }
-function seek(e) { if (!video||!video.duration) return; var r=e.currentTarget.getBoundingClientRect(); video.currentTime = ((e.clientX-r.left)/r.width)*video.duration }
-function fmt(t) { if (!t||isNaN(t)) return '0:00'; var m=Math.floor(t/60),s=Math.floor(t%60); return m+':'+(s<10?'0':'')+s }
-function cycleSpeed() { var a=[0.5,0.75,1,1.25,1.5,2]; var i=a.indexOf(speed); speed=a[(i+1)%a.length]; document.getElementById('speedBtn').textContent=speed+'x'; if(video) video.playbackRate=speed }
+function showVideoError(msg) {
+  var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+  dlHideNow()
+  var bar = document.getElementById('bar'); if (bar) bar.style.display = 'none'
+  var err = document.getElementById('error'); if (err) { err.textContent = msg || 'Не удалось загрузить файл'; err.style.display = 'block' }
+}
+// T-20260925-010 S2: у hlsPending-файла src появляется позже (HLS/file://) —
+// play() без src дал бы rejected promise без слушателя
+function togglePlay() { if (!video) return; if (!video.getAttribute('src')) return; if (video.paused) video.play(); else video.pause() }
+// duration=Infinity у live-плейлиста (ffmpeg ещё дописывает ENDLIST) — иначе «Infinity:NaN»
+function update() { if (!video||!video.duration||!isFinite(video.duration)) return; document.getElementById('progressFill').style.width = (video.currentTime/video.duration*100)+'%'; document.getElementById('time').textContent = fmt(video.currentTime)+' / '+fmt(video.duration) }
+function seek(e) { if (!video||!video.duration||!isFinite(video.duration)) return; var r=e.currentTarget.getBoundingClientRect(); video.currentTime = ((e.clientX-r.left)/r.width)*video.duration }
+function fmt(t) { if (!t||!isFinite(t)) return '0:00'; var m=Math.floor(t/60),s=Math.floor(t%60); return m+':'+(s<10?'0':'')+s }
+
+// ==== T-20260925-005 S2: #dl — строка прогресса под спиннером ====
+// фазы: download (процент+ETA / байты), convert (текст), stream (буферизация)
+var dlSamples = []
+var dlHideTimer = null
+function fmtSizeT(b) {
+  if (!b || !isFinite(b) || b <= 0) return '0 B'
+  var u = ['B', 'KB', 'MB', 'GB', 'TB']
+  var i = Math.min(Math.floor(Math.log(b) / Math.log(1024)), u.length - 1)
+  return parseFloat((b / Math.pow(1024, i)).toFixed(1)) + ' ' + u[i]
+}
+function dlShow(text) {
+  if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null }
+  var el = document.getElementById('dl'); if (!el) return
+  if (el.textContent !== text) el.textContent = text
+  el.style.display = 'block'
+}
+function dlHideNow() {
+  if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null }
+  dlSamples = []
+  var el = document.getElementById('dl'); if (el) el.style.display = 'none'
+}
+// скачивание завершено (sent >= total) → прячем через 500ms;
+// следующая фаза (convert) или новый файл отменяет таймер (dlShow/dlHideNow)
+function dlHideSoon() {
+  if (dlHideTimer) return
+  dlHideTimer = setTimeout(function () {
+    dlHideTimer = null
+    var el = document.getElementById('dl'); if (el) el.style.display = 'none'
+  }, 500)
+}
+function onPreviewProgress(d) {
+  if (!d) return
+  if (d.phase === 'convert') { dlSamples = []; dlShow('Конвертация видео…'); return }
+  var sent = Number(d.sent) || 0
+  var total = Number(d.total) || 0
+  var now = Date.now()
+  // события предыдущего файла (навигация) — начинаем накопление заново
+  if (dlSamples.length && sent + 4096 < dlSamples[dlSamples.length - 1].sent) dlSamples = []
+  dlSamples.push({ ts: now, sent: sent })
+  while (dlSamples.length > 1 && now - dlSamples[0].ts > 6000) dlSamples.shift()
+  if (total > 0 && sent >= total) { dlShow('Загрузка 100%'); dlHideSoon(); return }
+  // ETA по скользящему окну ~6s (сэмплы {ts,sent}); speed=0 → только процент/байты
+  var speed = 0
+  if (dlSamples.length > 1) {
+    var dt = (now - dlSamples[0].ts) / 1000
+    if (dt >= 1) speed = Math.max(0, (sent - dlSamples[0].sent) / dt)
+  }
+  if (total > 0) {
+    var pct = Math.min(100, Math.floor(sent / total * 100))
+    var eta = speed > 0 ? (total - sent) / speed : 0
+    if (eta >= 1) dlShow('Загрузка ' + pct + '% · осталось ' + fmt(eta))
+    else if (pct > 0) dlShow('Загрузка ' + pct + '%')
+    else dlShow('Загрузка ' + fmtSizeT(sent) + ' из ' + fmtSizeT(total))
+  } else {
+    dlShow('Загрузка ' + fmtSizeT(sent))
+  }
+}
+
+// ==== T-20260925-003 S2 + REWORK#1 F1: HLS (hls.js) поверх прямого src ====
+function destroyHls() {
+  if (hls) { try { hls.destroy() } catch (e) {} hls = null }
+  var qw = document.getElementById('qualityWrap'); if (qw) qw.style.display = 'none'
+}
+// REWORK#1 F2: снять HLS-сессию этого файла в main (kill ffmpeg + rm каталога)
+// ВАЖНО (F6 принят как minor): refcount-а нет — если тот же файл открыт во
+// втором окне, его сегменты начнут отдавать 404 (его hls.js сам уйдёт в
+// fallback на direct — graceful, без белого экрана)
+function dropHlsSession() {
+  var api = window.electronAPI && window.electronAPI.preview
+  if (!api || typeof api.hlsDrop !== 'function' || !currentMsgId) return
+  try { var dp = api.hlsDrop(currentMsgId); if (dp && dp.catch) dp.catch(function () {}) } catch (e) {}
+}
+// прямой src — ровно как до S2 (http-stream / file://), меню качества скрыто.
+// Общая для стартa (F1: мгновенный первый кадр) и fallback-а после HLS.
+function applyDirectSrc(vid, src) {
+  if (!src) { showVideoError('Формат не поддерживается в предпросмотре (нужен mp4/webm)'); return }
+  try { vid.pause() } catch (e) {}
+  vid.src = src
+  vid.autoplay = true
+  vid.preload = 'auto'
+  vid.playbackRate = speed
+  applyVol()
+  var p = vid.play()
+  if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; dlHideNow() })
+}
+// старт воспроизведения (REWORK#1 F1): прямой src ставится МГНОВЕННО — первый
+// кадр не ждёт транскод/HLS (спиннер снимает onplaying, ~1-2s, как в додо-
+// версии; metadata-кеш S3 ускоряет сам stream). preview.hlsStart уходит в фон
+// (fire-and-forget) и при успехе делает upgrade direct→HLS, ничего не блокируя.
+// {error}/лимит/таймаут/нет hls.js → non-event: остаёмся на direct, ничего не
+// показываем (ни лоадера, ни ошибки) — видео продолжает играть.
+function startPlayback(vid, src, messageId, token) {
+  currentMsgId = messageId
+  applyDirectSrc(vid, src)
+  var api = window.electronAPI && window.electronAPI.preview
+  if (!api || typeof api.hlsStart !== 'function' || typeof Hls === 'undefined' || !Hls.isSupported()) return
+  // клиентского таймаута нет: main сам ограничивает ожидание (IPC_START_TIMEOUT_MS
+  // = 60s), а видео уже играет; токен loadSeq отбрасывает ответ устаревшего файла
+  try {
+    api.hlsStart(messageId).then(function (r) {
+      if (token !== loadSeq || video !== vid) return // пользователь ушёл на другой файл
+      if (r && r.hlsUrl) { upgradeToHls(vid, r.hlsUrl, src, token); return }
+      console.log('[hls] start:', (r && r.error) || 'empty', '→ stay direct (non-event)')
+    }).catch(function (e) { console.log('[hls] hlsStart rejected:', e && e.message) })
+  } catch (e) { console.log('[hls] hlsStart throw:', e) }
+}
+
+// ==== T-20260925-010 S2: HLS-first старт для mov/mkv/avi (hlsPending) ====
+// Прямого src у таких файлов НЕТ (Chromium не декодирует контейнер, а качать
+// и конвертировать в лоб больше не хотим) → сразу в main за HLS-сессией:
+// спиннер крутится, #dl показывает «Подготовка потока…» (фазы download/convert
+// приходят как preview:progress из resolveInput-fallback и convert-fallback).
+// Бюджет HLS_PENDING_BUDGET_MS (20s): ни {hlsUrl}, ни {error} → старый путь
+// через preview:convert-fallback. main при этом отвечает ранним master'ом (~2-5s).
+function startSlowPlayback(vid, messageId, token) {
+  currentMsgId = messageId
+  pendingSlow = true
+  dlShow('Подготовка потока…')
+  var api = window.electronAPI && window.electronAPI.preview
+  if (!api || typeof api.hlsStart !== 'function' || typeof Hls === 'undefined' || !Hls.isSupported()) {
+    // hls.js недоступен → сразу старый путь (файл обязан воспроизвестись)
+    runConvertFallback(vid, token, 'no-hlsjs')
+    return
+  }
+  var settled = false
+  var budget = setTimeout(function () {
+    if (settled || token !== loadSeq || video !== vid) return
+    settled = true
+    runConvertFallback(vid, token, 'budget-20s')
+  }, HLS_PENDING_BUDGET_MS)
+  var done = function () { settled = true; clearTimeout(budget) }
+  try {
+    api.hlsStart(messageId).then(function (r) {
+      if (token !== loadSeq || video !== vid) return // пользователь ушёл на другой файл
+      if (settled) return
+      done()
+      if (r && r.hlsUrl) {
+        console.log('[hls] slow-start ready → ' + r.hlsUrl)
+        startHls(vid, r.hlsUrl, '', token, null)
+        return
+      }
+      console.log('[hls] slow-start:', (r && r.error) || 'empty', '→ convert-fallback')
+      runConvertFallback(vid, token, (r && r.error) || 'hls-error')
+    }).catch(function (e) {
+      if (settled || token !== loadSeq || video !== vid) return
+      done()
+      console.log('[hls] slow-start rejected:', e && e.message)
+      runConvertFallback(vid, token, 'reject')
+    })
+  } catch (e) {
+    clearTimeout(budget)
+    runConvertFallback(vid, token, 'throw')
+  }
+}
+// Старый путь mov/mkv/avi: preview:convert-fallback → file:// src → играем.
+// Вызывается при {error}/reject от hlsStart, по бюджету 20s и при попытке
+// «уйти на direct» без src (useDirect ниже). Сессию HLS снимаем — слот из 2
+// и CPU освобождаются, дубль качки исключён (downloadPreviewSourceOnce в main).
+function runConvertFallback(vid, token, why) {
+  if (token !== loadSeq || video !== vid) return
+  if (vid.__convFallback) return // fallback ровно один раз на файл
+  vid.__convFallback = true
+  console.log('[hls] convert-fallback via ' + why)
+  dropHlsSession()
+  var api = window.electronAPI && window.electronAPI.preview
+  if (!api || typeof api.convertFallback !== 'function') { showVideoError('Не удалось загрузить файл'); return }
+  api.convertFallback(sid, currentMsgId).then(function (r) {
+    if (token !== loadSeq || video !== vid) return
+    if (r && r.src) {
+      pendingSlow = false
+      console.log('[hls] convert-fallback ready → file://')
+      applyDirectSrc(vid, r.src)
+      return
+    }
+    console.log('[hls] convert-fallback:', (r && r.error) || 'empty')
+    showVideoError('Не удалось загрузить файл')
+  }).catch(function (e) {
+    if (token !== loadSeq || video !== vid) return
+    console.log('[hls] convert-fallback rejected:', e && e.message)
+    showVideoError('Не удалось загрузить файл')
+  })
+}
+// REWORK#1 F1: фоновый upgrade direct→HLS — видео уже играет по прямому src
+function upgradeToHls(vid, url, src, token) {
+  if (token !== loadSeq || video !== vid) return
+  if (hls) return // upgrade ровно один раз
+  // позиция/playing снимаются в момент ответа main; volume/playbackRate живут
+  // на элементе и переприменяются в MANIFEST_PARSED (applyVol / playbackRate)
+  var up = { saved: vid.currentTime, wasPlaying: !vid.paused, userSeek: null, seekListener: null }
+  console.log('[hls] upgrade t=' + up.saved.toFixed(2) + ' playing=' + up.wasPlaying)
+  startHls(vid, url, src, token, up)
+}
+// запуск hls.js; up (upgrade-режим) — { saved, wasPlaying, userSeek, seekListener },
+// для первоначального старта не передаётся
+function startHls(vid, url, src, token, up) {
+  destroyHls()
+  var inst = new Hls({ enableWorker: true, backBufferLength: 60 })
+  hls = inst
+  var retries = 0
+  var cleanupSeek = function () {
+    if (up && up.seekListener) { try { vid.removeEventListener('seeking', up.seekListener) } catch (e) {} up.seekListener = null }
+  }
+  // страховка: манифест не пришёл → снимаем спиннер и играем напрямую
+  var manifestTimer = setTimeout(function () {
+    if (token !== loadSeq || hls !== inst) return
+    console.log('[hls] manifest timeout → direct src')
+    cleanupSeek()
+    useDirect(vid, src, token)
+  }, 15000)
+  inst.on(Hls.Events.MANIFEST_PARSED, function () {
+    clearTimeout(manifestTimer)
+    if (token !== loadSeq || video !== vid) return
+    cleanupSeek()
+    var levels = inst.levels || []
+    if (up && levels.length <= 1) {
+      // REWORK#1 F1: single-variant — выбора качества нет → плеер не дёргаем:
+      // тихо возвращаемся на direct (позиция сохраняется) и снимаем сессию
+      // (F2: она никем не используется)
+      console.log('[hls] upgrade: single level → stay direct')
+      destroyHls()
+      restoreDirect(vid, src, up)
+      dropHlsSession()
+      return
+    }
+    var qw = document.getElementById('qualityWrap'); if (qw) qw.style.display = 'flex'
+    buildQualityMenu(levels)
+    applyLevelPref()
+    applyVol()
+    vid.playbackRate = speed
+    if (up) {
+      // REWORK#1 F1: возвращаем позицию, если пользователь не перемотал сам.
+      // cur мог сброситься в 0 при attachMedia (blob-src hls.js) — это не
+      // перемотка пользователя; реальные перемотки в окне upgrade ловили по
+      // событию seeking (up.userSeek). saved снят свежим при ответе main.
+      var cur = vid.currentTime
+      if (up.userSeek != null) { try { vid.currentTime = up.userSeek } catch (e) {} }
+      else if (Math.abs(cur - up.saved) < 2 || cur < 1) { try { vid.currentTime = up.saved } catch (e) {} }
+      if (up.wasPlaying) {
+        var p = vid.play()
+        if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+      } else {
+        var pb = document.getElementById('playBtn'); if (pb) pb.textContent = '▶'
+      }
+      update()
+    } else {
+      var p2 = vid.play()
+      if (p2 && p2.catch) p2.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+    }
+  })
+  inst.on(Hls.Events.LEVEL_SWITCHED, function () { if (token === loadSeq && hls === inst) markQuality() })
+  inst.on(Hls.Events.ERROR, function (evt, data) {
+    if (!data || !data.fatal) return
+    console.log('[hls] fatal:', data.type, data.details)
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retries < 2) { retries++; try { inst.startLoad() } catch (e) {} return }
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retries < 2) { retries++; try { inst.recoverMediaError() } catch (e) {} return }
+    clearTimeout(manifestTimer)
+    cleanupSeek()
+    useDirect(vid, src, token)
+  })
+  inst.loadSource(url)
+  inst.attachMedia(vid)
+  if (up) {
+    // слушатель вешаем ПОСЛЕ attach: события самого attach не считаем, а вот
+    // перемотку пользователя до MANIFEST_PARSED — ловим (его позиция важнее saved)
+    up.seekListener = function () { up.userSeek = vid.currentTime }
+    try { vid.addEventListener('seeking', up.seekListener) } catch (e) {}
+  }
+}
+// direct после отмены upgrade: hls.js мог заменить src на blob → возвращаем
+// прямой src и позицию (REWORK#1 F1: single-variant путь)
+function restoreDirect(vid, src, up) {
+  applyDirectSrc(vid, src)
+  if (!up) return
+  var target = up.userSeek != null ? up.userSeek : up.saved
+  if (!(target > 0)) return
+  var seekNow = function () { try { vid.currentTime = target } catch (e) {} vid.removeEventListener('loadedmetadata', seekNow) }
+  if (vid.readyState > 0) seekNow()
+  else vid.addEventListener('loadedmetadata', seekNow)
+}
+// прямой src как fallback после активного HLS (REWORK#1 F2: сессию снимаем)
+function useDirect(vid, src, token) {
+  if (token !== loadSeq || video !== vid) return
+  var hadHls = !!hls
+  destroyHls()
+  if (!src) {
+    // T-20260925-010 S2: src у hlsPending-файла так и не появился — HLS не
+    // состоялся (манифест/медиа-ошибка) → старый путь, а не «формат не поддерживается»
+    if (pendingSlow) { runConvertFallback(vid, token, 'direct-without-src'); return }
+    showVideoError('Формат не поддерживается в предпросмотре (нужен mp4/webm)'); return
+  }
+  applyDirectSrc(vid, src)
+  // REWORK#1 F2: HLS-сессия была активна, а мы ушли на direct (fatal/timeout/
+  // ошибка манифеста) → она больше не используется → kill ffmpeg + rm каталога,
+  // иначе транскод доедает файл впустую и занимает 1 из 2 слотов
+  if (hadHls) dropHlsSession()
+}
+
+// ==== меню: скорость ====
+function closeMenus() {
+  var ms = document.querySelectorAll('.menu')
+  for (var i = 0; i < ms.length; i++) ms[i].classList.remove('open')
+}
+function toggleMenu(menuId) {
+  var m = document.getElementById(menuId)
+  var wasOpen = m.classList.contains('open')
+  closeMenus()
+  if (!wasOpen) m.classList.add('open')
+}
+function buildSpeedMenu() {
+  var m = document.getElementById('speedMenu')
+  m.innerHTML = ''
+  for (var i = 0; i < SPEEDS.length; i++) {
+    (function (s) {
+      var d = document.createElement('div')
+      d.innerHTML = '<span>' + s + 'x</span><span class="chk">' + (s === speed ? '✓' : '') + '</span>'
+      d.onclick = function () { setSpeed(s); closeMenus() }
+      m.appendChild(d)
+    })(SPEEDS[i])
+  }
+}
+function toggleSpeedMenu() { buildSpeedMenu(); toggleMenu('speedMenu') }
+function setSpeed(s) {
+  speed = s
+  try { localStorage.setItem(SPEED_KEY, String(s)) } catch (e) {}
+  document.getElementById('speedBtn').textContent = s + 'x'
+  if (video) video.playbackRate = s
+}
+
+// ==== меню: качество (только при активном HLS) ====
+function toggleQualityMenu() { toggleMenu('qualityMenu') }
+function buildQualityMenu(levels) {
+  var m = document.getElementById('qualityMenu')
+  m.innerHTML = ''
+  var auto = document.createElement('div')
+  auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
+  auto.onclick = function () { pickLevel(-1); closeMenus() }
+  m.appendChild(auto)
+  var seen = {}
+  var list = []
+  for (var i = 0; i < levels.length; i++) {
+    var h = levels[i] && levels[i].height
+    if (!h || seen[h]) continue // дубли по высоте (master может отдавать одинаковые)
+    seen[h] = 1
+    list.push({ h: h, idx: i })
+  }
+  list.sort(function (a, b) { return b.h - a.h }) // как в Telegram: сверху высокие
+  for (var j = 0; j < list.length; j++) {
+    (function (o) {
+      var d = document.createElement('div')
+      d.setAttribute('data-h', o.h)
+      d.innerHTML = '<span>' + o.h + 'p</span><span class="chk"></span>'
+      d.onclick = function () { pickLevel(o.idx, o.h); closeMenus() }
+      m.appendChild(d)
+    })(list[j])
+  }
+  markQuality()
+}
+function pickLevel(idx, height) {
+  if (!hls) return
+  try { hls.currentLevel = idx } catch (e) {}
+  levelPref = (idx < 0 || height == null) ? 'auto' : height
+  try { localStorage.setItem(LEVEL_KEY, levelPref) } catch (e) {}
+  markQuality()
+}
+// восстановление выбранного уровня после переключения файла/сессии
+function applyLevelPref() {
+  if (!hls || !hls.levels) return
+  if (levelPref === 'auto') { if (!hls.autoLevelEnabled) hls.currentLevel = -1; return }
+  for (var i = 0; i < hls.levels.length; i++) {
+    if (hls.levels[i].height === levelPref) { hls.currentLevel = i; return }
+  }
+}
+// подпись кнопки: «Авто» пока ABR, иначе высота текущего уровня (LEVEL_SWITCHED)
+function markQuality() {
+  var btn = document.getElementById('qualityBtn')
+  var m = document.getElementById('qualityMenu')
+  if (!btn || !m) return
+  var label = 'Авто'
+  if (hls && !hls.autoLevelEnabled && hls.currentLevel >= 0 && hls.levels && hls.levels[hls.currentLevel] && hls.levels[hls.currentLevel].height) {
+    label = hls.levels[hls.currentLevel].height + 'p'
+  }
+  btn.textContent = label
+  var items = m.children
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i]
+    var hAttr = it.getAttribute('data-h')
+    var on = hAttr === null ? (hls && hls.autoLevelEnabled) : (label === hAttr + 'p')
+    var chk = it.querySelector('.chk')
+    if (chk) chk.textContent = on ? '✓' : ''
+  }
+}
+
+// ==== громкость / mute (персист rodjer.preview.volume|muted) ====
+function applyVol() {
+  if (video) { try { video.volume = volume; video.muted = muted } catch (e) {} }
+  var mb = document.getElementById('muteBtn')
+  if (mb) mb.textContent = (muted || volume === 0) ? '🔇' : (volume < 0.5 ? '🔉' : '🔊')
+  var vs = document.getElementById('vol')
+  if (vs) {
+    var pct = Math.round((muted ? 0 : volume) * 100)
+    // value всегда равен volume*100 (setVolume берёт его же) → присвоение
+    // не дёргает input-событие и не мешает pointer-drag
+    vs.value = String(pct)
+    vs.style.setProperty('--vp', pct + '%')
+  }
+}
+function setVolume(v) {
+  volume = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
+  if (volume > 0) muted = false
+  try { localStorage.setItem(VOL_KEY, String(volume)); localStorage.setItem(MUTED_KEY, muted ? '1' : '0') } catch (e) {}
+  applyVol()
+}
+function toggleMute() {
+  if (muted) { muted = false; if (volume === 0) volume = 1 }
+  else muted = true
+  try { localStorage.setItem(MUTED_KEY, muted ? '1' : '0'); localStorage.setItem(VOL_KEY, String(volume)) } catch (e) {}
+  applyVol()
+}
+
 function toggleFs() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen() }
 function nav(dir) {
+  closeMenus() // REWORK#1 F5: открытое меню качества/скорости не переживает смену файла
+  loadSeq++ // отменяем недостартовавший HLS/pro-старт предыдущего файла
+  destroyHls()
   document.getElementById('media').innerHTML = ''; video = null
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block'
-  try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx, r.data.src) }) } catch(e) {}
+  dlHideNow() // T-20260925-005 S2: устаревший #dl предыдущего файла не переживает навигацию
+  try { window.electronAPI.preview.navigate(sid, dir).then(r => { if (r.success && r.data) renderMedia(r.data.files, r.data.idx, r.data.src, r.data.hlsPending) }) } catch(e) {}
 }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') window.electronAPI.preview.close(sid)
-  if (e.key === 'ArrowLeft') nav(-1)
-  if (e.key === 'ArrowRight') nav(1)
-  if (e.key === ' ' && video) { e.preventDefault(); togglePlay() }
+  var tag = e.target && e.target.tagName
+  var inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+  if (e.key === 'Escape') {
+    // REWORK#1 F9: фокус в слайдере громкости — сначала blur (иначе Esc сразу
+    // закрывал окно, хотя пользователь работал со слайдером), следующий Esc —
+    // меню/закрытие окно как обычно
+    if (inField) { try { e.target.blur() } catch (err) {} return }
+    // сначала закрываем открытое меню, потом окно
+    if (document.querySelector('.menu.open')) { closeMenus(); return }
+    window.electronAPI.preview.close(sid)
+    return
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // фокус в слайдере громкости: стрелки не должны навигировать по файлам
+    if (inField) {
+      e.preventDefault()
+      setVolume(volume + (e.key === 'ArrowUp' || e.key === 'ArrowRight' ? 0.05 : -0.05))
+      return
+    }
+    if (e.key === 'ArrowLeft') { nav(-1); return }
+    if (e.key === 'ArrowRight') { nav(1); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setVolume(volume + 0.05); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setVolume(volume - 0.05); return }
+  }
+  if (e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь') { toggleMute(); return }
+  if (e.key === ' ' && video) {
+    // нативный click по сфокусированной кнопке сам переключит состояние;
+    // REWORK#1 F9: INPUT (#vol) — как у BODY: без скролла/дублирования (preventDefault)
+    if (tag === 'BUTTON' || tag === 'A') return
+    e.preventDefault(); togglePlay()
+  }
+})
+// клик мимо меню — закрываем выпадашки
+document.addEventListener('click', function (e) {
+  if (!e.target || !e.target.closest || !e.target.closest('.mwrap')) closeMenus()
 })
 document.getElementById('media').onclick = function(e) {
   if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG') return
@@ -2198,11 +2838,20 @@ document.getElementById('media').onclick = function(e) {
   if (e.clientX < w * 0.3) nav(-1)
   else if (e.clientX > w * 0.7) nav(1)
 }
+// init S2: персист громкости/скорости из localStorage → UI (видео подхватит при маунте)
+applyVol()
+document.getElementById('speedBtn').textContent = speed + 'x'
+document.getElementById('vol').addEventListener('input', function () { setVolume(parseFloat(this.value) / 100) })
+// T-20260925-005 S2: подписка на прогресс ДО первого preview.load — события
+// фаз download/convert приходят только из load/navigate, т.е. уже после этой строки
+if (window.electronAPI && window.electronAPI.preview && typeof window.electronAPI.preview.onProgress === 'function') {
+  try { window.electronAPI.preview.onProgress(onPreviewProgress) } catch (e) {}
+}
 // load first file
 window.electronAPI.preview.getSession(sid).then(r => {
   if (r.success) {
     window.electronAPI.preview.load(sid).then(r2 => {
-      if (r2.success) renderMedia(r2.data.files, r2.data.idx, r2.data.src)
+      if (r2.success) renderMedia(r2.data.files, r2.data.idx, r2.data.src, r2.data.hlsPending)
       else showError(r2.error || 'load failed')
     }).catch(function(e) { showError('load error: ' + e.message) })
   } else {
@@ -2245,8 +2894,10 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const f = s.files[s.idx]
     // T-20260924-019 S3: raw-путь без подмены ext (.jpg больше не дописывается до
     // скачивания), конверсия heic внутри ensurePreviewCache → отдаём display path.
-    const src = await resolvePreviewSrc(s.dir, f)
-    return { success: true, data: { files: s.files, idx: s.idx, src } }
+    // T-20260925-005 S2: sessionId — чтобы слать preview:progress в это окно.
+    // T-20260925-010 S2: mov/mkv/avi → hlsPending (src пустой, НЕ ошибка).
+    const r = await resolvePreviewSrc(s.dir, f, sessionId)
+    return { success: true, data: { files: s.files, idx: s.idx, src: r.src, hlsPending: !!r.hlsPending } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -2256,6 +2907,61 @@ ipcMain.handle('preview:get-session', async (_, sessionId: string) => {
     if (!s) return { success: false, error: 'Session not found' }
     return { success: true, data: { files: s.files, idx: s.idx } }
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+// T-20260925-003 S1: preview запрашивает HLS-сессию для messageId.
+// Возвращает { hlsUrl: 'http://127.0.0.1:14300/hls/<token>/<id>/master.m3u8' }
+// либо { error } (лимит сессий / ffmpeg не стартанул / транскод не успел).
+// REWORK#1 F1: вызов идёт из preview в ФОНЕ (первый кадр уже играет по
+// прямому src) → ждём master до 60s (IPC_START_TIMEOUT_MS); {error} для
+// preview — non-event, никакого fallback-переключения не нужно.
+ipcMain.handle('preview:hls-start', async (_, messageId: number): Promise<{ hlsUrl: string } | { error: string }> => {
+  try {
+    const id = Number(messageId)
+    if (!Number.isInteger(id) || id <= 0) return { error: 'bad-message-id' }
+    return await ensureHlsSession(id, IPC_START_TIMEOUT_MS)
+  } catch (error) {
+    return { error: (error as Error).message || 'hls-start-failed' }
+  }
+})
+
+// REWORK#1 F2: preview ушёл с активного HLS на direct (fatal-рекавери
+// исчерпан / master без уровней) → сессия никем не используется → kill ffmpeg
+// + удалить каталог, иначе транскод доедает файл впустую и жрёт слот из 2.
+// ВАЖНО (F6 принят как minor): refcount-а нет — если этот же файл открыт во
+// втором окне, его сегменты начнут отдавать 404 (его hls.js сам уйдёт в
+// fallback на direct — graceful, без белого экрана).
+ipcMain.handle('preview:hls-drop', async (_, messageId: number) => {
+  try {
+    const id = Number(messageId)
+    if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'bad-message-id' }
+    cleanupHlsForIds([id])
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+// ==== T-20260925-010 S2: fallback-IPC после неудачного HLS-first ====
+// mov/mkv/avi стартовали через hlsPending (preview:hls-start); если тот
+// вернул {error} либо молчал дольше бюджета 20s (см. startSlowPlayback в
+// preview-скрипте) — зовём этот IPC: старый путь (полное скачивание +
+// convertVideoToMp4 через resolvePreviewSlowSrc) → готовый file:// src.
+// Сессия HLS к этому моменту снята preview-скриптом (hlsDrop), дублей качки
+// нет — downloadPreviewSourceOnce объединяет её с веткой hlsServer.
+ipcMain.handle('preview:convert-fallback', async (_, sessionId: string, messageId: number): Promise<{ src?: string; error?: string }> => {
+  try {
+    const s = previewSessions.get(sessionId)
+    if (!s) return { error: 'session-not-found' }
+    const id = Number(messageId)
+    const f = (Number.isInteger(id) && s.files.find((x: any) => Number(x?.messageId) === id)) || s.files[s.idx]
+    if (!f) return { error: 'file-not-found' }
+    const src = await resolvePreviewSlowSrc(s.dir, f, sessionId)
+    if (!src) return { error: 'convert-failed' }
+    return { src }
+  } catch (error) {
+    return { error: (error as Error).message || 'convert-failed' }
+  }
 })
 
 ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => {
@@ -2275,8 +2981,9 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
     // T-20260924-019 S3: синхронизировано с preview:load — общий resolvePreviewSrc
     // (video → stream, image → raw cache + ensurePreviewCache), без отдельного
     // heicSuffix-пути, из-за которого src оказывался пустым.
-    const src = await resolvePreviewSrc(s.dir, nextFile)
-    return { success: true, data: { files: s.files, idx: s.idx, src } }
+    // T-20260925-010 S2: mov/mkv/avi → hlsPending (src пустой, НЕ ошибка).
+    const r = await resolvePreviewSrc(s.dir, nextFile, sessionId)
+    return { success: true, data: { files: s.files, idx: s.idx, src: r.src, hlsPending: !!r.hlsPending } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -2463,6 +3170,18 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
 ipcMain.on('preview:close', (_, sessionId: string) => {
   const id = parseInt(sessionId, 10)
   if (!id) return
+  // T-20260925-003 S1: закрыли preview → kill ffmpeg-сессий HLS и удалить их
+  // каталоги в hls-cache (сессии файлов этого окна; до win.close(), пока
+  // previewSessions ещё жив)
+  const s = previewSessions.get(sessionId)
+  if (s) {
+    const ids = s.files
+      .map((f: any) => Number(f?.messageId))
+      .filter((n: number) => Number.isInteger(n) && n > 0)
+    if (ids.length) {
+      try { cleanupHlsForIds(ids) } catch (e) { log('warn', `[hls] cleanup on preview:close err=${(e as Error).message}`) }
+    }
+  }
   const win = previewWindows.get(id)
   if (win && !win.isDestroyed()) win.close()
 })

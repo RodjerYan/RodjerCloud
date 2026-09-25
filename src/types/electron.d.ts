@@ -87,9 +87,17 @@ declare global {
 
         open: (files: any[], idx: number) => Promise<{ success: boolean; error?: string }>
         getSession: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
-        navigate: (sessionId: string, dir: number) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
-        load: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number }; error?: string }>
+        // T-20260925-010 S2: hlsPending=true (mov/mkv/avi без готового mp4) →
+        // src пустой, НЕ ошибка: preview сразу идёт в HLS-first (hlsStart)
+        navigate: (sessionId: string, dir: number) => Promise<{ success: boolean; data?: { files: any[]; idx: number; src?: string; hlsPending?: boolean }; error?: string }>
+        load: (sessionId: string) => Promise<{ success: boolean; data?: { files: any[]; idx: number; src?: string; hlsPending?: boolean }; error?: string }>
         close: (sessionId: string) => void
+        // T-20260925-003 S1: HLS master URL либо ошибка (preview берёт прежний src)
+        hlsStart: (messageId: number) => Promise<{ hlsUrl: string } | { error: string }>
+        // T-20260925-010 S2: fallback старого пути (download+convert) → file:// src
+        convertFallback: (sessionId: string, messageId: number) => Promise<{ src?: string; error?: string }>
+        // T-20260925-005 S2: прогресс download/convert в preview-окне (cleanup-функция)
+        onProgress: (cb: (data: { phase: 'download' | 'convert'; sent?: number; total?: number }) => void) => () => void
       }
       storage: {
         getAskDownloadPath: () => Promise<{ success: boolean; data?: boolean; error?: string }>

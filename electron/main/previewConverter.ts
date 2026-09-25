@@ -24,7 +24,10 @@ const TRANSCODE_TIMEOUT_MS = 600 * 1000
 
 let ffmpegPathCache: string | false | null = null
 
-function resolveFfmpegPath(): string | false {
+// T-20260925-003 S1: resolveFfmpegPath/runFfmpeg экспортированы — их же
+// переиспользует hlsServer (путь до бинаря из app.asar.unpacked + spawn
+// массивом с таймаутами), без дублирования логики.
+export function resolveFfmpegPath(): string | false {
   if (ffmpegPathCache !== null) return ffmpegPathCache
   let result: string | false = false
   try {
@@ -45,9 +48,39 @@ function resolveFfmpegPath(): string | false {
   return result
 }
 
+// ==== T-20260925-010 S1/S2: единая качка исходника preview-файла ====
+// hlsServer (fallback-ветка resolveInput) и preview:convert-fallback могут
+// качать ОДИН И ТОТ ЖЕ файл одновременно (preview ушёл на старый путь, пока
+// сессия hls ещё качала) → карта in-flight, как у convertVideoToMp4. Иначе:
+// двойное скачивание + гонка «existsSync уже true, но файл недописан».
+const srcDownloads = new Map<string, Promise<string | null>>()
+export function downloadPreviewSourceOnce(
+  telegramService: any,
+  messageId: number,
+  targetPath: string,
+  onProgress?: (sent: number, total: number) => void
+): Promise<string | null> {
+  const key = targetPath.toLowerCase()
+  const existing = srcDownloads.get(key)
+  if (existing) return existing // второй ждёт ТОТ ЖЕ промис (onProgress возьмётся у первого)
+  const p = (async (): Promise<string | null> => {
+    try {
+      if (!fs.existsSync(targetPath)) {
+        ffmpegLog(`download src id=${messageId} → ${path.basename(targetPath)}`)
+        await telegramService.downloadMediaToPath(messageId, targetPath, onProgress)
+      }
+    } catch (e) {
+      ffmpegLog(`download fail id=${messageId}: ${(e as Error).message}`)
+    }
+    return fs.existsSync(targetPath) ? targetPath : null
+  })().finally(() => srcDownloads.delete(key))
+  srcDownloads.set(key, p)
+  return p
+}
+
 type FfmpegRun = { code: number | null; timedOut: boolean; stderrHead: string; stderrTail: string }
 
-function runFfmpeg(bin: string, args: string[], timeoutMs: number): Promise<FfmpegRun> {
+export function runFfmpeg(bin: string, args: string[], timeoutMs: number): Promise<FfmpegRun> {
   return new Promise<FfmpegRun>((resolve) => {
     let settled = false
     let timer: ReturnType<typeof setTimeout> | null = null

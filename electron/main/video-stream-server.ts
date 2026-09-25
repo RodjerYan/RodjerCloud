@@ -5,6 +5,7 @@ import { vaultService } from './vault-service'
 import bigInt from 'big-integer'
 import * as crypto from 'crypto'
 import { Api } from 'telegram'
+import { handleHlsRequest, initHlsServer } from './hlsServer'
 
 function slog(msg: string) {
   // rework: убран захардкоженный маковский путь — пишем в console (main log)
@@ -13,21 +14,136 @@ function slog(msg: string) {
 
 let server: http.Server | null = null
 
+// ===== T-20260925-003 S3: metadata-кеш =====
+// Раньше КАЖДЫЙ Range-запрос делал client.getMessages(...) — а браузер/ffmpeg
+// шлюет десятки Range на один файл, и RTT на каждый из них откладывал первый
+// байт (главный тормоз TTFB первого кадра). Кешируем готовый разбор (message +
+// parts со смещениями + totalSize) на 60s, инвалидация — только по TTL.
+// Параллельные запросы одного id дедуплицируются через metaInflight.
+export type StreamPart = { id: number; msg: any; size: number; start: number; end: number }
+export type StreamMeta = {
+  message: any
+  parts: StreamPart[]
+  totalSize: number
+  mimeType: string
+  fileName: string
+}
+
+const META_TTL_MS = 60 * 1000
+const metaCache = new Map<number, { meta: StreamMeta; ts: number }>()
+const metaInflight = new Map<number, Promise<StreamMeta | null>>()
+
+async function fetchStreamMeta(telegramService: TelegramService, messageId: number): Promise<StreamMeta | null> {
+  const client = telegramService.getClient()
+  const channelId = telegramService.getChannelId()
+  if (!client || !channelId) return null
+
+  const messages = await client.getMessages(channelId as any, { ids: [messageId] })
+  // rework minor#5: несуществующий id → gramjs вернёт [undefined], а не пустой
+  // массив → раньше здесь падал baseMessage.file и клиент получал 500 вместо 404
+  if (!messages || messages.length === 0 || !messages[0]) return null
+
+  const baseMessage: any = messages[0]
+  if (!baseMessage.file) return null
+
+  const caption = baseMessage.message || ''
+  const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+
+  const parts: StreamPart[] = []
+  if (multipartMatch) {
+    const partIds = multipartMatch[1].split(',').map(Number)
+    // Fetch all part messages одним Promise.all — результат живёт в кеше 60s
+    const partMessages = await Promise.all(partIds.map((id: number) => client.getMessages(channelId as any, { ids: [id] })))
+
+    // Base message is part 1
+    parts.push({ id: baseMessage.id, msg: baseMessage, size: Number(baseMessage.file.size), start: 0, end: 0 })
+
+    for (const partArr of partMessages) {
+      if (partArr && partArr.length > 0 && partArr[0].file) {
+        const m: any = partArr[0]
+        parts.push({ id: m.id, msg: m, size: Number(m.file.size), start: 0, end: 0 })
+      }
+    }
+  } else {
+    parts.push({ id: baseMessage.id, msg: baseMessage, size: Number(baseMessage.file.size), start: 0, end: 0 })
+  }
+
+  // Calculate total size and offsets
+  let totalSize = 0
+  for (const p of parts) {
+    p.start = totalSize
+    p.end = totalSize + p.size - 1
+    totalSize += p.size
+  }
+
+  return {
+    message: baseMessage,
+    parts,
+    totalSize,
+    mimeType: baseMessage.file.mimeType || 'video/mp4',
+    fileName: baseMessage.file.name || '',
+  }
+}
+
+export function getStreamMeta(telegramService: TelegramService, messageId: number): Promise<StreamMeta | null> {
+  const hit = metaCache.get(messageId)
+  if (hit && Date.now() - hit.ts < META_TTL_MS) return Promise.resolve(hit.meta)
+
+  const inflight = metaInflight.get(messageId)
+  if (inflight) return inflight
+
+  const p = fetchStreamMeta(telegramService, messageId)
+    .then((meta) => {
+      metaInflight.delete(messageId)
+      if (meta) metaCache.set(messageId, { meta, ts: Date.now() })
+      else metaCache.delete(messageId) // неудача не кешируется (client мог быть не ready)
+      return meta
+    })
+    .catch((err) => {
+      metaInflight.delete(messageId)
+      throw err
+    })
+  metaInflight.set(messageId, p)
+  return p
+}
+
 export function startVideoStreamServer(telegramService: TelegramService, port: number = 14300) {
   if (server) return
 
+  // T-20260925-003 S1: HLS-сессии живут на этом же порту/сервере — hlsServer
+  // получает контекст (telegram для скачивания mov/mkv/avi + общий getStreamMeta).
+  initHlsServer({
+    telegramService,
+    port,
+    getMeta: (messageId: number) => getStreamMeta(telegramService, messageId),
+  })
+
   server = http.createServer(async (req, res) => {
     try {
+      slog(`Req: ${req.url} Range: ${req.headers.range}`)
+
+      // T-20260925-003 S1: /hls/<token>/<id>/master.m3u8, .../stream_N.m3u8,
+      // .../seg_N_00000.ts — ответ отдаёт hlsServer (сам шлёт заголовки).
+      // REWORK#1 F7: роутинг /hls/ — ДО CORS: глобальный ACAO:* на /hls/ не
+      // ставится (см. hlsServer.hlsTokenOk — CORS добавляется только на
+      // ответах с валидным токеном, иначе любая локальная страница читала бы
+      // HLS и драйвила транскод)
+      if (req.url && req.url.startsWith('/hls/')) {
+        await handleHlsRequest(req, res)
+        return
+      }
+
+      // CORS — только для /stream/ (медиа-элементы его и не требуют, но
+      // dev-страницы/тесты могут)
       res.setHeader('Access-Control-Allow-Origin', '*')
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
       res.setHeader('Access-Control-Allow-Headers', 'Range')
-      
+
       if (req.method === 'OPTIONS') {
         res.writeHead(200)
         return res.end()
       }
 
-      slog(`Req: ${req.url} Range: ${req.headers.range}`)
       const urlMatch = req.url?.match(/^\/stream\/(\d+)$/)
       if (!urlMatch) {
         res.writeHead(404)
@@ -43,53 +159,22 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
         return res.end('Telegram client not ready')
       }
 
-      const messages = await client.getMessages(channelId as any, { ids: [messageId] })
-      // rework minor#5: несуществующий id → gramjs вернёт [undefined], а не пустой
-      // массив → раньше здесь падал baseMessage.file и клиент получал 500 вместо 404
-      if (!messages || messages.length === 0 || !messages[0]) {
+      // T-20260925-003 S3: getMessages+парсинг multipart живут в кеше 60s —
+      // серия Range-запросов от одного плеера идёт без сетевых RTT.
+      const meta = await getStreamMeta(telegramService, messageId)
+      if (!meta) {
+        // несуществующий id / нет файла / клиент отвалился между проверками
         res.writeHead(404)
         return res.end('Message not found')
       }
 
-      const baseMessage: any = messages[0]
-      if (!baseMessage.file) {
-        res.writeHead(404)
-        return res.end('No file attached')
-      }
-
+      const baseMessage: any = meta.message
+      const parts = meta.parts
       const caption = baseMessage.message || ''
       const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
-      const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
       const isEncrypted = !!vaultMatch
       const ivHex = vaultMatch ? vaultMatch[1] : ''
-
-      let parts: { id: number, msg: any, size: number, start: number, end: number }[] = []
-      
-      if (multipartMatch) {
-        const partIds = multipartMatch[1].split(',').map(Number)
-        // Fetch all part messages
-        const partMessages = await Promise.all(partIds.map((id: number) => client.getMessages(channelId as any, { ids: [id] })))
-        
-        // Base message is part 1
-        parts.push({ id: baseMessage.id, msg: baseMessage, size: Number(baseMessage.file.size), start: 0, end: 0 })
-        
-        for (const partArr of partMessages) {
-          if (partArr && partArr.length > 0 && partArr[0].file) {
-             const m: any = partArr[0]
-             parts.push({ id: m.id, msg: m, size: Number(m.file.size), start: 0, end: 0 })
-          }
-        }
-      } else {
-        parts.push({ id: baseMessage.id, msg: baseMessage, size: Number(baseMessage.file.size), start: 0, end: 0 })
-      }
-
-      // Calculate total size and offsets
-      let totalSize = 0
-      for (const p of parts) {
-        p.start = totalSize
-        p.end = totalSize + p.size - 1
-        totalSize += p.size
-      }
+      const totalSize = meta.totalSize
 
       if (totalSize === 0) {
         res.writeHead(400)

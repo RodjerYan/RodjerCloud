@@ -162,6 +162,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     navigate: (sessionId: string, dir: number) => ipcRenderer.invoke('preview:navigate', sessionId, dir),
     load: (sessionId: string) => ipcRenderer.invoke('preview:load', sessionId),
     close: (id: string) => ipcRenderer.send('preview:close', id),
+    // T-20260925-003 S1: старт HLS-сессии → { hlsUrl } | { error } (fallback на прямой src)
+    hlsStart: (messageId: number) => ipcRenderer.invoke('preview:hls-start', messageId),
+    // REWORK#1 F2: preview ушёл с HLS на direct (fatal после upgrade / нет
+    // уровней) → сессия больше не используется → kill ffmpeg + rm каталога
+    hlsDrop: (messageId: number) => ipcRenderer.invoke('preview:hls-drop', messageId),
+    // T-20260925-010 S2: HLS-first не стартовал ({error} от hlsStart / бюджет 20s
+    // в preview-скрипте) → старый путь: полное скачивание + convertVideoToMp4
+    convertFallback: (sessionId: string, messageId: number) => ipcRenderer.invoke('preview:convert-fallback', sessionId, messageId),
+    // T-20260925-005 S2: прогресс долгих операций preview (download/convert);
+    // возвращает cleanup (removeListener), как и остальные on* в preload
+    onProgress: (cb: (data: { phase: 'download' | 'convert'; sent?: number; total?: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('preview:progress', listener)
+      return () => ipcRenderer.removeListener('preview:progress', listener)
+    },
   },
   share: {
     generateLink: (messageId: number, channelId: string, originalFileName?: string) => ipcRenderer.invoke('share:generate-link', messageId, channelId, originalFileName),

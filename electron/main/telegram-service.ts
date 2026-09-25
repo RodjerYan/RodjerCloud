@@ -35,6 +35,17 @@ function appLog(level: string, msg: string) {
   try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [${level}] ${msg}\n`) } catch {}
 }
 
+// T-20260925-005 S2: BigInteger (big-integer) → number для progress-колбэков GramJS
+function dlToNum(v: any): number {
+  if (typeof v === 'number') return isFinite(v) ? v : 0
+  if (v && typeof v.toJSNumber === 'function') {
+    const n = v.toJSNumber()
+    return typeof n === 'number' && isFinite(n) ? n : 0
+  }
+  const n = Number(v)
+  return isFinite(n) ? n : 0
+}
+
 function computeFileHash(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
@@ -1931,7 +1942,11 @@ export class TelegramService {
     }
   }
 
-  private async performDownload(message: any, targetPath: string) {
+  private async performDownload(
+    message: any,
+    targetPath: string,
+    onProgress?: (sent: number, total: number) => void,
+  ) {
     const caption = message.message || ''
     const vaultMatch = caption.match(/#vault\s+([a-f0-9]+)/)
     const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
@@ -1940,16 +1955,52 @@ export class TelegramService {
     let finalTargetPath = targetPath
     if (isEncrypted) finalTargetPath = targetPath + '.enc'
 
+    // ==== T-20260925-005 S2: прогресс скачивания (preview ETA) ====
+    // GramJS downloadMedia → progressCallback(downloaded, total) (BigInteger) на
+    // КАЖДЫЙ chunk → троттлим ~250ms + force на 100%. total: #origsize из
+    // caption'а (полный размер main+части), fallback — total от GramJS (doc.size).
+    // onProgress не передан (hash/downloadFile/…) → progressCallback = undefined,
+    // поведение скачивания прежнее.
+    const origMatch = caption.match(/#origsize\s+(\d+)/)
+    const totalBytes = origMatch ? Number(origMatch[1]) : 0
+    let lastSendTs = 0
+    const emit = (sent: number, size: number) => {
+      if (!onProgress) return
+      const now = Date.now()
+      const done = size > 0 && sent >= size
+      if (!done && now - lastSendTs < 250) return
+      lastSendTs = now
+      try { onProgress(Math.max(0, sent), Math.max(0, size)) } catch {}
+    }
+    // base — уже скачанные байты (main + предыдущие части) для монотонного sent;
+    // глобальный размер неизвестен → отдаём прогресс текущей части (без base),
+    // иначе sent мгновенно «догонит» размер части и событие станет финальным.
+    const makeCb = (base: number) => {
+      if (!onProgress) return undefined
+      return (downloaded: any, cbTotal: any) => {
+        const part = dlToNum(downloaded)
+        const partTotal = dlToNum(cbTotal)
+        if (totalBytes > 0) emit(base + part, totalBytes)
+        else emit(part, partTotal)
+      }
+    }
+
     if (multipartMatch) {
       const partIds = multipartMatch[1].split(',').map(Number)
-      
-      await this.client!.downloadMedia(message, { outputFile: finalTargetPath } as any)
-      
+      // base — уже скачанные байты (main + предыдущие части), чтобы sent рос монотонно
+      let base = 0
+
+      await this.client!.downloadMedia(message, { outputFile: finalTargetPath, progressCallback: makeCb(0) } as any)
+      base += dlToNum((message.file as any)?.fileSize) || dlToNum((message.file as any)?.size)
+
       for (const id of partIds) {
         const partMessages = await this.client!.getMessages(this.channelId as any, { ids: [id] })
         if (partMessages && partMessages.length > 0) {
           const partPath = finalTargetPath + `.part_${id}`
-          await this.client!.downloadMedia(partMessages[0], { outputFile: partPath } as any)
+          const partFile: any = (partMessages[0] as any)?.file
+          const partSize = dlToNum(partFile?.fileSize) || dlToNum(partFile?.size)
+          await this.client!.downloadMedia(partMessages[0], { outputFile: partPath, progressCallback: makeCb(base) } as any)
+          base += partSize
           
           const readStream = fs.createReadStream(partPath)
           const writeStream = fs.createWriteStream(finalTargetPath, { flags: 'a' })
@@ -1963,7 +2014,7 @@ export class TelegramService {
         }
       }
     } else {
-      await this.client!.downloadMedia(message, { outputFile: finalTargetPath } as any)
+      await this.client!.downloadMedia(message, { outputFile: finalTargetPath, progressCallback: makeCb(0) } as any)
     }
 
     if (isEncrypted) {
@@ -1993,13 +2044,14 @@ export class TelegramService {
     return { filePath: downloadPath, fileName }
   }
 
-  async downloadMediaToPath(messageId: number, filePath: string) {
+  // T-20260925-005 S2: onProgress — опциональный колбэк {sent,total} для preview-ETA
+  async downloadMediaToPath(messageId: number, filePath: string, onProgress?: (sent: number, total: number) => void) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
     if (!messages || messages.length === 0) throw new Error('Message not found')
     const message: any = messages[0]
     if (!message.file) throw new Error('No file attached to message')
-    await this.performDownload(message, filePath)
+    await this.performDownload(message, filePath, onProgress)
   }
 
   async downloadMediaToTemp(messageId: number): Promise<string> {
