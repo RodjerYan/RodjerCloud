@@ -130,16 +130,277 @@
 @keyframes seHintPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 .se-app-license { margin-top: 16px; font-size: 12px; color: var(--text-mute, var(--text-dim)); opacity: 0.5; }
 
-/* Update Modal */
-.se-modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
-.se-modal-content { padding: 24px; min-width: 380px; max-width: 480px; border-radius: 24px; }
-.se-modal-title { margin: 0 0 8px; font-size: 18px; }
-.se-modal-version { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
-.se-modal-notes { font-size: 13px; line-height: 1.6; max-height: 220px; overflow-y: auto; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 20px; white-space: pre-wrap; color: var(--text); }
+/* Update Modal — redesign */
+.se-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 13, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: seModalFade 0.18s ease both;
+  padding: 24px;
+}
+@keyframes seModalFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.se-modal {
+  position: relative;
+  width: min(460px, 100%);
+  max-height: min(86vh, 720px);
+  overflow: auto;
+  padding: 28px 28px 22px;
+  background: linear-gradient(180deg, rgba(24, 27, 48, 0.97), rgba(17, 20, 37, 0.98));
+  border: 1px solid rgba(124, 131, 255, 0.22);
+  border-radius: 24px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  animation: seModalPop 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  outline: none;
+}
+@keyframes seModalPop {
+  from { opacity: 0; transform: scale(0.94) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.se-modal-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.se-modal-x:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.se-modal-x:disabled { opacity: 0.35; cursor: not-allowed; }
+.se-modal-x:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+}
+.se-modal-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+  padding-top: 8px;
+}
+.se-modal-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(145deg, #7c83ff, #6c5ce7 55%, #b14aff);
+  box-shadow:
+    0 8px 28px rgba(108, 92, 231, 0.4),
+    0 0 0 6px rgba(124, 131, 255, 0.1);
+  margin-bottom: 16px;
+}
+.se-modal-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.se-modal-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  max-width: 300px;
+}
+.se-modal-versions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 20px 0 18px;
+  flex-wrap: wrap;
+}
+.se-ver-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 96px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+.se-ver-chip.current {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.se-ver-chip.next {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.se-ver-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+  font-weight: 600;
+}
+.se-ver-chip.next .se-ver-label { color: var(--accent); }
+.se-ver-num {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.se-ver-arrow {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.se-modal-notes {
+  text-align: left;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.se-notes-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+  margin-bottom: 10px;
+}
+.se-notes-body {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  padding-right: 4px;
+}
+.se-notes-h {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 12px 0 6px;
+}
+.se-notes-body > .se-notes-h:first-child,
+.se-notes-body > .se-notes-p:first-child { margin-top: 0; }
+.se-notes-h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 10px 0 4px;
+}
+.se-notes-p { margin: 0 0 8px; }
+.se-notes-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+.se-notes-list li { margin-bottom: 4px; }
+.se-notes-body code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--text);
+}
+.se-notes-body strong { color: var(--text); font-weight: 600; }
 .se-modal-progress { margin-bottom: 16px; }
-.se-modal-progress-text { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; font-weight: 500; }
-.se-modal-progress-bar-wrap { height: 6px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; }
-.se-modal-progress-bar { height: 100%; background: linear-gradient(90deg, #7c83ff, #b14aff); border-radius: 99px; transition: width 0.3s ease; }
-.se-modal-actions { display: flex; gap: 10px; justify-content: flex-end; padding-top: 8px; }
-.se-modal-actions .v3-btn { min-width: 100px; justify-content: center; }
-.se-modal-actions .v3-btn.primary { padding: 12px 28px; font-size: 14px; }
+.se-modal-progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text);
+}
+.se-progress-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.se-modal-progress-bar-wrap {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.se-modal-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #7c83ff, #b14aff);
+  border-radius: 99px;
+  transition: width 0.25s ease;
+  box-shadow: 0 0 12px rgba(124, 131, 255, 0.45);
+}
+.se-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: stretch;
+  align-items: center;
+}
+.se-modal-actions .v3-btn {
+  min-height: 44px;
+  justify-content: center;
+  flex: 1;
+}
+.se-modal-actions .v3-btn.ghost {
+  flex: 0 0 auto;
+  min-width: 88px;
+  color: var(--text-dim);
+}
+.se-modal-cta {
+  padding-left: 18px;
+  padding-right: 18px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.se-modal-notes-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-mute);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.se-modal-notes-link:hover { color: var(--accent); }
+.se-modal-notes-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  border-radius: 4px;
+}
+@media (max-width: 480px) {
+  .se-modal { padding: 22px 18px 18px; }
+  .se-modal-actions { flex-direction: column-reverse; }
+  .se-modal-actions .v3-btn,
+  .se-modal-actions .v3-btn.ghost { width: 100%; flex: 1 1 auto; }
+  .se-ver-chip { min-width: 88px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .se-modal-overlay, .se-modal { animation: none; }
+}

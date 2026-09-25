@@ -103,7 +103,7 @@
 }
 
 .login-title {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
   font-size: var(--text-3xl);
   font-weight: 800;
   color: var(--text);

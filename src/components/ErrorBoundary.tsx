@@ -21,7 +21,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'#111',color:'#eee',fontFamily:'monospace',padding:40 }}>
+        <div style={{ position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'#111',color:'#eee',fontFamily:'var(--font-sans)',padding:40 }}>
           <div style={{ maxWidth:600 }}>
             <h2 style={{ color:'#f55',marginBottom:12 }}>Критическая ошибка</h2>
             <pre style={{ whiteSpace:'pre-wrap',fontSize:13,lineHeight:1.5,color:'#aaa' }}>{this.state.error?.message}</pre>

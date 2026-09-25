@@ -40,8 +40,11 @@ animation: dropIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
 }
 .mf-check { position: absolute; top: 10px; left: 10px; cursor: pointer; }
 .mf-hide-checks .mf-check { display: none; }
-.mf-hide-checks .mf-table th:first-child,
-.mf-hide-checks .mf-table td:first-child { display: none; }
+/* T-20260924-019 S1: скрываем только checkbox-first колонки; таблицы с
+   классом-исключением (mf-table-nohide, напр. таблица папки) прячут только то,
+   что есть — первый столбец «Имя» остаётся видимым. */
+.mf-hide-checks .mf-table:not(.mf-table-nohide) th:first-child,
+.mf-hide-checks .mf-table:not(.mf-table-nohide) td:first-child { display: none; }
 /* ── Folder Cards ── */
 .mf-folders-grid {
   display: grid !important;

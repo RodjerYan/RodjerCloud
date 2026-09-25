@@ -29,10 +29,9 @@ declare global {
         listTrash: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         permDeleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
-        clearTrash: (messageIds: number[]) => Promise<{ success: boolean; data?: { deleted: number; failed: number; total: number }; error?: string }>
+        clearTrash: (messageIds: number[]) => Promise<{ success: boolean; data?: { deleted: number; ghostsDeleted: number; failed: number; total: number }; error?: string }>
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
-        cleanupGhosts: () => Promise<{ success: boolean; deletedCount?: number; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>
         getUserInfo: () => Promise<{ success: boolean; data?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }; error?: string }>
         searchGlobal: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
@@ -65,6 +64,9 @@ declare global {
         onUpdateAvailable: (cb: (data: { version: string; assetId: number; assetName: string }) => void) => () => void
       }
       getPathForFile: (file: File) => string
+      dropTempOpen: (fileName: string, size: number) => Promise<{ success: boolean; data?: { tempId: string; filePath: string }; error?: string }>
+      dropTempWrite: (tempId: string, chunk: Uint8Array) => Promise<{ success: boolean; data?: { written: number }; error?: string }>
+      dropTempClose: (tempId: string) => Promise<{ success: boolean; data?: { filePath: string }; error?: string }>
       folders: {
         list: () => Promise<{ success: boolean; data?: { folders: any[]; fileFolders: Record<number, string> }; error?: string }>
         loadFromTelegram: () => Promise<{ success: boolean; data?: { folders: any[]; fileFolders: Record<number, string> }; error?: string }>

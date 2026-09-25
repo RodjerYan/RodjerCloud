@@ -47,7 +47,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
     restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),
     permDeleteFile: (messageId: number) => ipcRenderer.invoke('telegram:perm-delete-file', messageId),
-    cleanupGhosts: () => ipcRenderer.invoke('telegram:cleanup-ghosts'),
     clearTrash: (messageIds: number[]) => ipcRenderer.invoke('telegram:clear-trash', messageIds),
     cacheAudio: (messageId: number, fileName: string) => ipcRenderer.invoke('telegram:cache-audio', messageId, fileName),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
@@ -122,8 +121,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setTurboMode: (val: boolean) => ipcRenderer.invoke('storage:set-turbo-mode', val),
   },
   getPathForFile: (file: File): string => {
-    try { return webUtils.getPathForFile(file) } catch { return '' }
+    try { return webUtils.getPathForFile(file) } catch (err) { console.warn('[drop] getPathForFile threw', err); return '' }
   },
+  // Fallback для пустого getPathForFile (macOS Sequoia, electron/electron#44600):
+  // копируем содержимое File чанками во временный файл в main и грузим по temp-path.
+  dropTempOpen: (fileName: string, size: number) =>
+    ipcRenderer.invoke('file:drop-temp-open', fileName, size),
+  dropTempWrite: (tempId: string, chunk: Uint8Array) =>
+    ipcRenderer.invoke('file:drop-temp-write', tempId, chunk),
+  dropTempClose: (tempId: string) =>
+    ipcRenderer.invoke('file:drop-temp-close', tempId),
   folders: {
     list: () => ipcRenderer.invoke('folders:list'),
     loadFromTelegram: () => ipcRenderer.invoke('folders:load-from-telegram'),

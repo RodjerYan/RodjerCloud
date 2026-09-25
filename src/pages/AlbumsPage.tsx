@@ -7,8 +7,9 @@ import { fmtSize } from '../lib/utils'
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS, type SmartAlbum } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
-import { appConfirm, appAlert } from "../lib/dialogs"
+import { appConfirm } from "../lib/dialogs"
 import { toast } from '../lib/toast'
+import { downloadFileWithFeedback } from '../lib/download'
 import { safeViewTransition } from '../lib/viewTransition'
 import { BulkProgressModal } from '../components/BulkProgressModal'
 import '../styles/duplicate-modal.css'
@@ -444,10 +445,8 @@ export default function AlbumsPage() {
     safeViewTransition(applyRemove)
   }
 
-  const handleDownload = async (f: any) => {
-    const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    if (!r.success) await appAlert(r.error || 'Ошибка')
-  }
+  // T-20260925-002 S1: общий feedback-скачивание (эталон MyFiles)
+  const handleDownload = (f: any, e?: React.MouseEvent) => downloadFileWithFeedback(f, e)
 
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
     let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-gm-card') : null;
@@ -500,9 +499,21 @@ export default function AlbumsPage() {
     }
   }
 
-  const handlePreview = (f: any) => {
-    const idx = albumFiles.indexOf(f)
-    window.electronAPI.preview.open(albumFiles, idx)
+  const handlePreview = async (f: any) => {
+    // T-20260924-019 S3: тот же preview:open IPC; защита от idx=-1 (иначе main
+    // вернёт {success:false} молча) — fallback по messageId + явная ошибка.
+    let idx = albumFiles.indexOf(f)
+    if (idx === -1) idx = albumFiles.findIndex((x: any) => x?.messageId === f.messageId)
+    if (idx === -1) {
+      toast.error('Не удалось открыть предпросмотр: файл не найден в списке')
+      return
+    }
+    try {
+      const r = await window.electronAPI.preview.open(albumFiles, idx)
+      if (!r?.success) toast.error(r?.error || 'Не удалось открыть предпросмотр')
+    } catch (e: any) {
+      toast.error('Не удалось открыть предпросмотр: ' + (e?.message || ''))
+    }
   }
 
   const handleCopyLink = async (f: any) => {
@@ -523,7 +534,7 @@ export default function AlbumsPage() {
         <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
         <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
         <div className="mf-gm-actions">
-          <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+          <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={13} /></button>
           <button title="Просмотр" onClick={() => handlePreview(f)}><Eye size={13} /></button>
           {isSmart ? <button title="Удалить из Telegram" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button> : <button title="Удалить из альбома" className="danger" onClick={(e) => removeFile(f.messageId, e)}><X size={13} /></button>}
         </div>
@@ -787,7 +798,7 @@ export default function AlbumsPage() {
                                   <span className="dup-msg"> · #{f.messageId}</span>
                                 </div>
                                 <div className="mf-gm-actions" onClick={e => e.stopPropagation()}>
-                                  <button title="Скачать" type="button" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                                  <button title="Скачать" type="button" onClick={(e) => handleDownload(f, e)}><Download size={13} /></button>
                                   <button title="Просмотр" type="button" onClick={() => handlePreview(f)}><Eye size={13} /></button>
                                   <button title="Удалить в корзину" className="danger" type="button" onClick={(e) => handleDelete(f, e)}><Trash2 size={13} /></button>
                                 </div>

@@ -1,0 +1,5 @@
+/* Inter — offline bundle из npm @fontsource-variable/inter (без CDN).
+   standard.css: variable wght 100–900 + opsz 14–32 (opsz даёт display-начертание
+   для заголовков через font-optical-sizing). woff2 попадают в бандл через
+   Vite asset pipeline из node_modules. */
+@import '@fontsource-variable/inter/standard.css';

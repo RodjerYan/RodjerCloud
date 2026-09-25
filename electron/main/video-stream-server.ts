@@ -3,12 +3,12 @@ import { app } from 'electron'
 import { TelegramService } from './telegram-service'
 import { vaultService } from './vault-service'
 import bigInt from 'big-integer'
-import * as fs from 'fs'
 import * as crypto from 'crypto'
 import { Api } from 'telegram'
 
 function slog(msg: string) {
-  try { fs.appendFileSync('/Users/alexander/Desktop/RodjerCloud/stream.log', `[${new Date().toISOString()}] ${msg}\n`) } catch(e) {}
+  // rework: убран захардкоженный маковский путь — пишем в console (main log)
+  console.log(`[stream] ${msg}`)
 }
 
 let server: http.Server | null = null
@@ -44,7 +44,9 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
       }
 
       const messages = await client.getMessages(channelId as any, { ids: [messageId] })
-      if (!messages || messages.length === 0) {
+      // rework minor#5: несуществующий id → gramjs вернёт [undefined], а не пустой
+      // массив → раньше здесь падал baseMessage.file и клиент получал 500 вместо 404
+      if (!messages || messages.length === 0 || !messages[0]) {
         res.writeHead(404)
         return res.end('Message not found')
       }
@@ -118,6 +120,10 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
         'Content-Length': chunkSize,
         'Content-Type': baseMessage.file.mimeType || 'video/mp4'
       })
+      // T-20260925-002 S3: writeHead буферизует заголовки в Node — пока нет ни
+      // одного res.write(), 206-ответ клиенту не уходит и Chromium висит на
+      // спиннере. flushHeaders() немедленно отправляет их (и для 200, и для 206).
+      res.flushHeaders()
 
       if (req.method === 'HEAD') {
         return res.end()
@@ -140,7 +146,12 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
 
         // Offset relative to the current part
         let partOffset = currentReqStart - p.start
-        let streamOffset = Math.floor(partOffset / 16) * 16 // align to AES block for decryption if needed
+        // rework minor#3: выравниваем вниз до 4096 (кратно и AES-block 16, и
+        // preDownload-выравниванию gramjs). DirectDownloadIter (offset <
+        // ceil(size/512K)) отдаёт offset в upload.getFile без выравнивания по
+        // 4096 → ранний не выровненный Range мог падать на GetFile, а заголовки
+        // к тому моменту уже ушли через flushHeaders. Разница уходит в skipBytes.
+        let streamOffset = Math.floor(partOffset / 4096) * 4096
         let skipBytes = partOffset - streamOffset
 
         let decipher: crypto.Decipher | null = null
@@ -195,10 +206,16 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
           }
         }
 
+        // T-20260925-002 S3: раньше requestSize = chunkSize (весь запрошенный
+        // диапазон, часто весь файл) → GramJS GenericDownloadIter буферизовал
+        // весь диапазон в RAM до первого байта. Фиксируем 512KB (= MAX_CHUNK_SIZE):
+        // chunkSize становится равен requestSize после clamp → DirectDownloadIter,
+        // итеративная отдача порциями по 512KB. Лимит по байтам контролирует
+        // bytesSent/chunkSize в цикле ниже (multipart/vault ветка не тронута).
         const iter = client.iterDownload({
           file: p.msg.media,
           offset: bigInt(streamOffset),
-          requestSize: chunkSize,
+          requestSize: 512 * 1024,
         })
 
         for await (let chunk of iter) {
@@ -237,6 +254,11 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
       if (!res.headersSent) {
         res.writeHead(500)
         res.end(err.message || 'Internal Server Error')
+      } else {
+        // rework minor#4: заголовки (206 + flushHeaders) уже ушли — клиент ждёт
+        // Content-Length байт, которых не будет. Обрыв соединения вместо
+        // таймаута.
+        try { res.destroy() } catch {}
       }
     }
   })

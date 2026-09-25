@@ -28,6 +28,9 @@ function shareLog(...args: unknown[]) {
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
 const APP_LOG_PATH = path.join(app.getPath('userData'), 'rodjercloud.log')
+function thumbLog(msg: string) {
+  try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [info] [thumb] ${msg}\n`) } catch {}
+}
 function appLog(level: string, msg: string) {
   try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [${level}] ${msg}\n`) } catch {}
 }
@@ -110,7 +113,10 @@ export class TelegramService {
         
         if (fs.existsSync(tmpPath) && (await fs.promises.stat(tmpPath)).size > 0) {
           let outputBuffer: Buffer = await fs.promises.readFile(tmpPath)
-          
+          const isHeicBuf = outputBuffer.length > 12 &&
+            outputBuffer.toString('ascii', 4, 8) === 'ftyp' &&
+            ['heic', 'heix', 'hevc', 'mif1'].includes(outputBuffer.toString('ascii', 8, 12))
+
           if (process.platform === 'darwin') {
             const sipsTmp = tmpPath + '.jpg'
             try {
@@ -118,9 +124,10 @@ export class TelegramService {
               outputBuffer = await fs.promises.readFile(sipsTmp)
               try { fs.unlinkSync(sipsTmp) } catch {}
             } catch (e: any) {
+              thumbLog(`heavy sips fail id=${task.messageId}: ${e?.message}`)
               console.error('sips convert error:', e)
             }
-          } else {
+          } else if (isHeicBuf) {
             const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
             const { Worker } = require('worker_threads')
             const outBuf = await new Promise<Buffer>((resolve, reject) => {
@@ -148,19 +155,31 @@ export class TelegramService {
             })
             const img = nativeImage.createFromBuffer(outBuf as Buffer)
             outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+          } else {
+            // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
+            const img = nativeImage.createFromBuffer(outputBuffer)
+            if (!img.isEmpty()) {
+              outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+            } else {
+              thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+            }
           }
-          
+
           await fs.promises.writeFile(task.cachePath, outputBuffer)
           try { fs.unlinkSync(tmpPath) } catch {}
-          
+          thumbLog(`heavy done id=${task.messageId} bytes=${outputBuffer.length}`)
+
           const { BrowserWindow } = require('electron')
           BrowserWindow.getAllWindows().forEach((w: any) => {
             if (!w.isDestroyed()) {
               try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
             }
           })
+        } else {
+          thumbLog(`heavy empty-download id=${task.messageId}`)
         }
       } catch (e) {
+        thumbLog(`heavy error id=${task.messageId}: ${(e as Error)?.message}`)
         console.error('Heavy thumb queue error:', e)
       }
     }
@@ -457,16 +476,28 @@ export class TelegramService {
   }
 
   uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
-    const task = this.uploadChain.then(() => this.uploadFileInternal(filePath, onProgress, encrypt, customFileName, checkCancelled))
-    this.uploadChain = task.then(() => undefined, () => undefined)
+    const base = path.basename(filePath)
+    const wasBusy = this._chainDepth > 0
+    this._chainDepth++
+    appLog('info', `[upload] enqueue ${base} chainBusy=${wasBusy} depth=${this._chainDepth}`)
+    const task = this.uploadChain.then(() => {
+      appLog('info', `[upload] chain acquired ${base} depth=${this._chainDepth}`)
+      return this.uploadFileInternal(filePath, onProgress, encrypt, customFileName, checkCancelled)
+    })
+    const done = () => { this._chainDepth = Math.max(0, this._chainDepth - 1) }
+    this.uploadChain = task.then(done, done)
     return task
   }
+  private _chainDepth = 0
 
   private async uploadFileInternal(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
     if (checkCancelled?.()) throw new Error('Upload cancelled by user')
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
+    // S2: stage-логи в rodjercloud.log — где зависла загрузка до sendFile
+    appLog('info', `[upload] stage:internal-enter ${path.basename(filePath)}`)
     const memBefore = process.memoryUsage()
+    appLog('info', `[upload] stage:stat ${path.basename(filePath)}`)
     const sizeMB = (fs.statSync(filePath).size / 1024 / 1024).toFixed(1)
     console.log(`[upload] mem before ${path.basename(filePath)} (${sizeMB}MB): heap=${(memBefore.heapUsed / 1024 / 1024).toFixed(0)}MB rss=${(memBefore.rss / 1024 / 1024).toFixed(0)}MB`)
 
@@ -495,6 +526,7 @@ export class TelegramService {
     const fileName = customFileName || path.basename(filePath)
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
+    appLog('info', `[upload] stage:ready ${fileName} size=${sizeBytes} isTemp=${isTemp}`)
     // Telegram hard limit ~2GB per document message. GramJS already splits the
     // upload into 512KB protocol parts that the server reassembles into ONE file.
     // App-level multipart (separate messages) only kicks in above this limit.
@@ -523,6 +555,7 @@ export class TelegramService {
 
     let thumbBuffer: Buffer | undefined = undefined
     if (!isTemp && sizeBytes <= 50 * 1024 * 1024) {
+      appLog('info', `[upload] stage:thumb-acquire ${fileName}`)
       await thumbAcquire()
       try {
         const ext = path.extname(filePath).toLowerCase()
@@ -611,18 +644,24 @@ export class TelegramService {
         }
       } finally {
         thumbRelease()
+        appLog('info', `[upload] stage:thumb-release ${fileName} hasThumb=${!!thumbBuffer}`)
       }
     }
 
     const totalParts = Math.max(1, Math.ceil(sizeBytes / CHUNK_SIZE))
     const isMultipart = totalParts > 1
-    
+
     let mainMessageId: number | null = null
     const multipartIds: number[] = []
     let totalSent = 0
     let fileHash = ''
-    try { fileHash = await computeFileHash(filePath) } catch {}
+    appLog('info', `[upload] stage:hash-start ${fileName}`)
+    try { fileHash = await computeFileHash(filePath) } catch (e: any) {
+      appLog('warn', `[upload] stage:hash-fail ${fileName}: ${e?.message || e}`)
+    }
     console.log(`[upload] hash computed for ${fileName}, entering upload loop`)
+    // S3: stage-progress — до sendFile в UI уже есть «0/размер», не только sendProgress(0,1)
+    onProgress?.(0, sizeBytes)
 
     let mainCaptionStr = ''
 
@@ -677,6 +716,7 @@ export class TelegramService {
         const SEND_TIMEOUT = Math.max(30 * 60 * 1000, Math.ceil(partSizeGB * 20) * 60 * 1000)
         console.log(`[upload] part ${i + 1}/${totalParts}: ${this.formatFileSize(partSizeBytes)}, timeout=${Math.round(SEND_TIMEOUT / 60000)}min, workers=${workersCount}`)
         console.log(`[upload] calling sendFile: ${fileName} part ${i + 1}/${totalParts}, ${this.formatFileSize(partSizeBytes)}, workers=${workersCount}`)
+        appLog('info', `[upload] stage:sendFile-begin ${fileName} part=${i + 1}/${totalParts} bytes=${partSizeBytes}`)
         const progressCallback: any = (progress: any) => {
           try {
             const val = typeof progress === 'number' ? progress : Number(progress?.toString?.() ?? 0)
@@ -715,6 +755,7 @@ export class TelegramService {
         } finally {
           if (sendTimer) clearTimeout(sendTimer)
         }
+        appLog('info', `[upload] stage:sendFile-done ${fileName} part=${i + 1}/${totalParts}`)
 
         if (isMultipart) {
           try { fs.unlinkSync(partPath) } catch {}
@@ -1029,7 +1070,8 @@ export class TelegramService {
     }
   }
 
-  private async fetchMessagesByIds(ids: number[]): Promise<any[]> {
+  /** @param failedIdChunks — опционально: сюда складываются id-чанки, запрос которых не удался (caller может отличить «нет сообщения» от «сеть упала»). */
+  private async fetchMessagesByIds(ids: number[], failedIdChunks?: number[][]): Promise<any[]> {
     const out: any[] = []
     const CHUNK = 100
     for (let i = 0; i < ids.length; i += CHUNK) {
@@ -1047,6 +1089,7 @@ export class TelegramService {
         }
       } catch (e: any) {
         console.warn('[listTrash] ids chunk', i / CHUNK + 1, 'failed:', e.message)
+        if (failedIdChunks) failedIdChunks.push(chunk)
       }
     }
     return out
@@ -1702,7 +1745,11 @@ export class TelegramService {
     return { deleted: total - failedIds.length, failed: failedIds.length, failedIds }
   }
 
-  async clearTrash(extraIds: number[] = [], onProgress?: (done: number, total: number) => void): Promise<{ deleted: number; failed: number; total: number }> {
+  async clearTrash(
+    extraIds: number[] = [],
+    onProgress?: (done: number, total: number) => void,
+    onOrphansProgress?: (done: number, total: number) => void
+  ): Promise<{ deleted: number; ghostsDeleted: number; failed: number; total: number }> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     if (this.fileCache.length === 0) {
       const disk = this.loadFileCache()
@@ -1717,86 +1764,170 @@ export class TelegramService {
     }
     const ids = Array.from(idSet)
     appLog('info', `[clearTrash] begin files=${extraIds.length} local=${this.localTrashedIds.size} set=${ids.length}`)
+
+    // Phase 1: purge trash ids (permanentDeleteBatch → deleteIdsHard, FLOOD_WAIT-safe)
+    let deleted = 0
+    let failed = 0
+    const total = ids.length
     if (ids.length === 0) {
       onProgress?.(0, 0)
-      return { deleted: 0, failed: 0, total: 0 }
+    } else {
+      const result = await this.permanentDeleteBatch(ids, onProgress)
+      deleted = result.deleted
+      failed = result.failed
     }
-    const result = await this.permanentDeleteBatch(ids, onProgress)
-    return { deleted: result.deleted, failed: result.failed, total: ids.length }
+
+    // Phase 2: orphan #chunk_of cleanup (bounded scan — MAX_BATCHES/withTimeout as listTrash)
+    let ghostsDeleted = 0
+    try {
+      ghostsDeleted = await this.cleanupOrphanChunks(onOrphansProgress)
+    } catch (e: any) {
+      appLog('warn', `[clearTrash] orphan cleanup failed: ${e?.message || e}`)
+    }
+
+    appLog('info', `[clearTrash] done deleted=${deleted} ghostsDeleted=${ghostsDeleted} failed=${failed} total=${total}`)
+    return { deleted, ghostsDeleted, failed, total }
   }
 
-  async cleanupGhosts() {
-    if (!this.client || !this.channelId) return { success: false, error: 'Not initialized' }
+  /**
+   * Bounded scan for orphan #chunk_of parts (aborted multipart uploads).
+   * Scan limits mirror listTrash: MAX_BATCHES batches of 200 with withTimeout(8s) — never while(true).
+   * Deletion goes through deleteIdsHard (FLOOD_WAIT retry).
+   *
+   * Data-loss guards (rework T-016):
+   *  1) `#multipart` claim на main-сообщении появляется ТОЛЬКО после загрузки всех частей (см. uploadFileInternal),
+   *     поэтому при активной цепочке загрузки (_chainDepth > 0) orphan-scan не выполняется вовсе;
+   *  2) окно скана (8×200) может оборваться между main и его чанками (main СТАРШЕ чанков) —
+   *     поэтому каждый unclaimed кандидат дополнительно проверяется через parent `#chunk_of <mainId>`
+   *     (fetchMessagesByIds): parent без #multipart (in-flight) → keep; claim у parent'а с id чанка → keep;
+   *     parent удалён / id не в claim-списке → orphan.
+   */
+  private async cleanupOrphanChunks(onProgress?: (done: number, total: number) => void): Promise<number> {
+    if (!this.client || !this.channelId) return 0
+    const BATCH = 200
+    const MAX_BATCHES = 8
+    // Guard 1: идёт multipart-загрузка — свежие чанки ещё лежат без claim, скан счёл бы их orphan
+    if (this._chainDepth > 0) {
+      appLog('info', `[clearTrash] orphan scan skipped: upload chain busy (depth=${this._chainDepth})`)
+      onProgress?.(0, 0)
+      return 0
+    }
+    const messages: any[] = []
+    let offsetId = 0
+    let batchCount = 0
+    onProgress?.(0, MAX_BATCHES)
+    while (batchCount < MAX_BATCHES) {
+      batchCount++
+      let batch: any[]
+      try {
+        batch = await withTimeout(
+          this.client.getMessages(this.channelId as any, {
+            limit: BATCH,
+            ...(offsetId ? { offsetId } : {}),
+          }),
+          8000,
+          'cleanupOrphanChunks batch ' + batchCount
+        )
+      } catch (e: any) {
+        appLog('warn', `[clearTrash] orphan scan batch ${batchCount} failed: ${e?.message || e}`)
+        break
+      }
+      if (!batch || batch.length === 0) break
+      messages.push(...batch)
+      onProgress?.(batchCount, MAX_BATCHES)
+      if (batch.length < BATCH) break
+      offsetId = this.msgId(batch[batch.length - 1])
+    }
+    if (messages.length === 0) return 0
+
+    const claimedChunkIds = new Set<number>()
+    const chunkCandidates: { chunkId: number; parentId: number | null }[] = []
+    for (const m of messages) {
+      if (!m || m.message === TelegramService.STATE_CAPTION) continue
+      const caption: string = m.message || ''
+      const msgId = this.msgId(m)
+      if (caption.includes('#chunk_of')) {
+        const chunkMatch = caption.match(/#chunk_of\s+(\d+)/)
+        chunkCandidates.push({ chunkId: msgId, parentId: chunkMatch ? Number(chunkMatch[1]) : null })
+        continue
+      }
+      const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
+      if (multipartMatch) {
+        multipartMatch[1].split(',').map(Number).forEach(id => claimedChunkIds.add(id))
+      }
+    }
+
+    // Кандидаты в orphan = не claim'нуты внутри окна скана → каждый проходит parent-check
+    const unclaimed = chunkCandidates.filter(c => c.chunkId > 0 && !claimedChunkIds.has(c.chunkId))
+    const keptClaimed = chunkCandidates.length - unclaimed.length
+    // parent id не распарсился → не можем проверить → keep (data-loss safe)
+    let keptUnknown = unclaimed.filter(c => c.parentId === null).length
+    const withParent = unclaimed.filter(c => c.parentId !== null)
+
+    // Parent-check: batch fetch всех уникальных parent'ов одним вызовом (fetchMessagesByIds чанкует по 100)
+    const parentsById = new Map<number, any>()
+    const failedParentIds = new Set<number>()
+    const uniqueParentIds = Array.from(new Set(withParent.map(c => c.parentId as number)))
+    if (uniqueParentIds.length > 0) {
+      try {
+        const failedIdChunks: number[][] = []
+        const fetched = await this.fetchMessagesByIds(uniqueParentIds, failedIdChunks)
+        for (const m of fetched) parentsById.set(this.msgId(m), m)
+        for (const failedChunk of failedIdChunks) for (const id of failedChunk) failedParentIds.add(id)
+      } catch (e: any) {
+        // не смогли проверить parent'ов → ничего не удаляем (data-loss safe)
+        appLog('warn', `[clearTrash] orphan parent fetch failed: ${e?.message || e}; skip deletion`)
+        return 0
+      }
+    }
+
+    const orphanIds: number[] = []
+    let keptInFlight = 0
+    for (const c of withParent) {
+      const parentId = c.parentId as number
+      if (failedParentIds.has(parentId)) {
+        keptUnknown++ // parent-fetch для этого id упал → «не существует» не доказано → keep
+        continue
+      }
+      const parent = parentsById.get(parentId)
+      if (!parent) {
+        orphanIds.push(c.chunkId) // parent удалён → orphan
+        continue
+      }
+      const parentCaption: string = parent.message || ''
+      const parentClaim = parentCaption.match(/#multipart\s+([\d,]+)/)
+      if (!parentClaim) {
+        keptInFlight++ // main ещё не финализирован (in-flight) → keep
+        continue
+      }
+      if (parentClaim[1].split(',').map(Number).includes(c.chunkId)) {
+        continue // claim у parent'а найден вне окна скана (boundary) → keep
+      }
+      orphanIds.push(c.chunkId) // claim существует, но id чанка в нём нет → orphan
+    }
+
+    // Guard 2: загрузка могла стартовать во время скана/parent-fetch
+    if (this._chainDepth > 0) {
+      appLog('info', `[clearTrash] orphan deletion skipped: upload chain became busy (depth=${this._chainDepth})`)
+      return 0
+    }
+    if (orphanIds.length === 0) {
+      appLog('info', `[clearTrash] orphan scan: none (scanned ${messages.length} msgs / ${batchCount} batches; kept claimed=${keptClaimed} inFlight=${keptInFlight} unknown=${keptUnknown})`)
+      return 0
+    }
+    appLog('info', `[clearTrash] orphan #chunk_of: ${orphanIds.length} of ${chunkCandidates.length} (scanned ${messages.length} msgs / ${batchCount} batches; kept claimed=${keptClaimed} inFlight=${keptInFlight} unknown=${keptUnknown})`)
+    await this.deleteIdsHard(orphanIds)
+    this.removeIdsFromFileCache(orphanIds)
+    return orphanIds.length
+  }
+
+  /** Thin wrapper для совместимости. UI больше не зовёт его напрямую — используй clearTrash. */
+  async cleanupGhosts(): Promise<{ success: boolean; deletedCount?: number; error?: string }> {
     try {
-      const messages: any[] = []
-      let offsetId = 0
-      const BATCH = 200
-      while (true) {
-        const batch = await this.client.getMessages(this.channelId as any, {
-          limit: BATCH,
-          ...(offsetId ? { offsetId } : {}),
-        })
-        if (batch.length === 0) break
-        messages.push(...batch)
-        if (batch.length < BATCH) break
-        offsetId = this.msgId(batch[batch.length - 1])
-      }
-
-      const claimedChunkIds = new Set<number>()
-      const trashIds = new Set<number>()
-      const knownIds = new Set<number>()
-
-      for (const m of messages) {
-        if (!m.file || m.message === TelegramService.STATE_CAPTION) continue
-        const msgId = this.msgId(m)
-        const caption: string = m.message || ''
-        
-        if (caption.includes('#chunk_of')) continue
-        
-        knownIds.add(msgId)
-        
-        const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
-        if (multipartMatch) {
-          multipartMatch[1].split(',').map(Number).forEach(id => claimedChunkIds.add(id))
-        }
-
-        const escapedMarker = this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        if (caption.match(new RegExp(`${escapedMarker}(\\d+)`)) || this.localTrashedIds.has(msgId)) {
-          trashIds.add(msgId)
-        }
-      }
-
-      const idsToDelete = new Set<number>()
-
-      for (const m of messages) {
-        if (m.message === TelegramService.STATE_CAPTION) continue
-        const msgId = this.msgId(m)
-        const caption: string = m.message || ''
-
-        if (caption.includes('#chunk_of')) {
-          if (!claimedChunkIds.has(msgId)) idsToDelete.add(msgId)
-        } else if (trashIds.has(msgId)) {
-          idsToDelete.add(msgId)
-          const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
-          if (multipartMatch) {
-            multipartMatch[1].split(',').map(Number).forEach(id => idsToDelete.add(id))
-          }
-        }
-      }
-
-      if (idsToDelete.size > 0) {
-        const arr = Array.from(idsToDelete)
-        for (let i = 0; i < arr.length; i += 100) {
-          await this.client.deleteMessages(this.channelId as any, arr.slice(i, i + 100), { revoke: true })
-        }
-      }
-      
-      this.localTrashedIds.clear()
-      this.saveTrashState()
-
-      return { success: true, deletedCount: idsToDelete.size }
+      const stats = await this.clearTrash([])
+      return { success: true, deletedCount: stats.deleted + stats.ghostsDeleted }
     } catch (e: any) {
-      return { success: false, error: e.message }
+      return { success: false, error: e?.message || String(e) }
     }
   }
 
@@ -1922,18 +2053,20 @@ export class TelegramService {
 
   async downloadThumbnail(messageId: number, fileName?: string): Promise<string | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    thumbLog(`downloadThumbnail enter id=${messageId} file=${fileName || ''}`)
     const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
-    if (!messages || messages.length === 0) return null
+    if (!messages || messages.length === 0) { thumbLog(`no message id=${messageId}`); return null }
     const message: any = messages[0]
-    if (!message.file) return null
+    if (!message.file) { thumbLog(`no file id=${messageId}`); return null }
 
     const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const cachePath = path.join(cacheDir, `${messageId}.jpg`)
-    if (fs.existsSync(cachePath)) return cachePath
+    if (fs.existsSync(cachePath)) { thumbLog(`cache-hit id=${messageId} size=${fs.statSync(cachePath).size}`); return cachePath }
 
     const media = message.document || message.photo
     const hasThumbs = media && media.thumbs && media.thumbs.length > 0
+    thumbLog(`id=${messageId} hasThumbs=${!!hasThumbs} thumbsLen=${media?.thumbs?.length ?? 0}`)
 
     if (hasThumbs) {
       // Try to get a medium/large thumbnail to avoid blurriness
@@ -1941,16 +2074,31 @@ export class TelegramService {
       for (const t of sizesToTry) {
         try {
           await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
-          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) return cachePath
-        } catch {}
+          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+            thumbLog(`download ok id=${messageId} thumb=${String(t)} bytes=${fs.statSync(cachePath).size}`)
+            return cachePath
+          }
+          thumbLog(`download empty id=${messageId} thumb=${String(t)}`)
+        } catch (e: any) {
+          thumbLog(`download fail id=${messageId} thumb=${String(t)} err=${e?.message}`)
+        }
       }
+      thumbLog(`all thumb attempts failed id=${messageId}`)
     } else {
       const ext = fileName ? path.extname(fileName).toLowerCase() : ''
-      if (ext === '.heic' || ext === '.heif') {
+      const fileSize = this.toNum(message.file?.size)
+      const isHeic = ext === '.heic' || ext === '.heif'
+      const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)
+      const MAX_THUMB_SRC = 20 * 1024 * 1024
+      thumbLog(`no-thumbs id=${messageId} ext=${ext} size=${fileSize}`)
+      if ((isHeic || isImage) && fileSize <= MAX_THUMB_SRC) {
         if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
           this.heavyThumbQueue.push({ messageId, message, cachePath })
+          thumbLog(`queued heavy id=${messageId} kind=${isHeic ? 'heic' : 'image'}`)
           this.processHeavyThumbQueue()
         }
+      } else {
+        thumbLog(`skip id=${messageId} reason=${!isHeic && !isImage ? 'not-image' : 'too-big'}`)
       }
     }
 

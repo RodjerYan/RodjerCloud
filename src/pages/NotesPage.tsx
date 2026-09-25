@@ -33,7 +33,7 @@ export default function NotesPage() {
           </div>
         </div>
         <div className="v3-card" style={{ display: "flex", flexDirection: "column" }}>
-          <textarea className="v3-input" rows={18} placeholder="# Пишите Markdown здесь..." value={draft} onChange={e => setDraft(e.target.value)} data-testid="note-editor" style={{ fontFamily: "var(--v3-mono)", resize: "vertical" }}/>
+          <textarea className="v3-input" rows={18} placeholder="# Пишите Markdown здесь..." value={draft} onChange={e => setDraft(e.target.value)} data-testid="note-editor" style={{ fontFamily: "var(--font-mono)", resize: "vertical" }}/>
           <div className="v3-row" style={{ marginTop: 12 }}>
             <button className="v3-btn primary" onClick={save} data-testid="note-save"><Save size={14}/> Сохранить</button>
             <div className="v3-sub">{draft.length} симв.</div>

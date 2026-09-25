@@ -5,6 +5,8 @@ import * as os from 'os'
 import * as https from 'https'
 import * as zlib from 'zlib'
 import * as path from 'path'
+import { pathToFileURL } from 'url'
+import type { FileHandle } from 'fs/promises'
 import { ZipArchive } from 'archiver'
 import { TelegramService } from './telegram-service'
 import { StorageService } from './storage-service'
@@ -12,8 +14,25 @@ import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 import { vaultService } from './vault-service'
 import { startVideoStreamServer } from './video-stream-server'
+import { convertVideoToMp4, ffmpegLog } from './previewConverter'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
+
+// H3: custom scheme must be privileged BEFORE app.ready — otherwise <img src="local-file://…">
+// can be blocked in the renderer (observed as 100% 🖼️ placeholders on macOS).
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-file',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+      corsEnabled: true,
+    },
+  },
+])
 
 if (process.env.NODE_ENV === 'development') {
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
@@ -25,6 +44,25 @@ function log(level: string, msg: string) {
   const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`
   try { fs.appendFileSync(logFile, line) } catch(e) {}
 }
+
+// S2: main-process console.log с префиксом [upload] → rodjercloud.log.
+// Раньше telegram-service писал только console.log (stdout), и при packaged-exe
+// stage-логи upload-пайплайна терялись — невозможно было понять, где завис 0%.
+try {
+  const origLog = console.log.bind(console)
+  console.log = (...args: unknown[]) => {
+    origLog(...args)
+    try {
+      const s = args.map(a => (typeof a === 'string' ? a : String(a))).join(' ')
+      if (s.includes('[upload]')) log('info', s)
+      // T-20260925-002 S3: [stream]-логи video-stream-server (slog) тоже должны
+      // попадать в rodjercloud.log — иначе диагностика стрима невозможна.
+      if (s.includes('[stream]')) log('info', s)
+      // rework S3.1: [ffmpeg]-логи конвертации mov/mkv/avi → mp4 (previewConverter)
+      if (s.includes('[ffmpeg]')) log('info', s)
+    } catch {}
+  }
+} catch {}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -56,15 +94,36 @@ const botService = new BotService()
 botService.loadToken()
 let initialFolderSyncDone = false
 
+// T-20260925-002 S2: раньше throttle ПОЛНОСТЬЮ дропал событие при <5000ms —
+// последнее files:changed могло потеряться (renderer ждал его 3s debounce).
+// Теперь: первое событие уходит сразу, остальные накапливаются (pendingFilesChanged)
+// и гарантированно доставляются хвостовым таймером (debounce).
 let lastFilesChangedSent = 0
+let pendingFilesChanged = false
+let filesChangedTailTimer: ReturnType<typeof setTimeout> | null = null
 const FILES_CHANGED_THROTTLE_MS = 5000
-function sendFilesChanged() {
-  const now = Date.now()
-  if (now - lastFilesChangedSent < FILES_CHANGED_THROTTLE_MS) return
-  lastFilesChangedSent = now
+function flushFilesChanged() {
+  lastFilesChangedSent = Date.now()
+  pendingFilesChanged = false
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('files:changed') } catch {}
   }
+}
+function sendFilesChanged() {
+  const now = Date.now()
+  const since = now - lastFilesChangedSent
+  if (since >= FILES_CHANGED_THROTTLE_MS) {
+    if (filesChangedTailTimer) { clearTimeout(filesChangedTailTimer); filesChangedTailTimer = null }
+    flushFilesChanged()
+    return
+  }
+  // внутри throttle-окна — запоминаем и ставим хвостовой таймер на остаток окна
+  pendingFilesChanged = true
+  if (filesChangedTailTimer) clearTimeout(filesChangedTailTimer)
+  filesChangedTailTimer = setTimeout(() => {
+    filesChangedTailTimer = null
+    if (pendingFilesChanged) flushFilesChanged()
+  }, FILES_CHANGED_THROTTLE_MS - since)
 }
 
 autoSyncService.setEventCallback((event) => {
@@ -155,8 +214,41 @@ function netFetch(url: string, headers: Record<string, string> = {}, timeoutMs =
   })
 }
 
+// Pick release with the highest semver (not GitHub "latest" by date).
+function pickMaxSemverRelease(list: any[]): any {
+  if (!Array.isArray(list)) return null
+  const candidates = list.filter((r: any) => r && r.tag_name && !r.draft && !r.prerelease)
+  if (candidates.length === 0) return null
+  let best = candidates[0]
+  for (const r of candidates) {
+    const a = parseVersion((r.tag_name || '').replace(/^v/, ''))
+    const b = parseVersion((best.tag_name || '').replace(/^v/, ''))
+    const n = Math.max(a.length, b.length)
+    let cmp = 0
+    for (let i = 0; i < n; i++) {
+      const av = a[i] || 0, bv = b[i] || 0
+      if (av !== bv) { cmp = av > bv ? 1 : -1; break }
+    }
+    if (cmp > 0) best = r
+  }
+  return best
+}
+
 async function fetchLatestRelease(): Promise<any> {
   const errors: string[] = []
+
+  // Prefer max semver from the releases list — /releases/latest is by published_at, not semver.
+  try {
+    const { statusCode, data } = await netFetch(
+      'https://api.github.com/repos/RodjerYan/RodjerCloud/releases?per_page=30',
+      { 'Accept': 'application/vnd.github.v3+json' }
+    )
+    if (statusCode >= 400) throw new Error(`GitHub API ${statusCode}`)
+    const parsed = JSON.parse(data)
+    const best = pickMaxSemverRelease(parsed)
+    if (best && best.tag_name) return best
+    throw new Error('No suitable release in GitHub list')
+  } catch (e: any) { errors.push('GitHub-list: ' + e.message) }
 
   try {
     const { statusCode, data } = await netFetch(
@@ -167,12 +259,16 @@ async function fetchLatestRelease(): Promise<any> {
     const parsed = JSON.parse(data)
     if (parsed && parsed.tag_name) return parsed
     throw new Error('No tag_name in GitHub response')
-  } catch (e: any) { errors.push('GitHub: ' + e.message) }
+  } catch (e: any) { errors.push('GitHub-latest: ' + e.message) }
 
   try {
     const { statusCode, data } = await netFetch(`${UPDATE_SERVER_URL}/api/latest`, { 'Accept': 'application/json' })
     if (statusCode >= 400) throw new Error(`Proxy ${statusCode}`)
     const parsed = JSON.parse(data)
+    if (parsed && Array.isArray(parsed)) {
+      const best = pickMaxSemverRelease(parsed)
+      if (best && best.tag_name) return best
+    }
     if (parsed && parsed.tag_name) return parsed
     throw new Error('No tag_name in proxy response')
   } catch (e: any) { errors.push('Proxy: ' + e.message) }
@@ -210,11 +306,38 @@ async function checkUpdate() {
 
 app.whenReady().then(async () => {
   protocol.handle('local-file', (request) => {
-    const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
-    const fileUrl = process.platform === 'win32'
-      ? 'file:///' + filePath.replace(/^\//, '')
-      : 'file://' + filePath
-    return net.fetch(fileUrl)
+    // H5: pathToFileURL safely escapes spaces (#, ?, %) in macOS "Application Support" paths.
+    try {
+      const u = new URL(request.url)
+      const pathname = decodeURIComponent(u.pathname)
+      let filePath: string
+      if (process.platform === 'win32') {
+        // local-file://C:/Users/... → host='C', pathname='/Users/...' (colon eaten)
+        if (u.host && /^[A-Za-z]$/.test(u.host)) {
+          filePath = `${u.host}:${pathname}`
+        } else {
+          // local-file:///C:/Users/... → pathname='/C:/Users/...'
+          filePath = pathname.replace(/^\//, '')
+        }
+        if (!/^[A-Za-z]:[\\/]/.test(filePath)) {
+          log('error', `[local-file] reject relative win path raw=${request.url} → ${filePath}`)
+          return new Response('Bad path', { status: 400 })
+        }
+      } else {
+        // darwin/linux: pathname already absolute '/Users/...'
+        filePath = pathname
+        if (!filePath.startsWith('/')) {
+          log('error', `[local-file] reject non-abs posix raw=${request.url} → ${filePath}`)
+          return new Response('Bad path', { status: 400 })
+        }
+      }
+      const fileUrl = pathToFileURL(filePath).href
+      log('info', `[local-file] raw=${request.url} → ${fileUrl}`)
+      return net.fetch(fileUrl)
+    } catch (e) {
+      log('error', `[local-file] parse fail raw=${request.url} err=${(e as Error).message}`)
+      return new Response('Bad URL', { status: 400 })
+    }
   })
 
   createWindow()
@@ -233,7 +356,9 @@ app.whenReady().then(async () => {
         try {
           const fp = path.join(previewCache, file)
           const stat = fs.statSync(fp)
-          if (stat.mtimeMs < cutoff) fs.unlinkSync(fp)
+          if (stat.mtimeMs < cutoff) { fs.unlinkSync(fp); continue }
+          // rework: purge poisoned .jpg (raw HEIC под именем .jpg) — без JPEG magic удаляем
+          if (file.toLowerCase().endsWith('.jpg') && !isJpegFile(fp)) fs.unlinkSync(fp)
         } catch {}
       }
     }
@@ -656,21 +781,23 @@ async function runUpload(job: UploadJob): Promise<void> {
   try {
     log('info', `[upload] start: ${job.filePath} (id=${job.id})`)
     let lastSend = 0
-    const THROTTLE_MS = 2000
+    const THROTTLE_MS = 250
     const isCancelled = () => uploadCancelled.has(job.id)
-    const sendProgress = (sent: number, total: number) => {
+    const sendProgress = (sent: number, total: number, force = false) => {
       if (isCancelled()) return
       const now = Date.now()
-      if (now - lastSend < THROTTLE_MS && sent < total) return
+      if (!force && now - lastSend < THROTTLE_MS && sent < total) return
       lastSend = now
       const pct = total > 0 ? Math.floor((sent / total) * 100) : 0
       if (mainWindow && !mainWindow.isDestroyed()) {
         try { mainWindow.webContents.send('telegram:upload-progress', { id: job.id, sent, total, percent: pct }) } catch {}
       }
     }
-    sendProgress(0, 1)
+    // S3: initial stage-ping with real file size (не throttle-ится force)
+    sendProgress(0, job.fileSize > 0 ? job.fileSize : 1, true)
     const result = await telegramService.uploadFile(job.filePath, (sent, total) => {
-      sendProgress(sent, total)
+      // stage-ping (sent===0) форсируем, чтобы UI не висел на sendProgress(0,1) без total
+      sendProgress(sent, total, sent === 0)
     }, job.encrypt, job.customFileName, isCancelled)
     if (isCancelled()) {
       log('info', `[upload] cancelled: ${job.filePath}`)
@@ -941,11 +1068,16 @@ ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: 
   try {
     const prefs = await readPrefs()
     if (prefs.askDownloadPath) {
-      const result = await dialog.showSaveDialog({
+      // T-20260924-019 S2: привязываем диалог к активному окну, чтобы он не «терялся»
+      // за главным окном; cancel → нормальный ответ {success:false, error:'cancelled'}.
+      const opts: Electron.SaveDialogOptions = {
         title: 'Сохранить файл',
         defaultPath: path.join(app.getPath('downloads'), fileName),
-      })
-      if (result.canceled) return { success: false, error: 'cancelled' }
+        properties: ['createDirectory', 'showOverwriteConfirmation'],
+      }
+      const parentWin = BrowserWindow.getFocusedWindow()
+      const result = parentWin ? await dialog.showSaveDialog(parentWin, opts) : await dialog.showSaveDialog(opts)
+      if (result.canceled || !result.filePath) return { success: false, error: 'cancelled' }
       const filePath = result.filePath
       await telegramService.downloadMediaToPath(messageId, filePath)
       return { success: true, data: { filePath, fileName } }
@@ -958,8 +1090,12 @@ ipcMain.handle('telegram:download-file', async (_, messageId: number, fileName: 
 ipcMain.handle('telegram:download-thumbnail', async (_, messageId: number, fileName?: string) => {
   try {
     const filePath = await telegramService.downloadThumbnail(messageId, fileName)
+    log('info', `[thumb] ipc download-thumbnail id=${messageId} → ${filePath}`)
     return { success: true, data: filePath }
-  } catch (error) { return { success: false, error: (error as Error).message } }
+  } catch (error) {
+    log('error', `[thumb] ipc download-thumbnail id=${messageId} err=${(error as Error).message}`)
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 ipcMain.handle('telegram:cache-audio', async (_, messageId: number, fileName: string) => {
@@ -1004,24 +1140,31 @@ ipcMain.handle('telegram:perm-delete-file', async (_, messageId: number) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('telegram:cleanup-ghosts', async () => {
-  return await telegramService.cleanupGhosts()
-})
-
-ipcMain.handle('telegram:clear-trash', async (event, messageIds: number[]) => {
+// purge корзины + orphan #chunk_of одним вызовом; kind прогресса: 'purge-all' | 'orphans'
+const clearTrashHandler = async (event: Electron.IpcMainInvokeEvent, messageIds: number[]) => {
   try {
     log('info', `[clearTrash] IPC start ids=${messageIds?.length || 0}`)
-    const stats = await telegramService.clearTrash(messageIds || [], (done, total) => {
-      try { event.sender.send('telegram:bulk-progress', { kind: 'purge-all', index: done, total }) } catch {}
-    })
+    const stats = await telegramService.clearTrash(
+      messageIds || [],
+      (done, total) => {
+        try { event.sender.send('telegram:bulk-progress', { kind: 'purge-all', index: done, total }) } catch {}
+      },
+      (done, total) => {
+        try { event.sender.send('telegram:bulk-progress', { kind: 'orphans', index: done, total }) } catch {}
+      }
+    )
     sendFilesChanged()
-    log('info', `[clearTrash] IPC done deleted=${stats.deleted} failed=${stats.failed} total=${stats.total}`)
+    log('info', `[clearTrash] IPC done deleted=${stats.deleted} ghosts=${stats.ghostsDeleted} failed=${stats.failed} total=${stats.total}`)
     return { success: true, data: stats }
   } catch (error) {
     log('error', `[clearTrash] IPC error: ${(error as Error).message}`)
     return { success: false, error: (error as Error).message }
   }
-})
+}
+
+ipcMain.handle('telegram:clear-trash', clearTrashHandler)
+// alias для совместимости: теперь это тот же bulk (purge + orphans); UI его больше не зовёт
+ipcMain.handle('telegram:cleanup-ghosts', clearTrashHandler)
 
 ipcMain.handle('telegram:logout', async () => {
   try {
@@ -1754,20 +1897,138 @@ ipcMain.handle('tgs:read', async (_, name?: string) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-function ensurePreviewCache(cachedPath: string): string {
-  const ext = path.extname(cachedPath).toLowerCase()
-  if (ext === '.heic' || ext === '.heif') {
-    const jpgPath = cachedPath + '.jpg'
-    if (!fs.existsSync(jpgPath)) {
-      try {
-        require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', cachedPath, '--out', jpgPath], { timeout: 15000 })
-      } catch (e: any) {
-        console.error('sips FAIL:', cachedPath, e.message)
+// T-20260924-019 S3: HEIC/HEIF → JPEG кроссплатформенно.
+// Раньше был sips-only (/usr/bin/sips) — на win32 конверсия падала, <img> не декодировал HEIC.
+// Теперь: на macOS — sips, иначе/как фоллбэк — heic-convert в worker_threads
+// (тот же паттерн, что в thumb path: telegram-service / file:get-local-url).
+function heicConvertWorker(inputBuffer: Buffer): Promise<Buffer> {
+  const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+  const { Worker } = require('worker_threads')
+  return new Promise<Buffer>((resolve, reject) => {
+    const worker = new Worker(`
+      const heicConvert = require('${heicPath}');
+      const { parentPort, workerData } = require('worker_threads');
+      async function run() {
+        try {
+          const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+          parentPort.postMessage({ success: true, buffer: out });
+        } catch (e) {
+          parentPort.postMessage({ success: false, error: e.message });
+        }
       }
-    }
-    return jpgPath
+      run();
+    `, { eval: true, workerData: inputBuffer })
+    worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+      if (msg.success) resolve(Buffer.from(msg.buffer!))
+      else reject(new Error(msg.error))
+    })
+    worker.on('error', reject)
+    worker.on('exit', (code: number | null) => {
+      if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+    })
+  })
+}
+
+// Проверка, что файл — настоящий JPEG (magic FF D8 FF), а не raw HEIC под именем .jpg
+function isJpegFile(p: string): boolean {
+  try {
+    const fd = fs.openSync(p, 'r')
+    try {
+      const buf = Buffer.alloc(3)
+      const n = fs.readSync(fd, buf, 0, 3, 0)
+      return n === 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF
+    } finally { fs.closeSync(fd) }
+  } catch { return false }
+}
+
+async function ensurePreviewCache(cachedPath: string): Promise<string> {
+  const ext = path.extname(cachedPath).toLowerCase()
+  if (ext !== '.heic' && ext !== '.heif') return cachedPath
+  const jpgPath = cachedPath + '.jpg'
+  // size+magic check — старые poisoned-файлы (raw HEIC под именем .jpg, size>=10000)
+  // должны быть удалены и переконвертированы, иначе <img> их не декодирует
+  let ok = fs.existsSync(jpgPath) && fs.statSync(jpgPath).size >= 10000 && isJpegFile(jpgPath)
+  if (fs.existsSync(jpgPath) && !isJpegFile(jpgPath)) {
+    // poisoned cache: exists, но не JPEG → unlink, переконвертируем заново
+    try { fs.rmSync(jpgPath, { force: true }) } catch {}
+    ok = false
   }
-  return cachedPath
+  if (!ok) {
+    try {
+      if (fs.existsSync(jpgPath)) fs.rmSync(jpgPath, { force: true })
+      const inputBuffer = await fs.promises.readFile(cachedPath)
+      if (inputBuffer.length > 2 && inputBuffer[0] === 0xFF && inputBuffer[1] === 0xD8 && inputBuffer[2] === 0xFF) {
+        // уже JPEG несмотря на расширение — копируем как есть
+        await fs.promises.writeFile(jpgPath, inputBuffer)
+      } else {
+        let converted = false
+        if (process.platform === 'darwin') {
+          try {
+            require('child_process').execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', cachedPath, '--out', jpgPath], { timeout: 15000 })
+            converted = fs.existsSync(jpgPath)
+          } catch (e: any) {
+            console.error('sips FAIL:', cachedPath, e.message)
+          }
+        }
+        if (!converted) {
+          await fs.promises.writeFile(jpgPath, await heicConvertWorker(inputBuffer))
+        }
+      }
+      ok = fs.existsSync(jpgPath) && fs.statSync(jpgPath).size > 0
+    } catch (e: any) {
+      console.error('heic preview convert FAIL:', cachedPath, e?.message)
+    }
+  }
+  return ok ? jpgPath : cachedPath
+}
+
+// Единый путь получения src для preview:load И preview:navigate (раньше были асимметричны):
+// video → http-stream; изображение → raw-скачивание в cache (без подмены ext) →
+// ensurePreviewCache(raw) → display path (jpg после конверсии) либо raw для jpg/png/…
+async function resolvePreviewSrc(dir: string, f: any): Promise<string> {
+  const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
+  // T-20260925-002 S3: stream-аем только то, что Chromium реально декодирует
+  // (mp4=h264/aac, webm=vp8/9/av1).
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) {
+    // mp4/webm — как раньше, напрямую в http-stream (S3 stream fix, не трогаем)
+    if (['mp4', 'webm'].includes(ext)) return `http://127.0.0.1:14300/stream/${f.messageId}`
+    // rework S3.1: mov/mkv/avi — качаем исходник в preview-cache (тот же
+    // downloadMediaToPath, что у images), remux/transcode ffmpeg-static →
+    // preview-cache\<id>_preview.mp4 → file:// (Chromium его играет).
+    // Лоадер preview-окна крутится, пока идёт скачивание+конвертация.
+    // Нет ffmpeg / конвертация упала → '' → renderMedia покажет старую
+    // понятную ошибку «Формат не поддерживается (нужен mp4/webm)».
+    const srcPath = path.join(dir, `${f.messageId}_${f.fileName}`)
+    const mp4Path = path.join(dir, `${f.messageId}_preview.mp4`)
+    // уже готовый mp4 → не перекачиваем и не переконвертируем исходник
+    // (part+rename гарантирует, что существующий dst цел; старше 7 дней он не
+    // бывает — preview-cache чистится при старте)
+    if (fs.existsSync(mp4Path)) {
+      try { if (fs.statSync(mp4Path).size > 0) return pathToFileURL(mp4Path).href } catch {}
+    }
+    if (!fs.existsSync(srcPath)) {
+      try {
+        ffmpegLog(`download src ${f.fileName} (id=${f.messageId})`)
+        await (telegramService as any).downloadMediaToPath(f.messageId, srcPath)
+      } catch (e) { ffmpegLog(`download fail: ${(e as Error).message}`) }
+    }
+    if (!fs.existsSync(srcPath)) return ''
+    const converted = await convertVideoToMp4(srcPath, mp4Path)
+    if (!converted) return ''
+    // rework: pathToFileURL корректно экранирует пробелы/#/% и Windows-пути
+    return pathToFileURL(converted).href
+  }
+  const rawPath = path.join(dir, `${f.messageId}_${f.fileName}`)
+  if (!fs.existsSync(rawPath)) {
+    try {
+      await (telegramService as any).downloadMediaToPath(f.messageId, rawPath)
+    } catch (e) { console.error('preview download failed', e) }
+  }
+  if (!fs.existsSync(rawPath)) return ''
+  const displayPath = await ensurePreviewCache(rawPath)
+  if (!fs.existsSync(displayPath)) return ''
+  // rework: pathToFileURL корректно экранирует пробелы/#/% иWindows-пути
+  return pathToFileURL(displayPath).href
 }
 
 const previewWindows = new Map<number, BrowserWindow>()
@@ -1823,18 +2084,18 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #media{position:fixed;top:0;left:0;right:0;bottom:48px;display:flex;align-items:center;justify-content:center}
 #media video,#media img{max-width:100%;max-height:100%;border-radius:4px}
 #bar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(10,10,20,0.92);display:none;align-items:center;gap:8px;padding:6px 12px;height:48px;border-top:1px solid rgba(255,255,255,0.06)}
-#bar button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:5px;padding:4px 10px;font:12px/1.2 sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s}
+#bar button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:5px;padding:4px 10px;font:12px/1.2 Inter, system-ui, sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s}
 #bar button:hover{background:rgba(255,255,255,0.18)}
 #progress{flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;cursor:pointer;position:relative;margin:0 8px}
 #progressFill{height:100%;background:#7c83ff;border-radius:3px;width:0%;pointer-events:none}
-#time{font:11px/1 monospace;color:rgba(255,255,255,0.45);min-width:70px;text-align:center}
+#time{font:11px/1 Inter, system-ui, sans-serif;color:rgba(255,255,255,0.45);min-width:70px;text-align:center}
 </style></head>
 <body>
-<div id="top"><span id="fname" style="color:#fff;font:13px/1 sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 sans-serif"></span></div>
+<div id="top"><span id="fname" style="color:#fff;font:13px/1 Inter, system-ui, sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 Inter, system-ui, sans-serif"></span></div>
 <button id="close" onclick="window.electronAPI.preview.close(sid)">✕</button>
 <div id="loader"></div>
 <div id="media"></div>
-<div id="error" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f87171;font:14px/1.4 sans-serif;text-align:center;max-width:80%"></div>
+<div id="error" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f87171;font:14px/1.4 Inter, system-ui, sans-serif;text-align:center;max-width:80%"></div>
 <div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><button id="speedBtn" onclick="cycleSpeed()">1x</button><button onclick="toggleFs()">⛶</button></div>
 <script>
 let sid = '${winId}'
@@ -1844,8 +2105,14 @@ let video = null
 function renderMedia(files, idx, src) {
   if (!files || !files[idx]) return
   const f = files[idx]
-  const isVideo = ['mp4','mov','mkv','avi','webm'].includes((f.fileName||'').split('.').pop().toLowerCase())
-  var ld = document.getElementById('loader'); if (ld && !isVideo) ld.style.display = 'none'
+  const vExt = (f.fileName||'').split('.').pop().toLowerCase()
+  const isVideo = ['mp4','mov','mkv','avi','webm'].includes(vExt)
+  // T-20260925-002 S3: нет src (конвертация mov/mkv/avi не удалась / ffmpeg
+  // недоступен / сломанный файл) → прячем и loader, иначе спиннер висит вместе
+  // с ошибкой (вечный лоадер). Пока src не пришёл (preview:load ждёт скачивание
+  // и конвертацию ffmpeg) лоадер крутится по умолчанию — это и есть индикатор
+  // долгой конвертации.
+  var ld = document.getElementById('loader'); if (ld && (!isVideo || !src)) ld.style.display = 'none'
   var err = document.getElementById('error')
   var el = document.getElementById('media')
   if (src) {
@@ -1856,23 +2123,39 @@ function renderMedia(files, idx, src) {
       vid.src = src
       vid.autoplay = true
       vid.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
+      vid.onerror = function() {
+        var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+        var bar = document.getElementById('bar'); if (bar) bar.style.display = 'none'
+        var er = document.getElementById('error')
+        if (er) { er.textContent = 'Не удалось загрузить файл'; er.style.display = 'block' }
+      }
       el.appendChild(vid)
     } else {
       var img = document.createElement('img')
       img.src = src
       img.draggable = false
       img.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
+      img.onerror = function() {
+        var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+        var er = document.getElementById('error')
+        if (er) { er.textContent = 'Не удалось загрузить файл'; er.style.display = 'block' }
+      }
       el.appendChild(img)
     }
     if (err) err.style.display = 'none'
   } else {
-    if (err) { err.textContent = 'Не удалось загрузить файл\\n' + f.fileName; err.style.display = 'block' }
+    if (err) {
+      err.textContent = (isVideo ? 'Формат не поддерживается в предпросмотре (нужен mp4/webm):\\n' : 'Не удалось загрузить файл\\n') + f.fileName
+      err.style.display = 'block'
+    }
+    document.getElementById('bar').style.display = 'none'; video = null
   }
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
   if (isVideo) {
     video = document.getElementById('pv')
-    document.getElementById('bar').style.display = 'flex'
+    // T-20260925-002 S3: без <video> (нет src — конвертация упала) — панель не показываем
+    if (video) document.getElementById('bar').style.display = 'flex'
     if (video) {
       video.playbackRate = speed
       video.ontimeupdate = update
@@ -1947,7 +2230,7 @@ document.addEventListener('mousemove', function() {
     } else {
       // preview:load will handle the download synchronously (await)
       if (fs.existsSync(cachedPath)) {
-        ensurePreviewCache(cachedPath)
+        await ensurePreviewCache(cachedPath)
       }
     }
 
@@ -1960,26 +2243,9 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     const s = previewSessions.get(sessionId)
     if (!s) return { success: false, error: 'Session not found' }
     const f = s.files[s.idx]
-    const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
-    const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
-    const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
-    const cachedPath = path.join(s.dir, `${f.messageId}_${f.fileName}`) + heicSuffix
-    
-    let src = ''
-    if (isVideo) {
-      src = `http://127.0.0.1:14300/stream/${f.messageId}`
-    } else {
-      if (!fs.existsSync(cachedPath)) {
-        try {
-          await (telegramService as any).downloadMediaToPath(f.messageId, cachedPath)
-          ensurePreviewCache(cachedPath)
-        } catch(e) { console.error('preview:load download failed', e) }
-      }
-      
-      if (fs.existsSync(cachedPath)) {
-        src = 'file:///' + encodeURI(cachedPath.replace(/\\/g, '/').replace(/^\//, ''))
-      }
-    }
+    // T-20260924-019 S3: raw-путь без подмены ext (.jpg больше не дописывается до
+    // скачивания), конверсия heic внутри ensurePreviewCache → отдаём display path.
+    const src = await resolvePreviewSrc(s.dir, f)
     return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -2006,23 +2272,78 @@ ipcMain.handle('preview:navigate', async (_, sessionId: string, dir: number) => 
     const nextFile = all[next]
     const nextIdx = s.files.indexOf(nextFile)
     s.idx = nextIdx
-    const cachedPath = path.join(s.dir, `${nextFile.messageId}_${nextFile.fileName}`)
-    if (!fs.existsSync(cachedPath)) {
-      try {
-        await (telegramService as any).downloadMediaToPath(nextFile.messageId, cachedPath)
-      } catch(e) { console.error('nav download failed', e) }
-    }
-    ensurePreviewCache(cachedPath)
-    const ext = (nextFile.fileName || '').split('.').pop()?.toLowerCase() || ''
-    const isVideo = ['mp4','mov','mkv','avi','webm'].includes(ext)
-    const heicSuffix = !isVideo && ['heic','heif'].includes(ext) ? '.jpg' : ''
-    const displayPath = cachedPath + heicSuffix
-    let src = ''
-    if (fs.existsSync(displayPath)) {
-      src = 'file:///' + encodeURI(displayPath.replace(/\\/g, '/').replace(/^\//, ''))
-    }
+    // T-20260924-019 S3: синхронизировано с preview:load — общий resolvePreviewSrc
+    // (video → stream, image → raw cache + ensurePreviewCache), без отдельного
+    // heicSuffix-пути, из-за которого src оказывался пустым.
+    const src = await resolvePreviewSrc(s.dir, nextFile)
     return { success: true, data: { files: s.files, idx: s.idx, src } }
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+// drag&drop temp-fallback (macOS Sequoia, electron/electron#44600): webUtils.getPathForFile
+// вернул '' — копируем содержимое File из renderer во временный файл, грузим по temp-path.
+// REWORK#2: чанкованная запись open/write/close через async FileHandle — вместо one-shot
+// arrayBuffer→writeFileSync (2–3× RAM + фриз main). Пик памяти ограничен размером чанка.
+let dropTempDir: string | null = null
+const MAX_DROP_TEMP_BYTES = 2 * 1024 * 1024 * 1024 // 2GB — sanity-limit, как в renderer
+const dropTempHandles = new Map<string, { handle: FileHandle; path: string; written: number }>()
+let dropTempSeq = 0
+
+ipcMain.handle('file:drop-temp-open', async (_, fileName: string, size: number) => {
+  try {
+    if (typeof size === 'number' && size > MAX_DROP_TEMP_BYTES) {
+      return { success: false, error: 'File too large for drag&drop temp fallback' }
+    }
+    // sanitize: только basename, без ../ и управляющих символов
+    const safeName = path.basename(String(fileName || '').replace(/\\/g, '/'))
+      .replace(/[\x00-\x1f\x7f]/g, '').trim()
+    const finalName = (!safeName || safeName === '.' || safeName === '..') ? 'dropped-file' : safeName
+    if (!dropTempDir || !fs.existsSync(dropTempDir)) {
+      dropTempDir = fs.mkdtempSync(path.join(app.getPath('temp'), 'rodjer-drop-'))
+    }
+    let filePath = path.join(dropTempDir, finalName)
+    if (fs.existsSync(filePath)) filePath = path.join(dropTempDir, `${Date.now()}_${finalName}`)
+    const handle = await fs.promises.open(filePath, 'w')
+    const tempId = `drop-${Date.now()}-${++dropTempSeq}`
+    dropTempHandles.set(tempId, { handle, path: filePath, written: 0 })
+    return { success: true, data: { tempId, filePath } }
+  } catch (error) {
+    console.warn('[drop] temp open failed', fileName, error)
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('file:drop-temp-write', async (_, tempId: string, chunk: ArrayBuffer | Uint8Array) => {
+  try {
+    const entry = dropTempHandles.get(tempId)
+    if (!entry) return { success: false, error: 'Unknown drop tempId' }
+    const buf = Buffer.isBuffer(chunk) ? chunk
+      : chunk instanceof ArrayBuffer ? Buffer.from(chunk)
+      : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+    if (entry.written + buf.length > MAX_DROP_TEMP_BYTES) {
+      return { success: false, error: 'File too large for drag&drop temp fallback' }
+    }
+    const { bytesWritten } = await entry.handle.write(buf)
+    entry.written += bytesWritten
+    return { success: true, data: { written: entry.written } }
+  } catch (error) {
+    console.warn('[drop] temp write failed', tempId, error)
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('file:drop-temp-close', async (_, tempId: string) => {
+  const entry = dropTempHandles.get(tempId)
+  if (!entry) return { success: false, error: 'Unknown drop tempId' }
+  dropTempHandles.delete(tempId)
+  try {
+    await entry.handle.close()
+    console.log('[drop] temp saved', path.basename(entry.path), entry.written)
+    return { success: true, data: { filePath: entry.path } }
+  } catch (error) {
+    console.warn('[drop] temp close failed', tempId, error)
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 ipcMain.handle('file:read-data-url', async (_, filePath: string) => {
@@ -2049,11 +2370,29 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
     const resolvedPath = path.resolve(filePath)
     const allowedDirs = [app.getPath('userData'), app.getPath('temp'), app.getPath('downloads')]
     if (!allowedDirs.some(dir => resolvedPath.startsWith(dir))) {
+      log('warn', `[thumb] getLocalUrl denied ${resolvedPath}`)
       return { success: false, error: 'Access denied: path outside allowed directories' }
     }
-    if (!fs.existsSync(resolvedPath)) return { success: false, error: 'File not found' }
+    if (!fs.existsSync(resolvedPath)) {
+      log('warn', `[thumb] getLocalUrl missing ${resolvedPath}`)
+      return { success: false, error: 'File not found' }
+    }
     let finalPath = resolvedPath
     const ext = path.extname(resolvedPath).toLowerCase()
+
+    // H6: bulletproof path for small thumb-cache images — no custom protocol involved.
+    const isThumbCache = resolvedPath.replace(/\\/g, '/').includes('/thumb-cache/')
+    if (isThumbCache && (ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.webp' || ext === '.gif' || ext === '.bmp')) {
+      const st = fs.statSync(resolvedPath)
+      if (st.size <= 512 * 1024) {
+        const mime: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' }
+        const b64 = fs.readFileSync(resolvedPath).toString('base64')
+        log('info', `[thumb] getLocalUrl data-url id=${path.basename(resolvedPath)} bytes=${st.size}`)
+        return { success: true, data: `data:${mime[ext] || 'image/jpeg'};base64,${b64}` }
+      }
+      log('info', `[thumb] getLocalUrl cache too big (${st.size}), fallback local-file`)
+    }
+
     if (ext === '.heic' || ext === '.heif') {
       const jpgPath = filePath + '.jpg'
       let needsConversion = !fs.existsSync(jpgPath)
@@ -2107,8 +2446,18 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
       }
       finalPath = jpgPath
     }
-    return { success: true, data: 'local-file://' + encodeURI(finalPath.replace(/\\/g, '/').replace(/^([A-Z]:)/, '/$1')) }
-  } catch (error) { return { success: false, error: (error as Error).message } }
+    // Same semantics as src/lib/localFileUrl.ts (main can't import from src):
+    // abs FS path → local-file:/// URL with drive letter in pathname (3 slashes).
+    let p = finalPath.replace(/\\/g, '/')
+    if (/^[A-Za-z]:/.test(p)) p = '/' + p
+    if (!p.startsWith('/')) p = '/' + p
+    const url = 'local-file://' + encodeURI(p)
+    log('info', `[thumb] getLocalUrl local-file → ${url}`)
+    return { success: true, data: url }
+  } catch (error) {
+    log('error', `[thumb] getLocalUrl err=${(error as Error).message}`)
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 ipcMain.on('preview:close', (_, sessionId: string) => {

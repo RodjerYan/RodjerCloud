@@ -23,11 +23,14 @@ async function processQueue() {
         const r = await window.electronAPI.telegram.downloadThumbnail(item.messageId, item.fileName);
         if (r.success && r.data) {
           const d = await window.electronAPI.file.getLocalUrl(r.data);
-          if (d.success) {
+          if (d.success && d.data) {
             cache[item.messageId] = d.data;
             item.cb(d.data);
             return;
           }
+          console.log(`[thumb] getLocalUrl fail id=${item.messageId} err=${(d as any).error || 'no-data'}`);
+        } else {
+          console.log(`[thumb] downloadThumbnail null/false id=${item.messageId} success=${r.success} data=${r.data}`);
         }
       } catch {}
       item.cb(null);

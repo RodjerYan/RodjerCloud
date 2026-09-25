@@ -25,6 +25,12 @@ export const subscribeToasts = (listener: (toasts: ToastMessage[]) => void) => {
 const show = (message: string, type: ToastType = 'info', duration?: number) => {
   const id = Math.random().toString(36).substring(2, 9);
   const ms = duration !== undefined ? duration : type === 'error' ? 6000 : type === 'loading' ? 0 : 3000;
+  // Non-loading toasts (success/error/info) dismiss any active loading toasts,
+  // so duration=0 loaders never hang forever. Manual toast.remove(id) still works.
+  if (type !== 'loading') {
+    const loadingIds = toasts.filter((t) => t.type === 'loading' && !t.exiting).map((t) => t.id);
+    loadingIds.forEach((lid) => remove(lid));
+  }
   toasts.push({ id, message, type });
   notify();
 

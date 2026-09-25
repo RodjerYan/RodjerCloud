@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import { Play, Download, Trash2, Music, Clock, Calendar } from 'lucide-react'
 import { useAudioPlayer } from '../lib/AudioPlayerContext'
 import { appConfirm } from '../lib/dialogs'
+import { downloadFileWithFeedback } from '../lib/download'
 import { safeViewTransition } from '../lib/viewTransition'
 
 function fmtSize(n: number) {
@@ -94,9 +95,8 @@ export default function AudioPlayerPage() {
     }
   }
 
-  const handleDownload = (f: any) => {
-    window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-  }
+  // T-20260925-002 S1: общий feedback-скачивание (эталон MyFiles)
+  const handleDownload = (f: any, e?: React.MouseEvent) => downloadFileWithFeedback(f, e)
 
   if (loading) return <div className="ap-container"><div className="mf-empty">Загрузка…</div></div>
 
@@ -190,7 +190,7 @@ export default function AudioPlayerPage() {
                   <div className="ap-track-size" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>{fmtSize(f.fileSize)}</span>
                     <div className="ap-track-actions">
-                      <button title="Скачать" onClick={(e) => { e.stopPropagation(); handleDownload(f) }}>
+                      <button title="Скачать" onClick={(e) => { e.stopPropagation(); handleDownload(f, e) }}>
                         <Download size={16} />
                       </button>
                       <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); handleDelete(f, e) }}>

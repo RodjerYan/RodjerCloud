@@ -4,7 +4,9 @@ import { flushSync } from 'react-dom'
 import { Star, Download, Trash2, Eye } from "lucide-react"
 import { Player } from '@lottiefiles/react-lottie-player'
 import { v3store } from "../lib/v3store"
-import { appConfirm, appAlert } from "../lib/dialogs"
+import { appConfirm } from "../lib/dialogs"
+import { toast } from '../lib/toast'
+import { downloadFileWithFeedback } from '../lib/download'
 import { safeViewTransition } from '../lib/viewTransition'
 
 import { fmtSize, typeOf } from '../lib/utils'
@@ -15,6 +17,7 @@ export default function FavoritesPage() {
   const [loading, setLoading] = useState(true)
   const [navAnim, setNavAnim] = useState<any>(null)
   const [thumbs, setThumbs] = useState<Record<number, string>>({})
+  const [brokenThumbs, setBrokenThumbs] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
     setFavs(v3store.getFavs())
@@ -70,10 +73,8 @@ export default function FavoritesPage() {
     }
   }, [])
 
-  const handleDownload = async (f: any) => {
-    const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    if (!r.success) await appAlert(r.error || 'Ошибка скачивания')
-  }
+  // T-20260925-002 S1: общий feedback-скачивание (эталон MyFiles)
+  const handleDownload = (f: any, e?: React.MouseEvent) => downloadFileWithFeedback(f, e)
 
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
     let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card') : null;
@@ -131,9 +132,21 @@ export default function FavoritesPage() {
     safeViewTransition(applyToggle)
   }
 
-  const handlePreview = (f: any) => {
-    const idx = favFiles.indexOf(f)
-    window.electronAPI.preview.open(favFiles, idx)
+  const handlePreview = async (f: any) => {
+    // T-20260924-019 S3: тот же preview:open IPC; защита от idx=-1 (иначе main
+    // вернёт {success:false} молча) — fallback по messageId + явная ошибка.
+    let idx = favFiles.indexOf(f)
+    if (idx === -1) idx = favFiles.findIndex((x: any) => x?.messageId === f.messageId)
+    if (idx === -1) {
+      toast.error('Не удалось открыть предпросмотр: файл не найден в списке')
+      return
+    }
+    try {
+      const r = await window.electronAPI.preview.open(favFiles, idx)
+      if (!r?.success) toast.error(r?.error || 'Не удалось открыть предпросмотр')
+    } catch (e: any) {
+      toast.error('Не удалось открыть предпросмотр: ' + (e?.message || ''))
+    }
   }
 
   return (
@@ -156,8 +169,9 @@ export default function FavoritesPage() {
                   style={{ viewTransitionName: `card_${f.messageId}` }}
                   onDoubleClick={() => { if (isImg || isVid) handlePreview(f) }}>
                   <div className="mf-card-icon" data-type={f.mimeType?.startsWith('image') ? 'Изображения' : f.mimeType?.startsWith('video') ? 'Видео' : 'Другое'}>
-                    {thumbs[f.messageId] ? (
-                      <img src={thumbs[f.messageId]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    {thumbs[f.messageId] && !brokenThumbs[f.messageId] ? (
+                      <img src={thumbs[f.messageId]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={() => setBrokenThumbs(prev => ({ ...prev, [f.messageId]: true }))} />
                     ) : (
                       (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()
                     )}
@@ -166,7 +180,7 @@ export default function FavoritesPage() {
                   <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date(((f.originalDate || f.uploadedAt) || 0) * 1000).toLocaleDateString()}</div>
                   <div className="mf-card-actions">
                     <button title="Убрать из избранного" onClick={() => toggleFav(f)}><Star size={14} fill="#fbbf24" stroke="#fbbf24" /></button>
-                    <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                    <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                     {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f)}><Eye size={14} /></button>}
                     <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                   </div>

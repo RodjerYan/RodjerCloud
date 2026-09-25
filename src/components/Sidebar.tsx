@@ -4,6 +4,7 @@ import { Home, FolderOpen, Upload, RefreshCw, Settings,
   LogOut, Trash2, Star, Image as ImgIcon,
   Headphones, Cloud, ArrowRight } from "lucide-react"
 import { appConfirm } from "../lib/dialogs"
+import { toLocalFileUrl } from "../lib/localFileUrl"
 import '../styles/logout-btn.css'
 
 interface Props { channelInfo: any; userInfo?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean } | null; onLogout: () => void; updateAvailable?: boolean }
@@ -23,14 +24,16 @@ const items = [
 ]
 
 export default function Sidebar({ channelInfo, userInfo, onLogout, updateAvailable }: Props) {
-  const avatarSrc = userInfo?.photoPath ? 'local-file://' + userInfo.photoPath.replace(/\\/g, '/').replace(/^([A-Z]:)/, '/$1') : null
+  const avatarSrc = userInfo?.photoPath ? toLocalFileUrl(userInfo.photoPath) : null
+  const [avatarBroken, setAvatarBroken] = React.useState(false)
+  React.useEffect(() => { setAvatarBroken(false) }, [avatarSrc])
   return (
     <aside className="v2-sidebar" data-testid="v3-sidebar">
       <div className="v2-sidebar-profile">
-        {avatarSrc ? (userInfo?.isVideo ? (
-          <video className="v2-sidebar-avatar" src={avatarSrc} autoPlay={!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches} loop muted playsInline />
+        {avatarSrc && !avatarBroken ? (userInfo?.isVideo ? (
+          <video className="v2-sidebar-avatar" src={avatarSrc} autoPlay={!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches} loop muted playsInline onError={() => setAvatarBroken(true)} />
         ) : (
-          <img className="v2-sidebar-avatar" src={avatarSrc} alt="" />
+          <img className="v2-sidebar-avatar" src={avatarSrc} alt="" onError={() => setAvatarBroken(true)} />
         )) : (
           <div className="v2-sidebar-avatar v2-sidebar-avatar-fallback" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Cloud size={20} />

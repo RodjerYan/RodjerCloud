@@ -61,17 +61,35 @@ interface FileThumbProps {
 
 export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, fileName, isVideo, typeLabel }) => {
   const [url, setUrl] = useState<string | null>(null)
+  const [broken, setBroken] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // retry if a new URL arrives after a failed load (e.g. later thumbnail-ready event)
+  useEffect(() => { setBroken(false) }, [url])
 
   useEffect(() => {
     const el = containerRef.current
     if (el) {
-      observe(el, () => setIsVisible(true))
+      observe(el, () => {
+        console.log(`[thumb] visible id=${messageId}`)
+        setIsVisible(true)
+      })
     }
     return () => {
       if (el) unobserve(el)
     }
+  }, [])
+
+  // Safety: if IntersectionObserver never fires (edge cases), force load after 800ms
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setIsVisible(v => {
+        if (!v) console.log(`[thumb] isVisible fallback force id=${messageId}`)
+        return v || true
+      })
+    }, 800)
+    return () => clearTimeout(t)
   }, [])
 
   useEffect(() => {
@@ -83,6 +101,7 @@ export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, file
     }
     let active = true
     loadThumb(messageId, fileName, (res) => {
+      console.log(`[thumb] loadThumb id=${messageId} → ${res ? res.slice(0, 80) : 'null'}`)
       if (active && res) {
         thumbUrlCache.set(messageId, res)
         setUrl(res)
@@ -113,9 +132,19 @@ export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, file
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {url ? (
+      {url && !broken ? (
         <>
-          <img src={url} loading="lazy" decoding="async" className="mf-gm-img" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img
+            src={url}
+            loading="lazy"
+            decoding="async"
+            className="mf-gm-img"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onError={(e) => {
+              console.log(`[thumb] img onError id=${messageId} src=${url.slice(0, 120)}`)
+              setBroken(true)
+            }}
+          />
           {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
         </>
       ) : (

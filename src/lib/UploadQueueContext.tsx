@@ -35,6 +35,9 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
   const archiveStart = useRef(0)
   const uploadStart = useRef(0)
   const isProcessing = useRef(false)
+  // id, которые main уже объявлял в очереди (getUploadState / telegram:queue-state).
+  // Нужно, чтобы не пометить done item, который ещё не успел попасть в main-очередь.
+  const seenInMainRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     (async () => {
@@ -46,6 +49,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             fileSize: j.fileSize || 0, status: j.status || 'waiting', percent: j.percent || 0,
             sent: j.sent || 0, total: j.total || j.fileSize || 0
           }))
+          restored.forEach((r: QueueItem) => seenInMainRef.current.add(r.id))
           setQueue(prev => {
             const existingIds = new Set(prev.map(p => p.id))
             const newItems = restored.filter((r: QueueItem) => !existingIds.has(r.id))
@@ -94,8 +98,20 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           sent: previousById.get(j.id)?.sent ?? j.sent ?? 0,
           total: previousById.get(j.id)?.total || j.total || j.fileSize || 0
         }))
+        data.queue.forEach((j: any) => seenInMainRef.current.add(j.id))
         const mainById = new Map(mainItems.map(item => [item.id, item]))
-        const preservedOrder = prev.map(item => mainById.get(item.id) || item)
+        // Main присылает только waiting/uploading и убирает job когда он завершён/отменён.
+        // Если раньше виденный в main item вдруг исчез из снимка — закрываем его как done,
+        // иначе он навсегда остаётся 'uploading' (zombie) и вечно держит баннер AggregateProgress.
+        const preservedOrder = prev.map(item => {
+          const merged = mainById.get(item.id)
+          if (merged) return merged
+          if (item.status === 'failed') return item
+          if (seenInMainRef.current.has(item.id) && (item.status === 'uploading' || item.status === 'waiting')) {
+            return { ...item, status: 'done' as const, percent: 100 }
+          }
+          return item
+        })
         const restoredOnly = mainItems.filter(item => !previousById.has(item.id))
         return [...preservedOrder, ...restoredOnly]
       })
@@ -127,9 +143,13 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         active++
         setQueue(prev => prev.map(q => q.id === it.id ? { ...q, status: 'uploading' } : q))
         window.electronAPI.telegram.uploadFile(it.filePath, it.id, it.encrypt).then((res: { success: boolean; error?: string }) => {
-          setQueue(prev => prev.map(q => q.id === it.id
-            ? { ...q, status: res.success ? 'done' : 'failed', percent: res.success ? 100 : q.percent, error: res.success ? undefined : res.error }
-            : q))
+          setQueue(prev => {
+            // Отмена — не ошибка: убираем элемент из очереди (как при ручном remove)
+            if (!res.success && res.error === 'cancelled') return prev.filter(q => q.id !== it.id)
+            return prev.map(q => q.id === it.id
+              ? { ...q, status: res.success ? 'done' : 'failed', percent: res.success ? 100 : q.percent, error: res.success ? undefined : res.error }
+              : q)
+          })
         }).finally(() => {
           active--
           processingIds.delete(it.id)
@@ -143,39 +163,51 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let lastUpdate = 0;
-    let pendingUpdates = new Map<string, { percent: number; sent: number; total: number }>();
+    const pendingUpdates = new Map<string, { percent: number; sent: number; total: number }>();
     let rafId: number | null = null;
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      if (rafId) return;
+      if (trailingTimer) { clearTimeout(trailingTimer); trailingTimer = null; }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const batch = new Map(pendingUpdates);
+        pendingUpdates.clear();
+        if (batch.size > 0) {
+          setQueue(prev => {
+            let changed = false;
+            const next = prev.map(q => {
+              const u = batch.get(q.id);
+              if (u) { changed = true; return { ...q, percent: u.percent, sent: u.sent, total: u.total }; }
+              return q;
+            });
+            return changed ? next : prev;
+          });
+        }
+        // lastUpdate — ПОСЛЕ отправки batch, чтобы не терять события, пришедшие во время rAF
+        lastUpdate = Date.now();
+      });
+    };
 
     const off = window.electronAPI.telegram.onUploadProgress?.((data: any) => {
       pendingUpdates.set(data.id, { percent: data.percent, sent: data.sent, total: data.total });
       const now = Date.now();
-
-      if (now - lastUpdate > 500) {
-        if (!rafId) {
-          rafId = window.requestAnimationFrame(() => {
-            const batch = new Map(pendingUpdates);
-            pendingUpdates.clear();
-            if (batch.size > 0) {
-              setQueue(prev => {
-                let changed = false;
-                const next = prev.map(q => {
-                  const u = batch.get(q.id);
-                  if (u) { changed = true; return { ...q, percent: u.percent, sent: u.sent, total: u.total }; }
-                  return q;
-                });
-                return changed ? next : prev;
-              });
-            }
-            lastUpdate = Date.now();
-            rafId = null;
-          });
-        }
+      if (now - lastUpdate >= 150) {
+        flush();
+      } else if (!trailingTimer) {
+        // Trailing flush: гарантируем, что последнее событие после паузы будет доставлено
+        trailingTimer = setTimeout(() => {
+          trailingTimer = null;
+          flush();
+        }, 150 - (now - lastUpdate));
       }
     });
 
     return () => {
       if (off) off();
       if (rafId) cancelAnimationFrame(rafId);
+      if (trailingTimer) clearTimeout(trailingTimer);
     }
   }, [])
 

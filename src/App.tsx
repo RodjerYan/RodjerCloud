@@ -125,7 +125,6 @@ function App() {
       document.documentElement.dataset.theme = p.theme
       document.documentElement.dataset.density = p.density
       document.documentElement.dataset.animations = p.animations
-      document.documentElement.style.setProperty("--v3-sans-active", p.font || "var(--v3-sans)")
     })
     return () => { if (t) clearTimeout(t) }
   }, [])

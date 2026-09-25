@@ -78,6 +78,18 @@ button:active, a:active { transform: scale(0.97); }
 .v3-sub { color: var(--text-dim); font-size: var(--text-base); }
 .v3-row { display: flex; gap: 12px; align-items: center; }
 
+/* Headings → Inter Display (Inter Variable c opsz + font-optical-sizing) */
+h1, h2, h3,
+.v3-h1, .v3-h2, .splash-title, .login-title,
+.up-head h1, .up-drop h2, .up-queue-head h2, .up-vault-modal h3,
+.dh-banner h1, .dh-panel-head h2,
+.se-root h1, .settings-header h2, .se-app-name, .se-modal-title, .se-notes-h3,
+.st-root h1, .st-panel h2,
+.mf-empty-title, .ap-title, .v2-h1, .section-title {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+
 /* Grid */
 .v3-grid { display: grid; gap: 18px; }
 

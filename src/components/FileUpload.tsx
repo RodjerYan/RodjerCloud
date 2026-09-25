@@ -136,6 +136,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
             if (updated[idx]) { updated[idx].status = 'completed'; updated[idx].progress = 100 }
             return updated
           })
+        } else if (result.error === 'cancelled') {
+          // Отмена — не ошибка: тихо убираем элемент из очереди (queueRef синхронизируем вручную,
+          // т.к. ре-рендер асинхронный, а цикл while читает queueRef.current)
+          const next = queueRef.current.filter((_, i) => i !== idx)
+          queueRef.current = next
+          setUploadQueue(next)
+          continue
         } else {
           setUploadQueue(prev => {
             const updated = [...prev]

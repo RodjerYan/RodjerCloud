@@ -6,6 +6,7 @@ import { Trash2, RotateCcw, X, Download, Search, Grid, List as ListIcon, Share2,
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm } from '../lib/dialogs'
 import { toast } from '../lib/toast'
+import { downloadFileWithFeedback } from '../lib/download'
 import { BulkProgressModal } from '../components/BulkProgressModal'
 import { safeViewTransition } from '../lib/viewTransition'
 import { FileThumb } from '../components/FileThumb'
@@ -448,21 +449,29 @@ export default function TrashPage() {
   }
 
   const handleClearTrash = async (e?: React.MouseEvent) => {
-    if (files.length === 0) return
     const count = files.length
-    if (!(await appConfirm(`Удалить навсегда все файлы из корзины (${count})?\nВосстановить их после этого будет невозможно.`))) return
+    const confirmText = count === 0
+      ? 'Очистить призраки/мусор в канале?'
+      : `Удалить навсегда все файлы из корзины (${count})?\nВосстановить их после этого будет невозможно.`
+    if (!(await appConfirm(confirmText))) return
     let x = 0.5, y = 0.5
     if (e) { x = e.clientX / window.innerWidth; y = e.clientY / window.innerHeight }
-    confetti({ particleCount: count > 200 ? 40 : 120, spread: 100, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+    if (count > 0) {
+      confetti({ particleCount: count > 200 ? 40 : 120, spread: 100, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
+    }
 
     const snapshot = files
     const items = snapshot.map(f => ({ name: f.fileName, status: 'pending' as const }))
     flushSync(() => {
       setFiles([])
       clearSelection()
-      setProgressModal({ title: 'Очистка корзины', items, current: 0, total: count, visible: true, onClose: () => setProgressModal(null) })
+      if (count > 0) {
+        setProgressModal({ title: 'Очистка корзины', items, current: 0, total: count, visible: true, onClose: () => setProgressModal(null) })
+      }
     })
 
+    // закроется автоматически при success/error/info (S1 — toast.ts dismiss loading)
+    toast.loading('Очистка…')
     const onProgress = (data: { kind: string; index: number; total: number }) => {
       if (data.kind !== 'purge-all') return
       setProgressModal(prev => {
@@ -479,13 +488,14 @@ export default function TrashPage() {
       unsub()
       if (r.success) {
         const deleted = r.data?.deleted ?? count
+        const ghostsDeleted = r.data?.ghostsDeleted ?? 0
         const failed = r.data?.failed ?? 0
         setProgressModal(prev => prev ? { ...prev, current: prev.total, items: prev.items.map((it, i) => ({ ...it, status: i < deleted ? 'done' as const : failed > 0 ? 'error' as const : 'done' as const })) } : prev)
         if (failed > 0) {
-          toast.error(`Удалено ${deleted} из ${count} · не удалось ${failed}`)
+          toast.error(`Удалено ${deleted}, призраков ${ghostsDeleted} · не удалось ${failed}`)
           load()
         } else {
-          toast.success(`Корзина очищена · удалено ${deleted}`)
+          toast.success(`Удалено ${deleted}, призраков ${ghostsDeleted}`)
         }
       } else {
         toast.error(r.error || 'Ошибка очистки корзины')
@@ -585,21 +595,9 @@ export default function TrashPage() {
         <div style={{ flex: 1 }} />
         <button
           className="v3-btn ghost"
-          disabled={files.length === 0}
-          style={{ fontSize: 12, padding: '4px 8px', color: '#f87171', opacity: files.length === 0 ? 0.4 : 1 }}
+          style={{ fontSize: 12, padding: '4px 8px', color: '#f87171' }}
           onClick={handleClearTrash}
         >Очистить корзину</button>
-        <button className="v3-btn ghost" style={{ fontSize: 12, padding: '4px 8px', color: '#f87171' }} onClick={async () => {
-          if (!(await appConfirm('Выполнить глубокую очистку канала от "призраков"? Это удалит все осиротевшие части файлов и зависшие файлы корзины.'))) return
-          toast.loading('Очистка канала...')
-          const r: any = await window.electronAPI.telegram.cleanupGhosts()
-          if (r.success) {
-            toast.success(`Очистка завершена! Удалено сообщений: ${r.deletedCount || 0}`)
-            load()
-          } else {
-            toast.error('Ошибка очистки: ' + r.error)
-          }
-        }}>Очистить призраки</button>
       </div>
 
       <div className="mf-bulkbar" style={{ position: 'sticky', top: 0, zIndex: 50, opacity: selected.size > 0 ? 1 : 0, transform: selected.size > 0 ? 'none' : 'translateY(-100%)', transition: 'opacity 0.25s, transform 0.3s', pointerEvents: selected.size > 0 ? 'auto' : 'none', visibility: selected.size > 0 ? 'visible' : 'hidden' }}>
@@ -654,7 +652,7 @@ export default function TrashPage() {
                 <div className="mf-card-meta">{fmtSize(f.fileSize)} · <TrashTimer trashedAt={f.trashedAt} /></div>
                 <div className="mf-card-actions">
                   <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
-                  <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
+                  <button title="Скачать" onClick={(e) => downloadFileWithFeedback(f, e)}><Download size={14} /></button>
                   <button title="Удалить навсегда" className="danger" onClick={(e) => handlePurge(f.messageId, e)}><X size={14} /></button>
                 </div>
               </div>
@@ -715,7 +713,7 @@ export default function TrashPage() {
                   <td><TrashTimer trashedAt={f.trashedAt} /></td>
                   <td>
                     <button title="Восстановить" onClick={(e) => handleRestore(f.messageId, e)}><RotateCcw size={14} /></button>
-                    <button title="Скачать" onClick={() => window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)}><Download size={14} /></button>
+                    <button title="Скачать" onClick={(e) => downloadFileWithFeedback(f, e)}><Download size={14} /></button>
                     <button title="Удалить навсегда" className="danger" onClick={(e) => handlePurge(f.messageId, e)}><X size={14} /></button>
                   </td>
                 </tr>

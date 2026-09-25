@@ -1,9 +1,82 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock, CheckCircle2 } from 'lucide-react'
+import { Copy, Bot, Info, Download, ExternalLink, HardDrive, Link2, Lock, CheckCircle2, ArrowRight, X, Rocket } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import iconUrl from '../assets/icon.png'
 import { toast } from '../lib/toast'
+
+/** Light release-notes renderer: ##/### headings, - lists, **bold**, `code`. Safe (no HTML). */
+function renderReleaseNotes(raw: string): React.ReactNode {
+  if (!raw) return null
+  const lines = raw.replace(/\r\n/g, '\n').split('\n')
+  const nodes: React.ReactNode[] = []
+  let listItems: string[] = []
+  let key = 0
+
+  const flushList = () => {
+    if (listItems.length === 0) return
+    nodes.push(
+      <ul key={`ul-${key++}`} className="se-notes-list">
+        {listItems.map((item, i) => (
+          <li key={i}>{inlineFmt(item)}</li>
+        ))}
+      </ul>
+    )
+    listItems = []
+  }
+
+  const inlineFmt = (text: string): React.ReactNode[] => {
+    // split on **bold** and `code`
+    const parts: React.ReactNode[] = []
+    const re = /(\*\*[^*]+\*\*|`[^`]+`)/g
+    let last = 0
+    let m: RegExpExecArray | null
+    let i = 0
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) parts.push(text.slice(last, m.index))
+      const tok = m[0]
+      if (tok.startsWith('**')) {
+        parts.push(<strong key={i++}>{tok.slice(2, -2)}</strong>)
+      } else {
+        parts.push(<code key={i++}>{tok.slice(1, -1)}</code>)
+      }
+      last = m.index + tok.length
+    }
+    if (last < text.length) parts.push(text.slice(last))
+    return parts
+  }
+
+  for (const line of lines) {
+    const h = line.match(/^(#{1,4})\s+(.*)$/)
+    if (h) {
+      flushList()
+      const level = h[1].length
+      nodes.push(
+        <div key={key++} className={level <= 2 ? 'se-notes-h' : 'se-notes-h3'}>
+          {inlineFmt(h[2])}
+        </div>
+      )
+      continue
+    }
+    const li = line.match(/^\s*[-*+]\s+(.*)$/)
+    if (li) {
+      listItems.push(li[1])
+      continue
+    }
+    if (/^\s*$/.test(line)) {
+      flushList()
+      continue
+    }
+    flushList()
+    nodes.push(
+      <p key={key++} className="se-notes-p">
+        {inlineFmt(line)}
+      </p>
+    )
+  }
+  flushList()
+  return nodes
+}
 
 export default function SettingsPage({ channelInfo, onChangeChannel, updateAvailable }: { channelInfo: any; onChangeChannel: () => void; updateAvailable?: boolean }) {
   const [concurrency, setConcurrency] = useState(5)
@@ -33,6 +106,71 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
   const [askDownloadPath, setAskDownloadPath] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [downloadPathState, setDownloadPathState] = useState('')
+  const modalCardRef = useRef<HTMLDivElement>(null)
+  const primaryBtnRef = useRef<HTMLButtonElement>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
+
+  const closeModal = useCallback(() => {
+    if (downloading) return
+    setUpdateModal(null)
+    setDownloadPathState('')
+    setDownloadProgress(0)
+  }, [downloading])
+
+  // Focus trap + Esc for update modal
+  useEffect(() => {
+    if (!updateModal?.hasUpdate) return
+    prevFocusRef.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => primaryBtnRef.current?.focus())
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!downloading) {
+          setUpdateModal(null)
+          setDownloadPathState('')
+          setDownloadProgress(0)
+        }
+        return
+      }
+      if (e.key === 'Tab') {
+        const root = modalCardRef.current
+        if (!root) return
+        const list = Array.from(
+          root.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')
+        )
+        if (list.length === 0) {
+          e.preventDefault()
+          return
+        }
+        const first = list[0]
+        const last = list[list.length - 1]
+        const active = document.activeElement
+        if (e.shiftKey) {
+          if (active === first || !root.contains(active)) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else if (active === last || !root.contains(active)) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      cancelAnimationFrame(raf)
+      const el = prevFocusRef.current
+      prevFocusRef.current = null
+      if (el && typeof el.focus === 'function' && document.contains(el)) el.focus()
+    }
+  }, [updateModal?.hasUpdate, downloading])
+
+  const notesNode = useMemo(
+    () => (updateModal?.releaseNotes ? renderReleaseNotes(updateModal.releaseNotes) : null),
+    [updateModal?.releaseNotes]
+  )
 
   useEffect(() => {
     (async () => {
@@ -297,46 +435,127 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
       </div>
 
       {updateModal && updateModal.hasUpdate && createPortal(
-        <div className="se-modal-overlay" onClick={() => { if (!downloading) setUpdateModal(null) }}>
-          <div className="settings-card se-modal-content" onClick={e => e.stopPropagation()} style={{ margin: 0 }}>
-            <h3 className="se-modal-title">Доступно обновление v{updateModal.latestVersion}</h3>
-            <div className="se-modal-version">Текущая версия: v{updateModal.currentVersion}</div>
-            
-            {updateModal.releaseNotes && (
-              <div className="se-modal-notes">
-                {updateModal.releaseNotes}
+        <div
+          className="se-modal-overlay"
+          onClick={closeModal}
+          role="presentation"
+        >
+          <div
+            ref={modalCardRef}
+            className="se-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="se-upd-title"
+            aria-describedby="se-upd-ver"
+            tabIndex={-1}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="se-modal-x"
+              onClick={closeModal}
+              disabled={downloading}
+              aria-label="Закрыть"
+            >
+              <X size={16} />
+            </button>
+
+            <div className="se-modal-hero">
+              <div className="se-modal-icon" aria-hidden>
+                <Rocket size={28} strokeWidth={1.75} />
+              </div>
+              <h3 id="se-upd-title" className="se-modal-title">
+                Доступно обновление
+              </h3>
+              <p id="se-upd-ver" className="se-modal-sub">
+                Установите свежую версию — займёт пару минут
+              </p>
+            </div>
+
+            <div className="se-modal-versions" aria-label="Версии">
+              <span className="se-ver-chip current">
+                <span className="se-ver-label">сейчас</span>
+                <span className="se-ver-num">v{updateModal.currentVersion}</span>
+              </span>
+              <ArrowRight size={16} className="se-ver-arrow" aria-hidden />
+              <span className="se-ver-chip next">
+                <span className="se-ver-label">новая</span>
+                <span className="se-ver-num">v{updateModal.latestVersion}</span>
+              </span>
+            </div>
+
+            {notesNode && (
+              <div className="se-modal-notes" id="se-upd-notes">
+                <div className="se-notes-label">Что нового</div>
+                <div className="se-notes-body">{notesNode}</div>
               </div>
             )}
-            
-            {downloading ? (
-              <div className="se-modal-progress">
+
+            {downloading && (
+              <div className="se-modal-progress" role="progressbar" aria-valuenow={downloadProgress} aria-valuemin={0} aria-valuemax={100} aria-label="Загрузка обновления">
                 <div className="se-modal-progress-text">
-                  <span>Загрузка…</span><span>{downloadProgress}%</span>
+                  <span>
+                    {downloadProgress < 100 ? 'Загрузка обновления…' : 'Готово к установке'}
+                  </span>
+                  <span className="se-progress-pct">{downloadProgress}%</span>
                 </div>
                 <div className="se-modal-progress-bar-wrap">
                   <div className="se-modal-progress-bar" style={{ width: downloadProgress + '%' }} />
                 </div>
               </div>
-            ) : null}
-            
+            )}
+
             <div className="se-modal-actions">
               {!downloading && !downloadPathState && (
-                <button className="v3-btn" onClick={() => setUpdateModal(null)}>Закрыть</button>
+                <>
+                  <button type="button" className="v3-btn ghost" onClick={closeModal}>
+                    Позже
+                  </button>
+                  <button
+                    ref={primaryBtnRef}
+                    type="button"
+                    className="v3-btn primary se-modal-cta"
+                    onClick={startDownload}
+                  >
+                    <Download size={15} />
+                    Обновить до v{updateModal.latestVersion}
+                  </button>
+                </>
               )}
-              {!downloading && !downloadPathState && (
-                <button className="v3-btn primary" onClick={startDownload}>
-                  <Download size={14} /> Скачать
+              {downloading && (
+                <button type="button" className="v3-btn" disabled>
+                  Не закрывайте приложение
                 </button>
               )}
               {downloadProgress === 100 && downloadPathState && (
                 <>
-                  <button className="v3-btn" onClick={() => { setUpdateModal(null); setDownloadPathState(''); setDownloadProgress(0) }}>Закрыть</button>
-                  <button className="v3-btn primary" onClick={installUpdate}>
-                    <ExternalLink size={14} /> Установить
+                  <button type="button" className="v3-btn ghost" onClick={closeModal}>
+                    Позже
+                  </button>
+                  <button
+                    ref={primaryBtnRef}
+                    type="button"
+                    className="v3-btn primary se-modal-cta"
+                    onClick={installUpdate}
+                  >
+                    <ExternalLink size={15} />
+                    Установить сейчас
                   </button>
                 </>
               )}
             </div>
+
+            {updateModal.htmlUrl && (
+              <a
+                className="se-modal-notes-link"
+                href={updateModal.htmlUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Полные заметки на GitHub
+                <ExternalLink size={12} />
+              </a>
+            )}
           </div>
         </div>,
         document.body

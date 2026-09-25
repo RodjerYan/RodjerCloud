@@ -27,6 +27,14 @@ function typeOf(name: string): string {
   return 'Другое'
 }
 
+/** <img> with visible fallback when the src fails to load (blob/local-file). */
+function SafeImg({ src, fallback, style, loading }: { src?: string | null; fallback: React.ReactNode; style?: React.CSSProperties; loading?: 'lazy' }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => { setBroken(false) }, [src])
+  if (!src || broken) return <>{fallback}</>
+  return <img src={src} style={style} loading={loading} onError={() => setBroken(true)} />
+}
+
 const FILES_PAGE_SIZE = 30
 const SCROLL_THRESHOLD = 600
 const RECENT_WINDOW_SEC = 6 * 3600
@@ -47,6 +55,7 @@ const CAT_COLOR: Record<string, string> = {
   Недавние: '#fbbf24', Изображения: '#a78bfa', Видео: '#f472b6', Документы: '#60a5fa', Архивы: '#fb923c', Аудио: '#34d399', Другое: '#94a3b8',
 }
 import { pendingStore, type PendingUpload } from '../lib/PendingUploadStore'
+import { extractDroppedFiles as extractDropFiles } from '../lib/dropUtils'
 
 const matchVirtualFolder = (fileName: string, folderId: string) => {
   if (folderId === '__type_Изображения') return !!fileName.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|svg|avif)$/i)
@@ -79,6 +88,8 @@ export default function MyFilesPage() {
   const [preview, setPreview] = useState<{ idx: number; list: any[] } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewIsVideo, setPreviewIsVideo] = useState(false)
+  const [previewBroken, setPreviewBroken] = useState(false)
+  useEffect(() => { setPreviewBroken(false) }, [previewUrl])
   const [drillDown, setDrillDown] = useState<string | null>(null)
   const [drillFiles, setDrillFiles] = useState<any[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
@@ -88,6 +99,11 @@ export default function MyFilesPage() {
   const [folders, setFolders] = useState<any[]>([])
   const [fileFolders, setFileFolders] = useState<Record<number, string>>({})
   const [folderDrill, setFolderDrill] = useState<string | null>(null)
+  // rework minor#2: upload живёт дольше рендера — замыкание .then видит
+  // УСТАРЕВШИЙ folderDrill (равный targetFolderId в момент старта загрузки),
+  // поэтому сравниваем через ref с актуальным значением.
+  const folderDrillRef = useRef<string | null>(null)
+  useEffect(() => { folderDrillRef.current = folderDrill }, [folderDrill])
   const [folderFiles, setFolderFiles] = useState<any[]>([])
   const folderNextOffsetIdRef = useRef<number | null>(null)
   const [folderTotal, setFolderTotal] = useState(0)
@@ -502,10 +518,15 @@ export default function MyFilesPage() {
 
   const loadFolderFiles = useCallback(async (folderId: string, silent = false) => {
     const requestId = ++folderRequestIdRef.current
-    if (!silent) setFolderLoading(true)
-    setFolderFiles([])
+    if (!silent) {
+      setFolderLoading(true)
+      // T-20260925-002 S2: silent-обновление НЕ wipe'ит старое содержимое —
+      // список остаётся на экране, пока не придёт ответ IPC (нет «папка пуста»).
+      // При первом входе (silent=false) wipe допустим.
+      setFolderFiles([])
+      setFolderTotal(0)
+    }
     folderNextOffsetIdRef.current = null
-    setFolderTotal(0)
     try {
       const r = await window.electronAPI.telegram.listFolderFilesFromCache(folderId, FILES_PAGE_SIZE, 0)
       if (requestId !== folderRequestIdRef.current) return
@@ -541,6 +562,38 @@ export default function MyFilesPage() {
     setFolderLoadingMore(false)
   }, [folderDrill])
 
+  const scheduleDropDone = () => {
+    if (dropDoneRef.current) clearTimeout(dropDoneRef.current)
+    dropDoneRef.current = setTimeout(() => {
+      setDropProgress(null)
+      forceRemovedIdsRef.current.clear()
+    }, 6000)
+  }
+
+  // Инкремент completed + пересчёт pct. Side-effect (scheduleDropDone) НЕ внутри
+  // апдейтера — показ done вынесен в useEffect ниже (см. MINOR review).
+  const bumpDropProgress = () => {
+    setDropProgress(dp => {
+      if (!dp) return null
+      const completed = dp.completed + 1
+      const activeProgresses = pendingStore.uploads.reduce((sum, p) => sum + p.progress, 0)
+      const pct = dp.total > 0 ? Math.min(100, Math.floor(((completed * 100) + activeProgresses) / dp.total)) : 0
+      return { ...dp, completed, pct }
+    })
+  }
+
+  // Снятие pending после завершения загрузки (normal path).
+  // Если запись уже снята force-remove'ом — remove идемпотентен, bump НЕ делаем
+  // (иначе двойной счёт completed и просадка pct).
+  const finalizePending = (id: string) => {
+    pendingStore.remove(id)
+    if (forceRemovedIdsRef.current.has(id)) {
+      console.log('[drop] finalize: already force-removed, skip bump', id)
+      return
+    }
+    bumpDropProgress()
+  }
+
   const uploadDroppedFiles = async (dropped: { filePath: string; fileName: string; objectUrl?: string }[], targetFolderId?: string | null) => {
     if (dropped.length === 0) return
     setDropProgress(prev => {
@@ -575,7 +628,7 @@ export default function MyFilesPage() {
 
         if (choice === 'skip') {
           pendingStore.remove(pendingId)
-          setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
+          bumpDropProgress()
           continue
         }
         if (choice === 'replace') {
@@ -597,7 +650,6 @@ export default function MyFilesPage() {
 
       window.electronAPI.telegram.uploadFile(file.filePath, pendingId, false, uploadCustomName).then(async (res: any) => {
         pendingStore.updateProgress({ id: pendingId, percent: 100 })
-        await new Promise(r => setTimeout(r, 500))
 
         if (res.success && res.data) {
           if (res.data.hash) v3store.setMeta({ messageId: res.data.messageId, hash: res.data.hash })
@@ -609,32 +661,38 @@ export default function MyFilesPage() {
 
           if (targetFolderId && res.data.messageId) {
             setFileFolders(prev => ({ ...prev, [res.data.messageId]: targetFolderId }))
-            await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
           }
+        } else if (res.error === 'cancelled') {
+          toast.info('Загрузка отменена')
         } else {
           toast.error(`Ошибка загрузки: ${res.error || 'неизвестная ошибка'}`)
         }
 
-        pendingStore.remove(pendingId)
+        // Снимаем pending сразу после updateProgress(100) ДО potentially зависших
+        // folder-операций («показ done» держит dropProgress + scheduleDropDone 6s).
+        // Без 500ms-задержки: она открывала окно гонки для force-remove.
+        finalizePending(pendingId)
         if (file.objectUrl) URL.revokeObjectURL(file.objectUrl)
 
-        await loadFolders()
-
-        setDropProgress(dp => {
-          if (!dp) return null
-          const completed = dp.completed + 1
-          const pct = Math.floor((completed / dp.total) * 100)
-          if (completed >= dp.total) {
-            clearTimeout(dropDoneRef.current)
-            dropDoneRef.current = setTimeout(() => setDropProgress(null), 6000)
+        // T-20260925-002 S2: файл в папке появляется сразу после upload.
+        // Порядок важен: сначала addFile (main уже знает mapping), затем
+        // немедленный loadFolderFiles(silent) — не ждём files:changed (3s debounce).
+        if (res.success && res.data && targetFolderId && res.data.messageId) {
+          try {
+            await window.electronAPI.folders.addFile(targetFolderId, res.data.messageId)
+          } catch {}
+          // rework minor#2: пользователь мог уйти из папки, пока шла загрузка —
+          // не перезаписываем чужой список содержимым папки-таргета
+          // (фоновое обновление останется через files:changed → debounce 3000).
+          if (folderDrillRef.current === targetFolderId) {
+            try { await loadFolderFiles(targetFolderId, true) } catch {}
           }
-          return { ...dp, completed, pct }
-        })
+        }
+        try { await loadFolders() } catch {}
       }).catch((err: any) => {
         console.error('Upload failed:', err)
-        pendingStore.remove(pendingId)
-        loadFolders()
-        setDropProgress(dp => dp ? { ...dp, completed: dp.completed + 1 } : null)
+        finalizePending(pendingId)
+        loadFolders().catch(() => {})
       })
     }
   }
@@ -890,10 +948,21 @@ export default function MyFilesPage() {
   }
   const clearSelection = () => setSelected(new Set())
 
-  const handleDownload = async (f: any) => {
-    toast.info('Скачивание ' + f.fileName)
-    const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
-    toast.success(r.success ? 'Сохранено: ' + (r.data?.filePath || f.fileName) : 'Ошибка скачивания')
+  const handleDownload = async (f: any, e?: React.MouseEvent) => {
+    e?.stopPropagation?.()
+    try {
+      toast.info('Скачивание ' + f.fileName)
+      const r = await window.electronAPI.telegram.downloadFile(f.messageId, f.fileName)
+      if (r?.success) {
+        toast.success('Файл сохранён: ' + (r.data?.filePath || f.fileName))
+      } else if (r?.error === 'cancelled') {
+        toast.info('Скачивание отменено')
+      } else {
+        toast.error(r?.error || 'Ошибка скачивания')
+      }
+    } catch (err: any) {
+      toast.error('Ошибка скачивания: ' + (err?.message || String(err || '')))
+    }
   }
   const handleDelete = async (f: any, e?: React.MouseEvent) => {
     let targetElement = e ? (e.currentTarget as HTMLElement).closest('.mf-card, .mf-list-item, tr') : null;
@@ -994,7 +1063,21 @@ export default function MyFilesPage() {
     const ft = typeOf(f.fileName)
     if (ft !== 'Изображения' && ft !== 'Видео') return
     const items = list || filtered
-    window.electronAPI.preview.open(items, items.indexOf(f))
+    // T-20260924-019 S3: indexOf(f) по identity мог вернуть -1 (f из другого списка)
+    // → preview.open молча падал. Сначала доверяем переданному idx, затем indexOf,
+    // затем lookup по messageId; иначе — явная ошибка вместо тишины.
+    let i = (idx >= 0 && idx < items.length && items[idx]?.messageId === f.messageId) ? idx : items.indexOf(f)
+    if (i === -1) i = items.findIndex((x: any) => x?.messageId === f.messageId)
+    if (i === -1) {
+      toast.error('Не удалось открыть предпросмотр: файл не найден в списке')
+      return
+    }
+    try {
+      const r = await window.electronAPI.preview.open(items, i)
+      if (!r?.success) toast.error(r?.error || 'Не удалось открыть предпросмотр')
+    } catch (err: any) {
+      toast.error('Не удалось открыть предпросмотр: ' + (err?.message || ''))
+    }
   }
   useEffect(() => {
     const onMousedown = (e: MouseEvent) => {
@@ -1224,6 +1307,11 @@ export default function MyFilesPage() {
   const [dropProgress, setDropProgress] = useState<{ current: number; total: number; pct: number; completed: number } | null>(null)
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>(pendingStore.uploads)
   const dropDoneRef = useRef<NodeJS.Timeout>()
+  const stalePendingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  // последний seen progress (>=100) по id — для per-id sliding 30s-таймера
+  const lastProgress100Ref = useRef<Map<string, number>>(new Map())
+  // id, снятые force-remove'ом: поздний .then/.catch делает remove (idempotent), но НЕ bump
+  const forceRemovedIdsRef = useRef<Set<string>>(new Set())
   const dragCounter = useRef(0)
 
   useEffect(() => {
@@ -1234,8 +1322,47 @@ export default function MyFilesPage() {
   }, [])
 
   useEffect(() => {
-    return pendingStore.subscribe((updates: PendingUpload[]) => {
+    const staleTimers = stalePendingTimersRef.current
+    const lastProgress100 = lastProgress100Ref.current
+    const unsub = pendingStore.subscribe((updates: PendingUpload[]) => {
       setPendingUploads(updates)
+
+      // Таймеры для записей, которые исчезли или снова <100 — снимаем
+      for (const [id, t] of Array.from(staleTimers)) {
+        const cur = updates.find(u => u.id === id)
+        if (!cur || cur.progress < 100) {
+          clearTimeout(t)
+          staleTimers.delete(id)
+          lastProgress100.delete(id)
+        }
+      }
+      // Страховка: запись с progress>=100 «зависла» (remove не пришёл) >30с
+      // от последнего progress-update **данной** записи (per-id sliding).
+      // Таймер сдвигается ТОЛЬКО если progress этой записи реально изменился —
+      // notify по другим записям не продлевает жизнь зависшей.
+      for (const p of updates) {
+        if (p.progress < 100) {
+          lastProgress100.delete(p.id)
+          continue
+        }
+        if (lastProgress100.get(p.id) === p.progress) continue // не изменился — таймер не трогаем
+        lastProgress100.set(p.id, p.progress)
+        const existing = staleTimers.get(p.id)
+        if (existing) clearTimeout(existing)
+        staleTimers.set(p.id, setTimeout(() => {
+          staleTimers.delete(p.id)
+          lastProgress100.delete(p.id)
+          const still = pendingStore.uploads.find(u => u.id === p.id)
+          if (still && still.progress >= 100) {
+            console.log('[drop] force-remove stale pending', p.id, still.fileName)
+            forceRemovedIdsRef.current.add(p.id)
+            pendingStore.remove(p.id)
+            bumpDropProgress() // completed++ не теряем (см. finalizePending guard)
+            setTimeout(() => forceRemovedIdsRef.current.delete(p.id), 10000)
+          }
+        }, 30000))
+      }
+
       setDropProgress(dp => {
         if (!dp) return null
         const activeProgresses = updates.reduce((sum, p) => sum + p.progress, 0)
@@ -1243,24 +1370,41 @@ export default function MyFilesPage() {
         return { ...dp, pct: Math.min(100, totalProgressPct) }
       })
     })
+    return () => {
+      unsub()
+      for (const t of staleTimers.values()) clearTimeout(t)
+      staleTimers.clear()
+      lastProgress100.clear()
+    }
   }, [])
 
-  const extractDroppedFiles = (e: React.DragEvent) => {
-    const dropped: { filePath: string; fileName: string; objectUrl?: string }[] = []
-    for (const file of Array.from(e.dataTransfer.files)) {
-      const p = window.electronAPI.getPathForFile(file)
-      let objectUrl: string | undefined
-      if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.name.match(/\.(heic|heif)$/i)) {
-        try { objectUrl = URL.createObjectURL(file) } catch {}
-      }
-      if (p) dropped.push({ filePath: p, fileName: file.name, objectUrl })
+  // MINOR: показ «завершено» (scheduleDropDone) — вне setDropProgress-updater,
+  // вызов после вычисления completed/total через commit состояния.
+  useEffect(() => {
+    if (dropProgress && dropProgress.total > 0 && dropProgress.completed >= dropProgress.total) {
+      scheduleDropDone()
     }
-    return dropped
+  }, [dropProgress?.completed, dropProgress?.total])
+
+  // Общий extraction (dir-detect через webkitGetAsEntry + temp-fallback) — см. src/lib/dropUtils.ts
+  const extractDroppedFiles = async (e: React.DragEvent, handler: string) => {
+    const res = await extractDropFiles(e, handler, { objectUrls: true })
+    if (res.skippedDirs > 0) {
+      toast.info('Папки через drag&drop не поддерживаются — используйте «Выбрать папку»')
+    }
+    if (res.skippedTooLarge > 0) {
+      toast.info('Файл слишком большой для drag&drop, используйте кнопку')
+    }
+    if (res.count > 0 && res.dropped.length === 0) {
+      console.warn('[drop] all skipped', { handler, count: res.count, skippedNoPath: res.skippedNoPath, skippedDirs: res.skippedDirs, skippedTooLarge: res.skippedTooLarge })
+      if (res.skippedNoPath > 0) toast.info('Не удалось получить путь к файлам — подробности в консоли')
+    }
+    return res
   }
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); dragCounter.current = 0; setIsDragOver(false)
-    const dropped = extractDroppedFiles(e)
+    const { dropped } = await extractDroppedFiles(e, 'mf-root')
     if (dropped.length === 0) return
     await uploadDroppedFiles(dropped, folderDrill)
   }
@@ -1551,7 +1695,7 @@ export default function MyFilesPage() {
                       <td>{fmtSize(f.fileSize)}</td>
                       <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                       <td>
-                        <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                        <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                         <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                         <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
                         <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
@@ -1599,7 +1743,7 @@ export default function MyFilesPage() {
                                     <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
                                     <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
                                     <div className="mf-gm-actions">
-                                      <button title="Скачать" onClick={() => handleDownload(f)}><Download size={13} /></button>
+                                      <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={13} /></button>
                                       {(drillDown === 'Изображения' || drillDown === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, galleryFiles.indexOf(f), galleryFiles)}><Eye size={13} /></button>}
                                       <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={13} /></button>
                                       <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={13} /></button>
@@ -1692,7 +1836,7 @@ export default function MyFilesPage() {
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
                               <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                               {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                               <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                               <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
@@ -1733,7 +1877,7 @@ export default function MyFilesPage() {
                               <td>{fmtSize(f.fileSize)}</td>
                               <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                               <td>
-                                <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                                <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                                 {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
                                 <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
                                 <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
@@ -1824,10 +1968,10 @@ export default function MyFilesPage() {
                              onDragOver={(e: any) => { e.preventDefault(); e.currentTarget.style.outline = '2px solid #7c83ff'; e.currentTarget.style.outlineOffset = '-2px' }}
                              onDragLeave={(e: any) => { e.currentTarget.style.outline = 'none' }}
                              onDrop={async (e: any) => {
-                               e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
-                               e.currentTarget.style.outline = 'none';
-                               if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                                 const dropped = extractDroppedFiles(e)
+                                e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
+                                e.currentTarget.style.outline = 'none';
+                                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                 const { dropped } = await extractDroppedFiles(e, 'mf-folder')
                                  if (dropped.length > 0) { await uploadDroppedFiles(dropped, sf.id); return }
                                }
                                try {
@@ -1893,7 +2037,7 @@ export default function MyFilesPage() {
                               </button>
                             )}
                             <div className="mf-card-icon" data-type={typeOf(f.fileName)} style={{ position: 'relative', overflow: 'hidden' }}>
-                              {f.objectUrl ? <img src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                              {<SafeImg src={f.objectUrl} loading="lazy" style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)'}} fallback={(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()} />}
                               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
                                 <svg width="40" height="40" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
                                   <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
@@ -1927,7 +2071,7 @@ export default function MyFilesPage() {
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
                             <div className="mf-card-actions">
                               <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                               {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
@@ -1951,7 +2095,7 @@ export default function MyFilesPage() {
                       ) : null}
                     </>
                   ) : (
-                    <table className="mf-table">
+                    <table className="mf-table mf-table-nohide">
                       <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
                       <tbody>
                         {currentLevelFolders.map(sf => (
@@ -1960,17 +2104,17 @@ export default function MyFilesPage() {
                               onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
                               onDragOver={(e) => e.preventDefault()}
                               onDrop={async (e) => {
-                                e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
-                                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                                  const dropped = extractDroppedFiles(e)
-                                  if (dropped.length > 0) { await uploadDroppedFiles(dropped, sf.id); return }
-                                }
-                                try {
-                                  const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
-                                  if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
-                                  else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
-                                } catch {}
-                              }}
+                                 e.preventDefault(); e.stopPropagation(); dragCounter.current = 0; setIsDragOver(false);
+                                 if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                   const { dropped } = await extractDroppedFiles(e, 'mf-folder')
+                                   if (dropped.length > 0) { await uploadDroppedFiles(dropped, sf.id); return }
+                                 }
+                                 try {
+                                   const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+                                   if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
+                                   else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
+                                 } catch {}
+                               }}
                               onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                             <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Folder size={16} style={{ color: '#7c83ff', flexShrink: 0 }} />{sf.name}</span></td>
@@ -1996,7 +2140,7 @@ export default function MyFilesPage() {
                             <td>{fmtSize(f.fileSize)}</td>
                             <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
                             <td>
-                              <button title="Скачать" onClick={() => handleDownload(f)}><Download size={14} /></button>
+                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
                               {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
                               <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
@@ -2014,7 +2158,7 @@ export default function MyFilesPage() {
                                 <td colSpan={5} style={{ padding: '16px 20px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                     <div style={{ position: 'relative', width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flexShrink: 0, border: '1px solid rgba(255,255,255,0.1)' }}>
-                                       {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }}><FileText size={20} color="#cbd5e1" /></div>}
+                                       <SafeImg src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} fallback={<div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }}><FileText size={20} color="#cbd5e1" /></div>} />
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
@@ -2052,7 +2196,7 @@ export default function MyFilesPage() {
                               <tr className="pending-upload" style={{ cursor: 'wait' }}>
                                 <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: 0.8 }}>
                                   <div style={{ position: 'relative', width: 24, height: 24, borderRadius: 4, overflow: 'hidden' }}>
-                                     {p.objectUrl ? <img src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} /> : <FileText size={16} />}
+                                      <SafeImg src={p.objectUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.6)' }} fallback={<FileText size={16} />} />
                                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
                                         <svg width="16" height="16" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
                                           <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="12" />
@@ -2127,10 +2271,12 @@ export default function MyFilesPage() {
           <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '30%', zIndex: 5 }} onClick={(e) => { e.stopPropagation(); navPreview(1) }} />
           <button className="mf-modal-nav left" onClick={(e) => { e.stopPropagation(); navPreview(-1) }}><ChevronLeft size={22} /></button>
           {previewUrl ? (
-            previewIsVideo ? (
-              <video src={previewUrl} controls autoPlay style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
+            previewBroken ? (
+              <div className="mf-modal-loading">Не удалось загрузить предпросмотр</div>
+            ) : previewIsVideo ? (
+              <video src={previewUrl} controls autoPlay onError={() => setPreviewBroken(true)} style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8 }} onClick={e => e.stopPropagation()} />
             ) : (
-              <img src={previewUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }} />
+              <img src={previewUrl} onError={() => setPreviewBroken(true)} onClick={e => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 8, boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }} />
             )
           ) : (
             <div className="mf-modal-loading">Загрузка предпросмотра…</div>

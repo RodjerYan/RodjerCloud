@@ -3,7 +3,9 @@ import { useLocation } from 'react-router-dom'
 import { Upload as UploadIcon, FolderOpen, Trash2, AlertTriangle, CheckCircle2, Clock3, Loader2, Archive, Lock, Unlock, X } from 'lucide-react'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { fmtSize } from '../lib/utils'
+import { toast } from '../lib/toast'
 import { useUploadQueue, type QueueItem as UploadQueueEntry } from '../lib/UploadQueueContext'
+import { extractDroppedFiles } from '../lib/dropUtils'
 
 const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 
@@ -113,10 +115,17 @@ export default function UploadPage() {
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
-    const dropped: any[] = []
-    for (const file of Array.from(e.dataTransfer.files)) {
-      const p = window.electronAPI.getPathForFile(file)
-      if (p) dropped.push({ filePath: p, fileName: file.name, fileSize: file.size })
+    // Общий extraction (dir-detect через webkitGetAsEntry + temp-fallback) — см. src/lib/dropUtils.ts
+    const { dropped, count, skippedNoPath, skippedDirs, skippedTooLarge } = await extractDroppedFiles(e, 'upload-page')
+    if (skippedDirs > 0) {
+      toast.info('Папки через drag&drop не поддерживаются — используйте «Выбрать папку»')
+    }
+    if (skippedTooLarge > 0) {
+      toast.info('Файл слишком большой для drag&drop, используйте кнопку')
+    }
+    if (count > 0 && dropped.length === 0) {
+      console.warn('[drop] all skipped', { handler: 'upload-page', count, skippedNoPath, skippedDirs, skippedTooLarge })
+      if (skippedNoPath > 0) toast.info('Не удалось получить путь к файлам — подробности в консоли')
     }
     if (dropped.length) addFiles(dropped, encryptNext)
   }

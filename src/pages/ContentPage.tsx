@@ -2,6 +2,7 @@ import React, { useState } from "react"
 import { Search, Download, Film, FileText, Music, Image as ImgIcon, Globe, Check, Loader, X, Eye } from "lucide-react"
 import { appAlert } from "../lib/dialogs"
 import { fmtSize } from "../lib/utils"
+import { toLocalFileUrl } from "../lib/localFileUrl"
 
 export default function ContentPage() {
   const [query, setQuery] = useState("")
@@ -15,6 +16,7 @@ export default function ContentPage() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewBroken, setPreviewBroken] = useState(false)
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -65,6 +67,7 @@ export default function ContentPage() {
     setPreviewUrl(null)
     setPreviewData(null)
     setPreviewError(null)
+    setPreviewBroken(false)
 
     try {
       const res = await window.electronAPI.telegram.previewGlobalMedia(r.previewKey)
@@ -74,7 +77,7 @@ export default function ContentPage() {
         if (res.data.mimeType.startsWith('image/')) {
           const urlRes = await window.electronAPI.file.readDataUrl(res.data.filePath)
           if (urlRes.success) setPreviewUrl(urlRes.data)
-          else setPreviewUrl('local-file://' + encodeURI(res.data.filePath.replace(/\\/g, '/').replace(/^([A-Z]:)/, '/$1')))
+          else setPreviewUrl(toLocalFileUrl(res.data.filePath))
         } else {
           const urlRes = await window.electronAPI.file.getLocalUrl(res.data.filePath)
           if (urlRes.success) setPreviewUrl(urlRes.data)
@@ -95,6 +98,7 @@ export default function ContentPage() {
     setPreviewData(null)
     setPreviewUrl(null)
     setPreviewError(null)
+    setPreviewBroken(false)
   }
 
   const getFileIcon = (mimeType: string) => {
@@ -260,16 +264,21 @@ export default function ContentPage() {
                 <FileText size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
                 <p style={{ fontSize: 14, color: '#ef4444', margin: 0 }}>{previewError}</p>
               </div>
+            ) : previewBroken ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <FileText size={64} style={{ opacity: 0.4, marginBottom: 16 }} />
+                <p style={{ fontSize: 15, opacity: 0.7, margin: 0 }}>Не удалось загрузить предпросмотр</p>
+              </div>
             ) : previewUrl && previewItem.mimeType.startsWith('image/') ? (
               <div style={{ padding: 16, display: 'flex', justifyContent: 'center' }}>
-                <img src={previewUrl} alt="Preview" style={{
+                <img src={previewUrl} alt="Preview" onError={() => setPreviewBroken(true)} style={{
                   maxWidth: '100%', maxHeight: '60vh', borderRadius: 12,
                   objectFit: 'contain', background: '#000',
                 }} />
               </div>
             ) : previewUrl && previewItem.mimeType.startsWith('video/') ? (
               <div style={{ padding: 16 }}>
-                <video controls autoPlay style={{ width: '100%', maxHeight: '60vh', borderRadius: 12, background: '#000' }}
+                <video controls autoPlay onError={() => setPreviewBroken(true)} style={{ width: '100%', maxHeight: '60vh', borderRadius: 12, background: '#000' }}
                   src={previewUrl}>
                 </video>
               </div>
