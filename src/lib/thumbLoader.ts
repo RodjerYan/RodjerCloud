@@ -14,6 +14,11 @@ export function loadThumb(messageId: number, fileName: string, cb: ThumbCallback
   if (!processing) processQueue();
 }
 
+// MAJOR 5 FIX: Export invalidateThumb to clear cache on image error
+export function invalidateThumb(messageId: number) {
+  delete cache[messageId];
+}
+
 async function processQueue() {
   processing = true;
   while (queue.length > 0) {

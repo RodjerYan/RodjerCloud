@@ -8,6 +8,7 @@ import zlib from 'zlib'
 import { app, ipcMain, nativeImage } from 'electron'
 import { execFile } from 'child_process'
 import { vaultService } from './vault-service'
+import bigInt from 'big-integer'
 
 // Thumbnail semaphore — max 2 concurrent thumbnail generations to prevent memory spikes
 let thumbSemCount = 0
@@ -28,6 +29,8 @@ function shareLog(...args: unknown[]) {
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
 const APP_LOG_PATH = path.join(app.getPath('userData'), 'rodjercloud.log')
+// T-20260925-002 P4: расширения видео (пробы размеров для file-cache)
+const VIDEO_EXT_RE = /\.(mov|mp4|m4v|mkv|webm|avi|3gp|mts|m2ts|flv|wmv)$/i
 function thumbLog(msg: string) {
   try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [info] [thumb] ${msg}\n`) } catch {}
 }
@@ -44,6 +47,18 @@ function dlToNum(v: any): number {
   }
   const n = Number(v)
   return isFinite(n) ? n : 0
+}
+
+// Проверка, что файл — настоящий JPEG (magic FF D8 FF), а не raw HEIC под именем .jpg
+function isJpegFile(p: string): boolean {
+  try {
+    const fd = fs.openSync(p, 'r')
+    try {
+      const buf = Buffer.alloc(3)
+      const n = fs.readSync(fd, buf, 0, 3, 0)
+      return n === 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF
+    } finally { fs.closeSync(fd) }
+  } catch { return false }
 }
 
 function computeFileHash(filePath: string): Promise<string> {
@@ -89,18 +104,30 @@ async function extractChunkToDisk(source: string, target: string, start: number,
   })
 }
 
+import { resolveFfmpegPath, runFfmpeg } from './previewConverter'
+
 export class TelegramService {
   private client: TelegramClient | null = null
   private phoneNumber: string = ''
   private channelId: bigint | null = null
   private uploadChain: Promise<void> = Promise.resolve()
 
-  private heavyThumbQueue: { messageId: number, message: any, cachePath: string }[] = []
+  private heavyThumbQueue: { messageId: number, message: any, cachePath: string, partialVideo?: boolean, escalated?: boolean }[] = []
   private processingHeavyQueue = false
   private fileCache: any[] = []
   private folderIndex: Map<string, Set<number>> = new Map()
   private syncingFiles = false
   private listFilesPromise: Promise<any[]> | null = null
+  // Negative cache for heavy thumb failures (messageId -> timestamp)
+  private heavyThumbFailCache = new Map<number, number>()
+  private readonly HEAVY_FAIL_TTL_MS = 10 * 60 * 1000 // 10 minutes
+  // One-shot escalation guard: messageId -> true (prevents re-escalation loops)
+  private heavyThumbEscalated = new Set<number>()
+
+  // P4 rework-3: remote dims probe via partial download + moov parsing
+  private dimsNetTried = new Set<number>()
+  private dimsNetQueue: { messageId: number; message: any }[] = []
+  private processingDimsNetQueue = false
 
   constructor() {
     this.loadTrashState()
@@ -116,82 +143,244 @@ export class TelegramService {
     this.processingHeavyQueue = true
     while (this.heavyThumbQueue.length > 0) {
       const task = this.heavyThumbQueue.shift()!
+      
+      // Check negative cache
+      const failTime = this.heavyThumbFailCache.get(task.messageId)
+      if (failTime && Date.now() - failTime < this.HEAVY_FAIL_TTL_MS) {
+        thumbLog(`heavy skip (negative cache) id=${task.messageId}`)
+        continue
+      }
+      
+      const tmpPath = task.cachePath + '.tmp.heic'
+      if (fs.existsSync(tmpPath)) fs.rmSync(tmpPath, { force: true })
+      
       try {
-        const tmpPath = task.cachePath + '.tmp.heic'
-        if (fs.existsSync(tmpPath)) fs.rmSync(tmpPath, { force: true })
-        
-        await this.performDownload(task.message, tmpPath)
+        // MAJOR 4 + ACCEPTANCE GAP 6: partial video download for large videos
+        if (task.partialVideo) {
+          await this.performPartialDownload(task.message, tmpPath, 16 * 1024 * 1024) // ~16MB
+        } else {
+          await this.performDownload(task.message, tmpPath)
+        }
         
         if (fs.existsSync(tmpPath) && (await fs.promises.stat(tmpPath)).size > 0) {
-          let outputBuffer: Buffer = await fs.promises.readFile(tmpPath)
-          const isHeicBuf = outputBuffer.length > 12 &&
-            outputBuffer.toString('ascii', 4, 8) === 'ftyp' &&
-            ['heic', 'heix', 'hevc', 'mif1'].includes(outputBuffer.toString('ascii', 8, 12))
+          // Check if source is a video file (by extension or by probing)
+          const fileName = task.message.file?.name || ''
+          const ext = path.extname(fileName).toLowerCase()
+          const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
 
-          if (process.platform === 'darwin') {
-            const sipsTmp = tmpPath + '.jpg'
-            try {
-              await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
-              outputBuffer = await fs.promises.readFile(sipsTmp)
-              try { fs.unlinkSync(sipsTmp) } catch {}
-            } catch (e: any) {
-              thumbLog(`heavy sips fail id=${task.messageId}: ${e?.message}`)
-              console.error('sips convert error:', e)
+          // Lazy probe: if video and cache lacks dimensions, probe the downloaded head file
+          // This populates width/height/duration in file-cache so grid badges appear without opening the video
+          if (isVideo && VIDEO_EXT_RE.test(fileName)) {
+            if (this.fileCache.length === 0) {
+              const disk = this.loadFileCache()
+              if (disk.length > 0) this.fileCache = disk
             }
-          } else if (isHeicBuf) {
-            const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
-            const { Worker } = require('worker_threads')
-            const outBuf = await new Promise<Buffer>((resolve, reject) => {
-              const worker = new Worker(`
-                const heicConvert = require('${heicPath}');
-                const { parentPort, workerData } = require('worker_threads');
-                async function run() {
-                  try {
-                    const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
-                    parentPort.postMessage({ success: true, buffer: out });
-                  } catch (e) {
-                    parentPort.postMessage({ success: false, error: e.message });
-                  }
+            const cachedRow = this.fileCache.find((f: any) => f.messageId === task.messageId)
+            if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
+              try {
+                const dims = await this.probeVideoDims(tmpPath)
+                if (dims) {
+                  this.cacheVideoDimensions(task.messageId, dims.width, dims.height, dims.duration)
+                  thumbLog(`lazy probe dims id=${task.messageId} ${dims.width}x${dims.height} dur=${dims.duration}`)
                 }
-                run();
-              `, { eval: true, workerData: outputBuffer })
-              worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
-                if (msg.success) resolve(Buffer.from(msg.buffer!))
-                else reject(new Error(msg.error))
-              })
-              worker.on('error', reject)
-              worker.on('exit', (code: number | null) => {
-                if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
-              })
-            })
-            const img = nativeImage.createFromBuffer(outBuf as Buffer)
-            outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
-          } else {
-            // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
-            const img = nativeImage.createFromBuffer(outputBuffer)
-            if (!img.isEmpty()) {
-              outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
-            } else {
-              thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+              } catch {
+                // probe errors must not break thumbnail pipeline
+              }
             }
           }
 
-          await fs.promises.writeFile(task.cachePath, outputBuffer)
-          try { fs.unlinkSync(tmpPath) } catch {}
-          thumbLog(`heavy done id=${task.messageId} bytes=${outputBuffer.length}`)
+          let outputBuffer: Buffer = Buffer.alloc(0)
 
-          const { BrowserWindow } = require('electron')
-          BrowserWindow.getAllWindows().forEach((w: any) => {
-            if (!w.isDestroyed()) {
-              try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
+          if (isVideo) {
+            // For videos, ffmpeg reads directly from disk — no need to load into memory
+            // Generate video thumbnail using ffmpeg
+            const ffmpegPath = resolveFfmpegPath()
+            if (ffmpegPath) {
+              const thumbTmp = tmpPath + '.thumb.jpg'
+              let ffmpegSucceeded = false
+              try {
+                // Try -ss 1 first (keyframe at 1s), fallback to -ss 0 if no keyframe
+                await runFfmpeg(ffmpegPath, [
+                  '-y', '-ss', '1', '-i', tmpPath,
+                  '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
+                ], 30000)
+                if (!fs.existsSync(thumbTmp) || fs.statSync(thumbTmp).size === 0 || !isJpegFile(thumbTmp)) {
+                  // Fallback: try without -ss 1 (from beginning)
+                  thumbLog(`heavy video ffmpeg -ss 1 failed, retry -ss 0 id=${task.messageId}`)
+                  await runFfmpeg(ffmpegPath, [
+                    '-y', '-ss', '0', '-i', tmpPath,
+                    '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
+                  ], 30000)
+                }
+                if (fs.existsSync(thumbTmp) && fs.statSync(thumbTmp).size > 0 && isJpegFile(thumbTmp)) {
+                  outputBuffer = await fs.promises.readFile(thumbTmp)
+                  try { fs.unlinkSync(thumbTmp) } catch {}
+                  ffmpegSucceeded = true
+                } else {
+                  thumbLog(`heavy video ffmpeg produced invalid output id=${task.messageId}`)
+                  outputBuffer = Buffer.alloc(0)
+                  try { fs.unlinkSync(thumbTmp) } catch {}
+                }
+              } catch (e: any) {
+                thumbLog(`heavy video ffmpeg error id=${task.messageId}: ${e?.message}`)
+                outputBuffer = Buffer.alloc(0)
+                try { fs.unlinkSync(thumbTmp) } catch {}
+              }
+
+              // SCHEME A ESCALATION: if partialVideo failed and not yet escalated, queue full download (capped at 512MB)
+              if (!ffmpegSucceeded && task.partialVideo && !this.heavyThumbEscalated.has(task.messageId)) {
+                const fileSize = this.toNum(task.message.file?.size)
+                const MAX_FULL_DOWNLOAD = 512 * 1024 * 1024 // 512MB cap
+                if (fileSize > 0 && fileSize <= MAX_FULL_DOWNLOAD) {
+                  this.heavyThumbEscalated.add(task.messageId)
+                  thumbLog(`heavy video partial failed → escalating to full download id=${task.messageId} size=${fileSize}`)
+                  this.heavyThumbQueue.push({ messageId: task.messageId, message: task.message, cachePath: task.cachePath, partialVideo: false })
+                  // Clean up tmp and continue to next task (don't negative-cache yet)
+                  try { fs.unlinkSync(tmpPath) } catch {}
+                  continue
+                } else if (fileSize > MAX_FULL_DOWNLOAD) {
+                  thumbLog(`heavy video partial failed, file too large for full download (${fileSize} > ${MAX_FULL_DOWNLOAD}) id=${task.messageId}`)
+                }
+              }
+            } else {
+              thumbLog(`heavy video: ffmpeg not available id=${task.messageId}`)
+              outputBuffer = Buffer.alloc(0)
             }
-          })
+          } else {
+            // Non-video: read file into buffer for HEIC/image processing
+            outputBuffer = await fs.promises.readFile(tmpPath)
+            const isHeicBuf = outputBuffer.length > 12 &&
+              outputBuffer.toString('ascii', 4, 8) === 'ftyp' &&
+              ['heic', 'heix', 'hevc', 'mif1'].includes(outputBuffer.toString('ascii', 8, 12))
+
+            if (process.platform === 'darwin') {
+              const sipsTmp = tmpPath + '.jpg'
+              let sipsOk = false
+              try {
+                await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
+                outputBuffer = await fs.promises.readFile(sipsTmp)
+                // Validate sips output is actually JPEG
+                if (outputBuffer.length > 0 && isJpegFile(sipsTmp)) {
+                  sipsOk = true
+                } else {
+                  thumbLog(`heavy sips produced non-JPEG output id=${task.messageId}`)
+                }
+                try { fs.unlinkSync(sipsTmp) } catch {}
+              } catch (e: any) {
+                thumbLog(`heavy sips fail id=${task.messageId}: ${e?.message}`)
+                console.error('sips convert error:', e)
+              }
+              // If sips failed or produced invalid output, fall through to heic-convert/nativeImage
+              if (!sipsOk) {
+                if (isHeicBuf) {
+                  const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+                  const { Worker } = require('worker_threads')
+                  const outBuf = await new Promise<Buffer>((resolve, reject) => {
+                    const worker = new Worker(`
+                      const heicConvert = require('${heicPath}');
+                      const { parentPort, workerData } = require('worker_threads');
+                      async function run() {
+                        try {
+                          const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                          parentPort.postMessage({ success: true, buffer: out });
+                        } catch (e) {
+                          parentPort.postMessage({ success: false, error: e.message });
+                        }
+                      }
+                      run();
+                    `, { eval: true, workerData: outputBuffer })
+                    worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                      if (msg.success) resolve(Buffer.from(msg.buffer!))
+                      else reject(new Error(msg.error))
+                    })
+                    worker.on('error', reject)
+                    worker.on('exit', (code: number | null) => {
+                      if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                    })
+                  })
+                  const img = nativeImage.createFromBuffer(outBuf as Buffer)
+                  outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+                } else {
+                  // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
+                  const img = nativeImage.createFromBuffer(outputBuffer)
+                  if (!img.isEmpty()) {
+                    outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+                  } else {
+                    thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+                  }
+                }
+              }
+            } else if (isHeicBuf) {
+              const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+              const { Worker } = require('worker_threads')
+              const outBuf = await new Promise<Buffer>((resolve, reject) => {
+                const worker = new Worker(`
+                  const heicConvert = require('${heicPath}');
+                  const { parentPort, workerData } = require('worker_threads');
+                  async function run() {
+                    try {
+                      const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                      parentPort.postMessage({ success: true, buffer: out });
+                    } catch (e) {
+                      parentPort.postMessage({ success: false, error: e.message });
+                    }
+                  }
+                  run();
+                `, { eval: true, workerData: outputBuffer })
+                worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                  if (msg.success) resolve(Buffer.from(msg.buffer!))
+                  else reject(new Error(msg.error))
+                })
+                worker.on('error', reject)
+                worker.on('exit', (code: number | null) => {
+                  if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                })
+              })
+              const img = nativeImage.createFromBuffer(outBuf as Buffer)
+              outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+            } else {
+              // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
+              const img = nativeImage.createFromBuffer(outputBuffer)
+              if (!img.isEmpty()) {
+                outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+              } else {
+                thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+              }
+            }
+          }
+
+          // Only write if we have valid JPEG output
+          if (outputBuffer.length > 0 && outputBuffer[0] === 0xFF && outputBuffer[1] === 0xD8 && outputBuffer[2] === 0xFF) {
+            await fs.promises.writeFile(task.cachePath, outputBuffer)
+            try { fs.unlinkSync(tmpPath) } catch {}
+            thumbLog(`heavy done id=${task.messageId} bytes=${outputBuffer.length}`)
+
+            const { BrowserWindow } = require('electron')
+            BrowserWindow.getAllWindows().forEach((w: any) => {
+              if (!w.isDestroyed()) {
+                try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
+              }
+            })
+          } else {
+            thumbLog(`heavy invalid output (not JPEG) id=${task.messageId} → skipping`)
+            try { fs.unlinkSync(tmpPath) } catch {}
+            // Add to negative cache
+            this.heavyThumbFailCache.set(task.messageId, Date.now())
+          }
         } else {
           thumbLog(`heavy empty-download id=${task.messageId}`)
+          // Clean up empty/partial tmp file
+          try { fs.unlinkSync(tmpPath) } catch {}
+          // Add to negative cache
+          this.heavyThumbFailCache.set(task.messageId, Date.now())
         }
       } catch (e) {
         thumbLog(`heavy error id=${task.messageId}: ${(e as Error)?.message}`)
         console.error('Heavy thumb queue error:', e)
+        // Clean up tmp file on error
+        try { fs.unlinkSync(tmpPath) } catch {}
+        // Add to negative cache
+        this.heavyThumbFailCache.set(task.messageId, Date.now())
       }
     }
     this.processingHeavyQueue = false
@@ -538,6 +727,9 @@ export class TelegramService {
     const sizeBytes = fileStats.size
     const originalSizeBytes = originalStats.size
     appLog('info', `[upload] stage:ready ${fileName} size=${sizeBytes} isTemp=${isTemp}`)
+    // P4: у видео шапку пробуем заранее — width/height/duration уедут в file-cache
+    const probeDims = VIDEO_EXT_RE.test(fileName) ? await this.probeVideoDims(filePath) : null
+    if (probeDims) appLog('info', `[upload] probe ${fileName}: ${probeDims.width}x${probeDims.height} dur=${probeDims.duration}`)
     // Telegram hard limit ~2GB per document message. GramJS already splits the
     // upload into 512KB protocol parts that the server reassembles into ONE file.
     // App-level multipart (separate messages) only kicks in above this limit.
@@ -827,6 +1019,9 @@ export class TelegramService {
       isEncrypted: !!encrypt,
       isMultipart,
       multipartIds: [...multipartIds],
+      width: probeDims?.width,
+      height: probeDims?.height,
+      duration: probeDims?.duration,
     }
   }
 
@@ -919,6 +1114,39 @@ export class TelegramService {
     const multipartMatch = caption.match(/#multipart\s+([\d,]+)/)
     const isMultipart = !!multipartMatch
     const originalDate = createdMatch ? new Date(createdMatch[1]).getTime() / 1000 : 0
+
+    // Extract video dimensions and duration from gramjs message
+    let width: number | undefined
+    let height: number | undefined
+    let duration: number | undefined
+
+    // B1 FIX: gramjs File getters (m.file.width/height/duration) throw
+    // TypeError: Right-hand side of 'instanceof' is not callable
+    // for document messages. Skip m.file entirely — fallback to
+    // document.attributes (className='DocumentAttributeVideo') works reliably.
+    // Photo branch (m.photo.sizes) also works and is kept below.
+
+    // Fallback: message.document.attributes -> DocumentAttributeVideo
+    if (m.document?.attributes) {
+      for (const attr of m.document.attributes) {
+        // gramjs uses className property to identify attribute type
+        if (attr.className === 'DocumentAttributeVideo' || attr._className === 'DocumentAttributeVideo') {
+          if (width === undefined && attr.w !== undefined) width = attr.w
+          if (height === undefined && attr.h !== undefined) height = attr.h
+          if (duration === undefined && attr.duration !== undefined) duration = attr.duration
+        }
+      }
+    }
+
+    // For photos: get dimensions from message.photo sizes (largest)
+    if ((width === undefined || height === undefined) && m.photo?.sizes?.length) {
+      const largest = m.photo.sizes.reduce((max: any, s: any) => (s.w * s.h > max.w * max.h ? s : max), m.photo.sizes[0])
+      if (largest?.w && largest?.h) {
+        width = largest.w
+        height = largest.h
+      }
+    }
+
     return {
       messageId: this.msgId(m),
       fileName: m.file?.name || 'Unknown',
@@ -931,6 +1159,9 @@ export class TelegramService {
       isEncrypted: !!vaultMatch,
       isMultipart,
       multipartIds: multipartMatch ? multipartMatch[1].split(',').map(Number) : [],
+      width,
+      height,
+      duration,
     }
   }
 
@@ -1487,6 +1718,7 @@ export class TelegramService {
 
       let foundOld = false
       for (const m of batch) {
+        if (!m) continue // gramjs может вернуть undefined-элементы под flood
         const msgId = this.msgId(m)
         if (msgId <= fromId) { foundOld = true; break }
         if (this.isFileVisible(m)) newFiles.push(this.parseFileMessage(m))
@@ -1494,7 +1726,9 @@ export class TelegramService {
       scanned += batch.length
       if (onProgress) onProgress(this.fileCache.length + newFiles.length, scanned)
       if (foundOld || batch.length < BATCH) break
-      offsetId = this.msgId(batch[batch.length - 1])
+      const last = batch[batch.length - 1]
+      if (!last) break
+      offsetId = this.msgId(last)
       await new Promise(r => setTimeout(r, 500))
     }
 
@@ -1510,7 +1744,404 @@ export class TelegramService {
     }
   }
 
-  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string; isMultipart?: boolean; multipartIds?: number[] }) {
+  private healingDimensions = false
+
+// T-20260925-002 P4/S2: file-cache.json был создан до того, как
+// parseFileMessage начал вкладывать width/height/duration — у старых
+// видео бейдж разрешения не появлялся. Дозаполняем атрибуты батчевой
+// выборкой сообщений (100 id за RPC). dimsHealFailed — разрешённая
+// строка без атрибутов (не перезапрашиваем); неудачу fetch помечаем
+// ничем — попробуем на следующем синке.
+// NOTE: Server-side heal is useless for forceDocument uploads — Telegram
+// strips Video attributes from documents. Dimensions arrive via:
+//  1) lazy probeVideoDims() on the downloaded head file during thumbnail generation (this file)
+//  2) HLS probe on first video open (preview path)
+// dimsHealFailed markers are kept as-is (correct: server has nothing to heal).
+  private async healVideoDimensions(): Promise<void> {
+    if (!this.client || !this.channelId || this.healingDimensions) return
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const VIDEO_EXT = VIDEO_EXT_RE
+    const targets = this.fileCache.filter((f: any) =>
+      !f.dimsHealFailed &&
+      (!(f.width > 0) || !(f.height > 0)) &&
+      ((f.mimeType || '').startsWith('video/') || VIDEO_EXT.test(f.fileName || ''))
+    )
+    if (targets.length === 0) return
+    this.healingDimensions = true
+    appLog('info', `[dims] healing ${targets.length} video entries`)
+    const CHUNK = 100
+    let healed = 0
+    let dirty = 0
+    try {
+      for (let i = 0; i < targets.length; i += CHUNK) {
+        const chunk = targets.slice(i, i + CHUNK)
+        let fetched: any[] | null = null
+        for (let attempt = 0; attempt < 4 && !fetched; attempt++) {
+          try {
+            fetched = await withTimeout(
+              this.client.getMessages(this.channelId as any, {
+                ids: chunk.map((f: any) => f.messageId),
+                waitTime: 0,
+              } as any),
+              60000, // gramjs flood-sleep внутри запроса может быть ~30s
+              `healVideoDimensions chunk ${i / CHUNK + 1}`
+            )
+          } catch (e: any) {
+            const msg = e?.message || ''
+            if (msg.includes('flood') || msg.includes('420') || msg.includes('Too Many')) {
+              console.warn(`[healVideoDimensions] flood wait #${attempt + 1}`)
+              await new Promise(r => setTimeout(r, 15000))
+              continue
+            }
+            console.warn('[healVideoDimensions] chunk failed:', msg)
+            break
+          }
+        }
+        if (!fetched) {
+          // fetch не удался — строки НЕ помечаем, повторим на следующем синке
+          console.warn(`[healVideoDimensions] chunk ${i / CHUNK + 1} skipped (fetch failed)`)
+          break
+        }
+        const byId = new Map<number, any>()
+        for (const m of fetched || []) {
+          if (!m) continue
+          const id = this.msgId(m)
+          if (id) byId.set(id, m)
+        }
+        let chunkFailedMarks = 0
+        let chunkNoMsg = 0
+        for (const row of chunk as any[]) {
+          const m = byId.get(row.messageId)
+          if (!m || !this.isFileVisible(m)) { row.dimsHealFailed = true; chunkNoMsg++; continue }
+          try {
+            const parsed = this.parseFileMessage(m)
+            if (parsed && (parsed.width ?? 0) > 0 && (parsed.height ?? 0) > 0) {
+              row.width = parsed.width
+              row.height = parsed.height
+              if (parsed.duration != null) row.duration = parsed.duration
+              healed++
+              dirty++
+            } else {
+              row.dimsHealFailed = true // атрибутов нет в самом сообщении
+              chunkFailedMarks++
+            }
+          } catch { row.dimsHealFailed = true; chunkFailedMarks++ }
+        }
+        if (i === 0) appLog('info', `[dims] chunk0 marks: noMsg=${chunkNoMsg} noDims=${chunkFailedMarks} byId=${byId.size}/${chunk.length}`)
+        if (dirty >= 500) { this.saveFileCache(this.fileCache); dirty = 0 }
+        await new Promise(r => setTimeout(r, 300))
+      }
+      // сохраняем всегда: dimsHealFailed-маркеры не должны перезапрашиваться
+      this.saveFileCache(this.fileCache)
+    } finally {
+      this.healingDimensions = false
+    }
+    appLog('info', `[dims] done: healed ${healed}/${targets.length}`)
+  }
+
+  // P4: HLS-проба уже замерила реальные размеры — сохраняем в file-cache,
+  // чтобы бейдж разрешения появился в сетке после первого открытия видео.
+  cacheVideoDimensions(messageId: number, width: number, height: number, duration?: number): boolean {
+    if (!messageId || !(width > 0) || !(height > 0)) return false
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const row = this.fileCache.find((f: any) => f.messageId === messageId)
+    if (!row) return false
+    if (row.width === width && row.height === height) return false
+    row.width = width
+    row.height = height
+    if (duration && duration > 0) row.duration = duration
+    this.saveFileCache(this.fileCache)
+    thumbLog(`cacheVideoDimensions id=${messageId} → ${width}x${height} dur=${duration || 0}`)
+    return true
+  }
+
+  // P4: проба шапки файла перед аплоадом (ffmpeg -i читает только метаданные).
+  // Best-effort: таймаут/ошибка → null, аплоад не блокируем.
+  private async probeVideoDims(filePath: string): Promise<{ width: number; height: number; duration: number } | null> {
+    try {
+      let ffmpegPath = require('ffmpeg-static') as string
+      if (ffmpegPath.includes('app.asar')) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
+      let out = ''
+      try {
+        await execFileAsync(ffmpegPath, ['-hide_banner', '-i', filePath], { timeout: 15000, maxBuffer: 4 * 1024 * 1024 })
+      } catch (e: any) {
+        // ffmpeg -i без выхода завершается кодом 1 — вывод в stderr
+        out = String(e?.stderr || e?.stdout || '')
+      }
+      if (!out) return null
+      let width = 0
+      let height = 0
+      let duration = 0
+      const dur = out.match(/Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/)
+      if (dur) duration = parseInt(dur[1], 10) * 3600 + parseInt(dur[2], 10) * 60 + Math.round(parseFloat(dur[3]))
+      for (const line of out.split(/\r?\n/)) {
+        if (!/Stream #\d+:\d+/.test(line) || !/Video:/.test(line)) continue
+        if (/attached pic/i.test(line)) continue
+        const m = line.match(/(?:^|[\s,])(\d{2,5})x(\d{2,5})(?=[\s,\]])/)
+        if (m) { width = parseInt(m[1], 10); height = parseInt(m[2], 10) }
+        break
+      }
+      if (!(width > 0) || !(height > 0)) return null
+      return { width, height, duration }
+    } catch {
+      return null
+    }
+  }
+
+  // T-20260925-002 P4 rework-3: локальный probe исходников на диске (mdfind + ffmpeg)
+  // Вызывается фоновым резолвером для видео без dims, у которых есть тумбы (heavy path не срабатывает).
+  // Не трогает dimsHealFailed — локальный probe независим от server-side heal.
+  private async resolveDimsLocally(row: any): Promise<boolean> {
+    try {
+      // Guard: видео, нет dims, не пробовали локально
+      if (!VIDEO_EXT_RE.test(row.fileName || '')) return false
+      if (row.width > 0 && row.height > 0) return false
+      if (row.dimsLocalProbed) return false
+
+      // mdfind по имени файла (без shell, массив аргументов — безопасно для пробелов)
+      const result = await execFileAsync('/usr/bin/mdfind', ['-name', row.fileName], { timeout: 10000, maxBuffer: 1024 * 1024 })
+      const stdout = String(result.stdout || '')
+      const candidates = stdout.trim().split(/\r?\n/).filter(Boolean)
+      if (candidates.length === 0) {
+        row.dimsLocalProbed = true
+        return false
+      }
+
+      // Фильтр: точное совпадение basename + fileSize (поле в кэше — fileSize)
+      const targetSize = row.fileSize
+      const matches = candidates.filter((p: string) => {
+        try {
+          return path.basename(p) === row.fileName && fs.statSync(p).size === targetSize
+        } catch {
+          return false
+        }
+      })
+
+      // Ровно одно совпадение → пробуем
+      if (matches.length === 1) {
+        const dims = await this.probeVideoDims(matches[0])
+        if (dims) {
+          this.cacheVideoDimensions(row.messageId, dims.width, dims.height, dims.duration)
+          thumbLog(`local probe hit id=${row.messageId} ${dims.width}x${dims.height} dur=${dims.duration} path=${matches[0]}`)
+          row.dimsLocalProbed = true
+          return true
+        }
+      } else if (matches.length > 1) {
+        thumbLog(`local probe ambiguous id=${row.messageId} matches=${matches.length}`)
+      }
+
+      row.dimsLocalProbed = true
+      return false
+    } catch (e) {
+      // Ошибки не валят синк — тихо логируем и помечаем, чтобы не повторять mdfind
+      thumbLog(`local probe error id=${row.messageId}: ${(e as Error)?.message}`)
+      row.dimsLocalProbed = true
+      return false
+    }
+  }
+
+  // Фоновый резолвер локальных размеров: запускается после healVideoDimensions в syncFilesInBackground
+  // Обрабатывает последовательно, не блокируя event loop, сохраняет кэш каждые 25 итераций.
+  private localDimsRunning = false
+  private async startLocalDimsResolver(): Promise<void> {
+    if (this.localDimsRunning) return
+    this.localDimsRunning = true
+
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+
+    const candidates = this.fileCache.filter((f: any) =>
+      VIDEO_EXT_RE.test(f.fileName || '') &&
+      !(f.width > 0 && f.height > 0) &&
+      !f.dimsLocalProbed
+    )
+
+    if (candidates.length === 0) {
+      this.localDimsRunning = false
+      return
+    }
+
+    appLog('info', `[dims] local resolve: start total=${candidates.length}`)
+    let hits = 0
+    let processed = 0
+
+    for (const row of candidates) {
+      const ok = await this.resolveDimsLocally(row)
+      if (ok) hits++
+      processed++
+
+      // Не блокируем event loop дольше ~50ms на итерацию
+      await new Promise(r => setImmediate(r))
+
+      // Сохраняем кэш каждые 25 попыток
+      if (processed % 25 === 0) {
+        this.saveFileCache(this.fileCache)
+      }
+    }
+
+    this.saveFileCache(this.fileCache)
+    this.localDimsRunning = false
+    appLog('info', `[dims] local resolve: done hits=${hits} misses=${processed - hits} total=${processed}`)
+  }
+
+  // P4 rework-3: parse moov atom from buffer (works on truncated fragments)
+  // Returns { width, height, duration } or null
+  private parseMoovDims(buf: Buffer): { width: number; height: number; duration: number | null } | null {
+    // Parser for moov atom: tkhd→w/h (fixed-point 16.16), mvhd→duration
+    // Works on partial downloads (head/tail fragments) because it scans for box signatures
+    let duration: number | null = null
+    const mvhdIdx = buf.indexOf('mvhd')
+    if (mvhdIdx >= 0) {
+      // mvhd payload starts at mvhdIdx+4 (after 'mvhd' type)
+      // v0: version@+4, flags@+5..7, creation@+8, modification@+12, timescale@+16, duration@+20
+      // v1: version@+4, flags@+5..7, creation@+8(8), modification@+16(8), timescale@+24, duration@+28(8)
+      if (mvhdIdx + 32 <= buf.length) {
+        const version = buf[mvhdIdx + 4]
+        if (version === 0) {
+          const timescale = buf.readUInt32BE(mvhdIdx + 16)
+          const dur = buf.readUInt32BE(mvhdIdx + 20)
+          if (timescale > 0) duration = dur / timescale
+        } else if (version === 1) {
+          const timescale = buf.readUInt32BE(mvhdIdx + 24)
+          const dur = Number(buf.readBigUInt64BE(mvhdIdx + 28))
+          if (timescale > 0) duration = dur / timescale
+        }
+      }
+    }
+    let best: { width: number; height: number } | null = null
+    let idx = -1
+    while ((idx = buf.indexOf('tkhd', idx + 1)) !== -1) {
+      const boxStart = idx - 4 // box size precedes type
+      if (boxStart < 0) continue
+      const size = buf.readUInt32BE(boxStart)
+      if (size < 40 || boxStart + size > buf.length) continue // truncated/invalid box
+      // tkhd: version(1)+flags(3)+creation(4/8)+modification(4/8)+trackID(4)+reserved(4)+duration(4/8)
+      // width/height are at fixed offset from box end: -8 (width), -4 (height) in 16.16 fixed-point
+      const wPos = boxStart + size - 8
+      const w = buf.readUInt32BE(wPos) / 65536
+      const h = buf.readUInt32BE(wPos + 4) / 65536
+      if (w > 0 && h > 0) best = { width: Math.round(w), height: Math.round(h) } // audio trak = 0x0
+    }
+    if (!best) return null
+    return { ...best, duration: duration === null ? null : Math.round(duration * 100) / 100 }
+  }
+
+  // P4 rework-3: fetch byte range via iterDownload (256KB chunks), return concatenated Buffer
+  private async fetchBufferRange(message: any, offsetBytes: number, bytes: number): Promise<Buffer | null> {
+    if (!this.client) return null
+    try {
+      const media = message.document || message.photo
+      if (!media) return null
+      const limit = Math.ceil(bytes / (256 * 1024))
+      const iter = this.client.iterDownload({
+        file: message.media,
+        offset: bigInt(offsetBytes),
+        requestSize: 256 * 1024,
+        limit,
+      })
+      const chunks: Buffer[] = []
+      let received = 0
+      for await (const chunk of iter) {
+        chunks.push(chunk)
+        received += chunk.length
+        if (received >= bytes) break
+      }
+      if (chunks.length === 0) return null
+      return Buffer.concat(chunks, received)
+    } catch {
+      return null
+    }
+  }
+
+  // P4 rework-3: probe remote dimensions via partial download + moov parsing
+  // Strategy: HEAD 1MB → parse; miss → TAIL 2MB (aligned to 64KB) → parse; fileSize ≤ 4MB → full file
+  private async probeRemoteDims(messageId: number, message: any): Promise<void> {
+    // Load cache if needed
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const row = this.fileCache.find((f: any) => f.messageId === messageId)
+    if (!row) return
+    // Guard: video file, no dims yet, not encrypted, not already tried this session
+    if (!VIDEO_EXT_RE.test(row.fileName || '')) return
+    if (row.width > 0 && row.height > 0) return
+    if (row.isEncrypted) return // ciphertext — cannot parse
+    if (this.dimsNetTried.has(messageId)) return
+    this.dimsNetTried.add(messageId)
+
+    const fileSize = row.fileSize || this.toNum(message.file?.size)
+    if (!fileSize || fileSize <= 0) return
+
+    let dims: { width: number; height: number; duration: number | null } | null = null
+
+    try {
+      if (fileSize <= 4 * 1024 * 1024) {
+        // Small file: download entirely
+        const buf = await this.fetchBufferRange(message, 0, fileSize)
+        if (buf) dims = this.parseMoovDims(buf)
+      } else {
+        // HEAD 1MB
+        const headBytes = 1024 * 1024
+        let buf = await this.fetchBufferRange(message, 0, headBytes)
+        if (buf) dims = this.parseMoovDims(buf)
+
+        // Miss → TAIL 2MB (aligned down to 64KB boundary)
+        if (!dims) {
+          const tailBytes = 2 * 1024 * 1024
+          const alignedOffset = Math.floor((fileSize - tailBytes) / 65536) * 65536
+          const actualBytes = fileSize - alignedOffset
+          buf = await this.fetchBufferRange(message, alignedOffset, actualBytes)
+          if (buf) dims = this.parseMoovDims(buf)
+        }
+      }
+
+      if (dims) {
+        this.cacheVideoDimensions(messageId, dims.width, dims.height, dims.duration || 0)
+        thumbLog(`net probe dims id=${messageId} ${dims.width}x${dims.height} dur=${dims.duration ?? 0}`)
+      } else {
+        thumbLog(`net probe miss id=${messageId}`)
+      }
+    } catch {
+      thumbLog(`net probe error id=${messageId}`)
+    }
+  }
+
+  // P4 rework-3: sequential queue worker for remote dims probes (fire-and-forget from callers)
+  private async processDimsNetQueue(): Promise<void> {
+    if (this.processingDimsNetQueue) return
+    this.processingDimsNetQueue = true
+    while (this.dimsNetQueue.length > 0) {
+      const task = this.dimsNetQueue.shift()!
+      try {
+        await this.probeRemoteDims(task.messageId, task.message)
+      } catch {
+        // errors already logged in probeRemoteDims
+      }
+      // Small delay between requests to avoid hammering the network
+      await new Promise(r => setTimeout(r, 150))
+    }
+    this.processingDimsNetQueue = false
+  }
+
+  // P4 rework-3: enqueue a remote dims probe (non-blocking, deduplicated by dimsNetTried)
+  private enqueueDimsNetProbe(messageId: number, message: any): void {
+    if (this.dimsNetTried.has(messageId)) return
+    // Avoid duplicate queue entries
+    if (this.dimsNetQueue.some(t => t.messageId === messageId)) return
+    this.dimsNetQueue.push({ messageId, message })
+    void this.processDimsNetQueue()
+  }
+
+  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string; isMultipart?: boolean; multipartIds?: number[]; width?: number; height?: number; duration?: number }) {
     if (!result?.messageId) return
     const existing = this.fileCache.find((f: any) => f.messageId === result.messageId)
     if (existing) return
@@ -1530,6 +2161,10 @@ export class TelegramService {
       isMultipart,
       multipartIds,
       hash: result.hash,
+      // P4: размеры из probe при аплоаде — бейдж разрешения без открытия файла
+      width: result.width || undefined,
+      height: result.height || undefined,
+      duration: result.duration || undefined,
     }
     this.fileCache.unshift(entry)
     this.fileCache.sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
@@ -1555,6 +2190,10 @@ export class TelegramService {
         }
         await this.listFilesPromise
       }
+      // P4: дозаполняем width/height/duration у старых строк кэша
+      await this.healVideoDimensions()
+      // P4 rework-3: локальный probe исходников на диске (mdfind + ffmpeg) для видео без dims
+      await this.startLocalDimsResolver()
     } catch (e) {
       console.warn('[syncFilesInBackground] error:', (e as Error).message)
     }
@@ -2017,12 +2656,56 @@ export class TelegramService {
       await this.client!.downloadMedia(message, { outputFile: finalTargetPath, progressCallback: makeCb(0) } as any)
     }
 
-    if (isEncrypted) {
+if (isEncrypted) {
       await vaultService.decryptFile(finalTargetPath, targetPath, vaultMatch[1])
       try { fs.unlinkSync(finalTargetPath) } catch {}
     }
   }
 
+  // MAJOR 4 + ACCEPTANCE GAP 6: partial download for video thumbnails (~16MB)
+  // Uses iterDownload with limit to fetch only the first N bytes
+  private async performPartialDownload(
+    message: any,
+    targetPath: string,
+    maxBytes: number
+  ): Promise<void> {
+    const media = message.document || message.photo
+    if (!media) throw new Error('No media to download')
+    
+    const ws = fs.createWriteStream(targetPath)
+    let received = 0
+    
+    try {
+      // Use iterDownload with requestSize and limit to get partial content
+      const iter = this.client!.iterDownload({
+        file: message.media,
+        requestSize: 256 * 1024, // 256KB chunks
+        limit: Math.ceil(maxBytes / (256 * 1024)),
+      })
+      
+      for await (const chunk of iter) {
+        if (received + chunk.length > maxBytes) {
+          // Write only what we need to reach maxBytes
+          const remaining = maxBytes - received
+          ws.write(chunk.subarray(0, remaining))
+          received = maxBytes
+          break
+        }
+        ws.write(chunk)
+        received += chunk.length
+      }
+    } finally {
+      ws.end()
+      await new Promise<void>((resolve, reject) => {
+        ws.on('finish', resolve)
+        ws.on('error', reject)
+      })
+    }
+    
+    if (received === 0) {
+      throw new Error('Partial download received 0 bytes')
+    }
+  }
 
 
   async downloadFile(messageId: number, fileName: string) {
@@ -2111,47 +2794,97 @@ export class TelegramService {
     const message: any = messages[0]
     if (!message.file) { thumbLog(`no file id=${messageId}`); return null }
 
+    // P4 rework-3: enqueue remote dims probe for videos without dimensions
+    // Fires on EVERY thumbnail request (including disk cache hits) so existing library gets probed
+    const extForProbe = fileName ? path.extname(fileName).toLowerCase() : ''
+    const isVideoForProbe = VIDEO_EXT_RE.test(extForProbe || (message.file?.name || ''))
+    if (isVideoForProbe) {
+      // Check cache for existing dims to avoid unnecessary probe
+      if (this.fileCache.length === 0) {
+        const disk = this.loadFileCache()
+        if (disk.length > 0) this.fileCache = disk
+      }
+      const cachedRow = this.fileCache.find((f: any) => f.messageId === messageId)
+      if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
+        this.enqueueDimsNetProbe(messageId, message)
+      }
+    }
+
     const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const cachePath = path.join(cacheDir, `${messageId}.jpg`)
-    if (fs.existsSync(cachePath)) { thumbLog(`cache-hit id=${messageId} size=${fs.statSync(cachePath).size}`); return cachePath }
+    // Validate cached file: size > 0 and JPEG magic (FF D8 FF)
+    if (fs.existsSync(cachePath)) {
+      const stat = fs.statSync(cachePath)
+      if (stat.size > 0 && isJpegFile(cachePath)) {
+        thumbLog(`cache-hit id=${messageId} size=${stat.size}`)
+        return cachePath
+      }
+      // Corrupted/empty cache — delete and re-download
+      thumbLog(`cache-invalid id=${messageId} size=${stat.size} magic=${isJpegFile(cachePath) ? 'ok' : 'bad'} → deleting`)
+      try { fs.unlinkSync(cachePath) } catch {}
+    }
 
     const media = message.document || message.photo
     const hasThumbs = media && media.thumbs && media.thumbs.length > 0
     thumbLog(`id=${messageId} hasThumbs=${!!hasThumbs} thumbsLen=${media?.thumbs?.length ?? 0}`)
 
+    let thumbDownloaded = false
     if (hasThumbs) {
       // Try to get a medium/large thumbnail to avoid blurriness
       const sizesToTry = ['m', 'x', media.thumbs.length - 1, 1, 0]
       for (const t of sizesToTry) {
         try {
           await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
-          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0 && isJpegFile(cachePath)) {
             thumbLog(`download ok id=${messageId} thumb=${String(t)} bytes=${fs.statSync(cachePath).size}`)
-            return cachePath
+            thumbDownloaded = true
+            break
           }
-          thumbLog(`download empty id=${messageId} thumb=${String(t)}`)
+          thumbLog(`download empty/invalid id=${messageId} thumb=${String(t)}`)
+          try { fs.unlinkSync(cachePath) } catch {}
         } catch (e: any) {
           thumbLog(`download fail id=${messageId} thumb=${String(t)} err=${e?.message}`)
         }
       }
-      thumbLog(`all thumb attempts failed id=${messageId}`)
-    } else {
-      const ext = fileName ? path.extname(fileName).toLowerCase() : ''
-      const fileSize = this.toNum(message.file?.size)
-      const isHeic = ext === '.heic' || ext === '.heif'
-      const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)
-      const MAX_THUMB_SRC = 20 * 1024 * 1024
-      thumbLog(`no-thumbs id=${messageId} ext=${ext} size=${fileSize}`)
-      if ((isHeic || isImage) && fileSize <= MAX_THUMB_SRC) {
-        if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
-          this.heavyThumbQueue.push({ messageId, message, cachePath })
-          thumbLog(`queued heavy id=${messageId} kind=${isHeic ? 'heic' : 'image'}`)
-          this.processHeavyThumbQueue()
-        }
-      } else {
-        thumbLog(`skip id=${messageId} reason=${!isHeic && !isImage ? 'not-image' : 'too-big'}`)
+      if (!thumbDownloaded) {
+        thumbLog(`all thumb attempts failed id=${messageId} → falling back to heavy queue`)
       }
+    }
+
+    // BLOCKER 2 FIX: if thumb was successfully downloaded, return the cache path immediately
+    if (thumbDownloaded) {
+      return cachePath
+    }
+
+    const ext = fileName ? path.extname(fileName).toLowerCase() : ''
+    const fileSize = this.toNum(message.file?.size)
+    const isHeic = ext === '.heic' || ext === '.heif'
+    const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)
+    const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
+    const MAX_THUMB_SRC = 20 * 1024 * 1024
+    thumbLog(`no-thumbs id=${messageId} ext=${ext} size=${fileSize} isVideo=${isVideo}`)
+
+    // BLOCKER 3 + MAJOR 4 FIX: shouldHeavy only when !thumbDownloaded, both terms capped by MAX_THUMB_SRC
+    // For videos > MAX_THUMB_SRC: attempt partial download (~16MB) for ffmpeg thumbnail
+    const shouldHeavy = (!thumbDownloaded && hasThumbs && fileSize <= MAX_THUMB_SRC) ||
+                        ((isHeic || isImage) && fileSize <= MAX_THUMB_SRC) ||
+                        (isVideo && fileSize <= MAX_THUMB_SRC)
+    if (shouldHeavy) {
+      if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
+        this.heavyThumbQueue.push({ messageId, message, cachePath })
+        thumbLog(`queued heavy id=${messageId} kind=${isHeic ? 'heic' : isVideo ? 'video' : 'image'}`)
+        this.processHeavyThumbQueue()
+      }
+    } else if (isVideo) {
+      // ACCEPTANCE GAP 6: videos > MAX_THUMB_SRC — attempt partial download (~16MB) for thumbnail
+      if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
+        this.heavyThumbQueue.push({ messageId, message, cachePath, partialVideo: true })
+        thumbLog(`queued heavy (partial-video) id=${messageId} size=${fileSize}`)
+        this.processHeavyThumbQueue()
+      }
+    } else {
+      thumbLog(`skip id=${messageId} reason=${!isHeic && !isImage && !isVideo ? 'not-image' : 'too-big'}`)
     }
 
     return null

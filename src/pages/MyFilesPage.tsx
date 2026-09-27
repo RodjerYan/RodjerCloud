@@ -788,10 +788,17 @@ export default function MyFilesPage() {
         loadCategoryCounts()
         loadFolders()
         setExpandedCatFiles({})
+        // P4: drill-список (Видео/Изображения) живёт отдельно от files —
+        // без этого бейдж разрешения появлялся только после перезахода
+        if (drillDown) {
+          window.electronAPI.telegram.getFilesByCategory(drillDown).then((r: any) => {
+            if (r.success) setDrillFiles(processRawFiles(r.data || []))
+          }).catch(() => {})
+        }
       }, 3000)
     })
     return unsub
-  }, [loadFolders, loadCategoryCounts, folderDrill, loadFolderFiles])
+  }, [loadFolders, loadCategoryCounts, folderDrill, loadFolderFiles, drillDown])
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
@@ -1738,7 +1745,7 @@ export default function MyFilesPage() {
                                     onDoubleClick={() => { const canPreview = drillDown === 'Изображения' || drillDown === 'Видео'; if (canPreview) handlePreview(f, galleryFiles.indexOf(f), galleryFiles) }}>
                                     <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                                     <div className="mf-gm-icon" data-type={drillDown}>
-                                      <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={drillDown === 'Видео'} typeLabel={drillDown || ''} />
+                                      <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={drillDown === 'Видео'} typeLabel={drillDown || ''} width={f.width} height={f.height} />
                                     </div>
                                     <div className="mf-gm-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
                                     <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
@@ -1993,14 +2000,14 @@ export default function MyFilesPage() {
                             {previewFile ? (
                               <>
                                 <div className="mf-folder-cover">
-                                  <FileThumb messageId={previewFile.messageId} fileName={previewFile.fileName} isVideo={!!isPreviewVideo} typeLabel={isPreviewVideo ? 'Видео' : 'Изображения'} />
+                                  <FileThumb messageId={previewFile.messageId} fileName={previewFile.fileName} isVideo={!!isPreviewVideo} typeLabel={isPreviewVideo ? 'Видео' : 'Изображения'} width={previewFile.width} height={previewFile.height} />
                                 </div>
                                 <div className="mf-folder-overlay" />
                                 {cascadeFiles.length > 1 && (
                                   <div className="mf-folder-cascade">
                                     {cascadeFiles.slice().reverse().map((f: any) => (
                                       <div key={f.messageId} className="mf-folder-cascade-thumb">
-                                        <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={false} typeLabel="Изображения" />
+                                        <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={false} typeLabel="Изображения" width={f.width} height={f.height} />
                                       </div>
                                     ))}
                                   </div>
@@ -2065,7 +2072,7 @@ export default function MyFilesPage() {
                                onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
                             <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                             <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
-                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
                             </div>
                             <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                             <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>

@@ -529,7 +529,7 @@ export default function AlbumsPage() {
     return (
       <div key={f.messageId} className="mf-gm-card magnetic" style={{ viewTransitionName: `card_${f.messageId}` }} onDoubleClick={() => handlePreview(f)} onContextMenu={(e) => onContextMenu(e, f)}>
         <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
-          <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} />
+          <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} />
         </div>
         <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
         <div className="mf-gm-meta">{fmtSize(f.fileSize)}</div>
@@ -790,7 +790,7 @@ export default function AlbumsPage() {
                                   {isKeep ? 'Оригинал' : 'Дубликат'}
                                 </span>
                                 <div className="mf-gm-icon" data-type={isVid ? 'Видео' : 'Изображения'}>
-                                  <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} />
+                                  <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} />
                                 </div>
                                 <div className="mf-gm-name" title={f.fileName}>{f.fileName}</div>
                                 <div className="mf-gm-meta">

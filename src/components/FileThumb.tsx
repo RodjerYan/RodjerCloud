@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Play } from 'lucide-react'
-import { loadThumb } from '../lib/thumbLoader'
+import { loadThumb, invalidateThumb } from '../lib/thumbLoader'
+import { resolutionLabel } from '../lib/utils'
 
 let globalObserver: IntersectionObserver | null = null;
 const observerCallbacks = new Map<Element, () => void>();
@@ -31,6 +32,8 @@ function unobserve(el: Element) {
 
 const thumbUrlCache = new Map<number, string>()
 const thumbPendingCallbacks = new Map<number, Set<(url: string) => void>>()
+// Track retry attempts per messageId to allow only one retry
+const thumbRetryCount = new Map<number, number>()
 let globalThumbListenerAttached = false
 
 function ensureGlobalThumbListener() {
@@ -57,9 +60,11 @@ interface FileThumbProps {
   fileName: string
   isVideo: boolean
   typeLabel: string
+  width?: number
+  height?: number
 }
 
-export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, fileName, isVideo, typeLabel }) => {
+export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, fileName, isVideo, typeLabel, width, height }) => {
   const [url, setUrl] = useState<string | null>(null)
   const [broken, setBroken] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
@@ -130,6 +135,29 @@ export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, file
     }
   }, [messageId])
 
+  const handleImageError = () => {
+    const retries = thumbRetryCount.get(messageId) || 0
+    if (retries === 0) {
+      // First error: invalidate cache and retry once
+      console.log(`[thumb] img onError id=${messageId} src=${url?.slice(0, 120)} → retry 1/1`)
+      thumbUrlCache.delete(messageId)
+      invalidateThumb(messageId) // MAJOR 5 FIX: invalidate thumbLoader cache
+      thumbRetryCount.set(messageId, 1)
+      // Trigger reload by setting url to null then letting the effect re-run
+      setUrl(null)
+      setBroken(false)
+      // Force re-load by toggling visibility
+      setIsVisible(false)
+      setTimeout(() => setIsVisible(true), 0)
+    } else {
+      // Retry exhausted: mark as broken
+      console.log(`[thumb] img onError id=${messageId} retry exhausted → placeholder`)
+      setBroken(true)
+    }
+  }
+
+  const resolution = isVideo ? resolutionLabel(height) : null
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       {url && !broken ? (
@@ -140,16 +168,15 @@ export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, file
             decoding="async"
             className="mf-gm-img"
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onError={(e) => {
-              console.log(`[thumb] img onError id=${messageId} src=${url.slice(0, 120)}`)
-              setBroken(true)
-            }}
+            onError={handleImageError}
           />
           {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
+          {resolution && <div className="mf-gm-resolution">{resolution}</div>}
         </>
       ) : (
-        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.02)', position: 'relative' }}>
           {isVideo ? '🎬' : (typeLabel === 'Изображения' ? '🖼️' : '📄')}
+          {resolution && <div className="mf-gm-resolution">{resolution}</div>}
         </div>
       )}
     </div>

@@ -13,9 +13,9 @@ import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 import { vaultService } from './vault-service'
-import { startVideoStreamServer } from './video-stream-server'
+import { startVideoStreamServer, rangeCache } from './video-stream-server'
 import { convertVideoToMp4, downloadPreviewSourceOnce, ffmpegLog } from './previewConverter'
-import { ensureHlsSession, cleanupHlsForIds, IPC_START_TIMEOUT_MS, setHlsProgressHandler } from './hlsServer'
+import { ensureHlsSession, cleanupHlsForIds, IPC_START_TIMEOUT_MS, setHlsProgressHandler, setHlsProbeHandler } from './hlsServer'
 
 app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend')
 
@@ -326,17 +326,32 @@ app.whenReady().then(async () => {
           log('error', `[local-file] reject relative win path raw=${request.url} → ${filePath}`)
           return new Response('Bad path', { status: 400 })
         }
+        const fileUrl = pathToFileURL(filePath).href
+        log('info', `[local-file] raw=${request.url} → ${fileUrl}`)
+        return net.fetch(fileUrl)
       } else {
-        // darwin/linux: pathname already absolute '/Users/...'
-        filePath = pathname
+        // darwin/linux: standard-scheme parsing (local-file:///Users/... → host='users', pathname='/alexander/...')
+        // Include host in the reconstructed path since WHATWG "special authority ignore slashes" drops leading slashes
+        const rawPath = u.host ? `/${u.host}${pathname}` : pathname
+        filePath = rawPath
         if (!filePath.startsWith('/')) {
           log('error', `[local-file] reject non-abs posix raw=${request.url} → ${filePath}`)
           return new Response('Bad path', { status: 400 })
         }
+        // Case-fallback for macOS (APFS case-insensitive) and Linux devs: host was lowercased by URL parser
+        // If file doesn't exist and path starts with /users/, try /Users/ (capital U)
+        let resolvedPath = filePath
+        if (!fs.existsSync(resolvedPath) && resolvedPath.startsWith('/users/')) {
+          const fallbackPath = '/Users' + resolvedPath.slice(5)
+          if (fs.existsSync(fallbackPath)) {
+            resolvedPath = fallbackPath
+            log('info', `[local-file] case-fallback raw=${request.url} → ${pathToFileURL(resolvedPath).href}`)
+          }
+        }
+        const fileUrl = pathToFileURL(resolvedPath).href
+        log('info', `[local-file] raw=${request.url} → ${fileUrl}`)
+        return net.fetch(fileUrl)
       }
-      const fileUrl = pathToFileURL(filePath).href
-      log('info', `[local-file] raw=${request.url} → ${fileUrl}`)
-      return net.fetch(fileUrl)
     } catch (e) {
       log('error', `[local-file] parse fail raw=${request.url} err=${(e as Error).message}`)
       return new Response('Bad URL', { status: 400 })
@@ -1055,6 +1070,8 @@ ipcMain.handle('telegram:sync-files-bg', async (event) => {
         const d = await readFolders()
         telegramService.rebuildFolderIndex(d.fileFolders || {})
       } catch {}
+      // P4: после healVideoDimensions рендерер должен перечитать кэш
+      try { sendFilesChanged() } catch {}
     })
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -2118,6 +2135,13 @@ setHlsProgressHandler((messageId, ev) => {
   }
 })
 
+// P4: пробе HLS записала реальные размеры → file-cache → бейдж разрешения
+setHlsProbeHandler((messageId, width, height, duration) => {
+  try {
+    if (telegramService.cacheVideoDimensions(messageId, width, height, duration)) sendFilesChanged()
+  } catch {}
+})
+
 ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
   try {
     const f = files[idx]
@@ -2166,6 +2190,10 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
           .filter((n: number) => Number.isInteger(n) && n > 0)
         if (closedIds.length) {
           try { cleanupHlsForIds(closedIds) } catch (e) { log('warn', `[hls] cleanup on preview closed err=${(e as Error).message}`) }
+          // m2 FIX: Clear range cache for all messageIds in this preview session
+          for (const messageId of closedIds) {
+            rangeCache.clear(messageId)
+          }
         }
       }
       previewWindows.delete(winId)
@@ -2245,7 +2273,33 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 try { var _pv = parseFloat(localStorage.getItem(VOL_KEY)); if (isFinite(_pv) && _pv >= 0 && _pv <= 1) volume = _pv } catch (e) {}
 try { muted = localStorage.getItem(MUTED_KEY) === '1' } catch (e) {}
 try { var _ps = parseFloat(localStorage.getItem(SPEED_KEY)); if (SPEEDS.indexOf(_ps) >= 0) speed = _ps } catch (e) {}
-try { var _pl = localStorage.getItem(LEVEL_KEY); if (_pl === 'auto') levelPref = 'auto'; else if (parseFloat(_pl) > 0 && isFinite(parseFloat(_pl))) levelPref = parseFloat(_pl) } catch (e) {}
+try { var _pl = localStorage.getItem(LEVEL_KEY); if (_pl === 'auto') levelPref = 'auto'; else if (_pl === 'original') levelPref = 'original'; else if (parseFloat(_pl) > 0 && isFinite(parseFloat(_pl))) levelPref = parseFloat(_pl) } catch (e) {}
+
+// ==== S3: динамическая лестница качества ====
+// Стандартные уровни (высота в пикселях)
+const STANDARD_HEIGHTS = [240, 480, 720, 1080, 1440, 2160]
+// Текущая лестница качества для текущего файла (заполняется в renderMedia)
+let currentQualityLadder = []
+// Режим: 'direct' | 'hls'
+let qualityMode = 'direct'
+
+/**
+ * Строит лестницу качества на основе реальной высоты исходного видео.
+ * @param sourceHeight - высота исходного видео в пикселях (0 или undefined = неизвестно)
+ * @returns массив объектов { height, label }, где height = 0 означает "Оригинал"
+ */
+function buildQualityLadder(sourceHeight) {
+  if (!sourceHeight || sourceHeight <= 0) {
+    return [{ height: 0, label: 'Оригинал' }]
+  }
+  // Уровни строго МЕНЬШЕ sourceHeight + всегда "Оригинал" (sourceHeight)
+  const levels = STANDARD_HEIGHTS.filter(h => h < sourceHeight)
+  const result = levels.map(h => ({ height: h, label: h === 2160 ? '4K' : h + 'p' }))
+  // Добавляем "Оригинал" в конце
+  result.push({ height: 0, label: 'Оригинал' })
+  return result
+}
+
 function renderMedia(files, idx, src, hlsPending) {
   if (!files || !files[idx]) return
   const f = files[idx]
@@ -2287,15 +2341,39 @@ function renderMedia(files, idx, src, hlsPending) {
       var vid = document.createElement('video')
       vid.id = 'pv'
       vid.autoplay = true
-      // T-20260925-003 S3: preload=auto — буферизуем сразу, не дожидаясь play()
-      vid.preload = 'auto'
+      // T-20260925-003 S3 / S4: preload=metadata — загружаем только метаданные (длительность, размеры),
+      // не качаем весь файл вперёд. Для тяжёлых видео это убирает долгую предзагрузку.
+      vid.preload = 'metadata'
       vid.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
       try { vid.volume = volume; vid.muted = muted } catch (e) {}
       var directTried = false
       vid.onerror = function() {
+        // m2 FIX: suppress onerror during upgrade window (vid.src='' → attachMedia)
+        if (upgradeInProgress) return
         // media-ошибка при HLS → один раз пробуем прямой src (fallback),
         // дальше — прежняя ошибка «Не удалось загрузить файл»
         if (hls && !directTried) { directTried = true; useDirect(vid, src, token); return }
+        // direct-ошибка (HEVC/AV1/неподдерживаемый кодек) → один раз пробуем HLS
+        if (!hls && !vid.__hlsErrTried && token === loadSeq && video === vid) {
+          vid.__hlsErrTried = true
+          //захватываем позицию ДО асинхронного hlsStart — к моменту upgradeToHls
+          //vid.currentTime может сброситься (ошибка декода/сети)
+          var savedPos = vid.currentTime
+          var api = window.electronAPI && window.electronAPI.preview
+          if (api && typeof api.hlsStart === 'function' && typeof Hls !== 'undefined' && Hls.isSupported()) {
+            api.hlsStart(currentMsgId).then(function (r) {
+              if (token !== loadSeq || video !== vid) return
+              if (r && r.hlsUrl) { upgradeToHls(vid, r.hlsUrl, src, token, savedPos); return }
+              console.log('[hls] error-fallback:', (r && r.error) || 'empty', '→ show error')
+              showVideoError('Не удалось загрузить файл')
+            }).catch(function (e) {
+              if (token !== loadSeq || video !== vid) return
+              console.log('[hls] error-fallback rejected:', e && e.message)
+              showVideoError('Не удалось загрузить файл')
+            })
+            return // ждём ответа hlsStart
+          }
+        }
         if (ld) ld.style.display = 'none'
         dlHideNow()
         if (bar) bar.style.display = 'none'
@@ -2328,9 +2406,28 @@ function renderMedia(files, idx, src, hlsPending) {
   }
   document.getElementById('fname').textContent = f.fileName
   document.getElementById('fpos').textContent = (idx + 1) + ' / ' + total
+  
+  // ==== S3: строим лестницу качества и показываем меню СРАЗУ ====
+  if (isVideo) {
+    // Получаем высоту из метаданных файла (S2 пробросил width/height)
+    // Minor FIX: removed dead/NaN expression (sourceHeight used f.height * f.width / f.height → NaN when height=0)
+    const effectiveHeight = f.height || 0
+    currentQualityLadder = buildQualityLadder(effectiveHeight)
+    qualityMode = slow ? 'hls' : (isStreamSrc ? 'direct' : 'direct')
+    // Показываем меню качества всегда для видео (даже в direct-режиме)
+    buildQualityMenuFromLadder(currentQualityLadder)
+    var qw = document.getElementById('qualityWrap')
+    if (qw) qw.style.display = 'flex'
+  } else {
+    var qw = document.getElementById('qualityWrap')
+    if (qw) qw.style.display = 'none'
+  }
+  
   if (isVideo && video) {
     bar.style.display = 'flex'
     video.playbackRate = speed
+    // S3: сохраняем messageId на видео для switchToHls
+    video.__messageId = f.messageId
     video.ontimeupdate = update
     video.onloadedmetadata = function() { document.getElementById('time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration) }
     video.onplay = function() { document.getElementById('playBtn').textContent = '⏸' }
@@ -2427,7 +2524,8 @@ function onPreviewProgress(d) {
 // ==== T-20260925-003 S2 + REWORK#1 F1: HLS (hls.js) поверх прямого src ====
 function destroyHls() {
   if (hls) { try { hls.destroy() } catch (e) {} hls = null }
-  var qw = document.getElementById('qualityWrap'); if (qw) qw.style.display = 'none'
+  // S3: НЕ прячем меню качества — оно теперь всегда видно для видео
+  // (прячем только при навигации на не-видео, см. renderMedia)
 }
 // REWORK#1 F2: снять HLS-сессию этого файла в main (kill ffmpeg + rm каталога)
 // ВАЖНО (F6 принят как minor): refcount-а нет — если тот же файл открыт во
@@ -2439,38 +2537,26 @@ function dropHlsSession() {
   try { var dp = api.hlsDrop(currentMsgId); if (dp && dp.catch) dp.catch(function () {}) } catch (e) {}
 }
 // прямой src — ровно как до S2 (http-stream / file://), меню качества скрыто.
-// Общая для стартa (F1: мгновенный первый кадр) и fallback-а после HLS.
-function applyDirectSrc(vid, src) {
-  if (!src) { showVideoError('Формат не поддерживается в предпросмотре (нужен mp4/webm)'); return }
-  try { vid.pause() } catch (e) {}
-  vid.src = src
-  vid.autoplay = true
-  vid.preload = 'auto'
-  vid.playbackRate = speed
-  applyVol()
-  var p = vid.play()
-  if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; dlHideNow() })
-}
-// старт воспроизведения (REWORK#1 F1): прямой src ставится МГНОВЕННО — первый
-// кадр не ждёт транскод/HLS (спиннер снимает onplaying, ~1-2s, как в додо-
-// версии; metadata-кеш S3 ускоряет сам stream). preview.hlsStart уходит в фон
-// (fire-and-forget) и при успехе делает upgrade direct→HLS, ничего не блокируя.
-// {error}/лимит/таймаут/нет hls.js → non-event: остаёмся на direct, ничего не
-// показываем (ни лоадера, ни ошибки) — видео продолжает играть.
+  // Общая для стартa (F1: мгновенный первый кадр) и fallback-а после HLS.
+  // S4: preload=metadata — не качаем весь файл вперёд для тяжёлых видео.
+  function applyDirectSrc(vid, src) {
+    if (!src) { showVideoError('Формат не поддерживается в предпросмотре (нужен mp4/webm)'); return }
+    try { vid.pause() } catch (e) {}
+    vid.src = src
+    vid.autoplay = true
+    vid.preload = 'metadata'
+    vid.playbackRate = speed
+    applyVol()
+    var p = vid.play()
+    if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; dlHideNow() })
+  }
+// старт воспроизведения: прямой src ставится МГНОВЕННО — первый кадр не ждёт
+// транскод/HLS. HLS запускается ТОЛЬКО по требованию (меню качества) или как
+// fallback при ошибке direct (HEVC/AV1/неподдерживаемые кодеки).
 function startPlayback(vid, src, messageId, token) {
   currentMsgId = messageId
   applyDirectSrc(vid, src)
-  var api = window.electronAPI && window.electronAPI.preview
-  if (!api || typeof api.hlsStart !== 'function' || typeof Hls === 'undefined' || !Hls.isSupported()) return
-  // клиентского таймаута нет: main сам ограничивает ожидание (IPC_START_TIMEOUT_MS
-  // = 60s), а видео уже играет; токен loadSeq отбрасывает ответ устаревшего файла
-  try {
-    api.hlsStart(messageId).then(function (r) {
-      if (token !== loadSeq || video !== vid) return // пользователь ушёл на другой файл
-      if (r && r.hlsUrl) { upgradeToHls(vid, r.hlsUrl, src, token); return }
-      console.log('[hls] start:', (r && r.error) || 'empty', '→ stay direct (non-event)')
-    }).catch(function (e) { console.log('[hls] hlsStart rejected:', e && e.message) })
-  } catch (e) { console.log('[hls] hlsStart throw:', e) }
+  // token сохраняется для возможного fallback-а в onerror (vid.__hlsErrTried guard)
 }
 
 // ==== T-20260925-010 S2: HLS-first старт для mov/mkv/avi (hlsPending) ====
@@ -2504,7 +2590,8 @@ function startSlowPlayback(vid, messageId, token) {
       done()
       if (r && r.hlsUrl) {
         console.log('[hls] slow-start ready → ' + r.hlsUrl)
-        startHls(vid, r.hlsUrl, '', token, null)
+        // Minor FIX: startHls signature is (vid, url, src, token, up, targetHeight) — 6 args
+        startHls(vid, r.hlsUrl, '', token, null, null)
         return
       }
       console.log('[hls] slow-start:', (r && r.error) || 'empty', '→ convert-fallback')
@@ -2549,91 +2636,177 @@ function runConvertFallback(vid, token, why) {
   })
 }
 // REWORK#1 F1: фоновый upgrade direct→HLS — видео уже играет по прямому src
-function upgradeToHls(vid, url, src, token) {
+function upgradeToHls(vid, url, src, token, savedPos) {
   if (token !== loadSeq || video !== vid) return
   if (hls) return // upgrade ровно один раз
   // позиция/playing снимаются в момент ответа main; volume/playbackRate живут
   // на элементе и переприменяются в MANIFEST_PARSED (applyVol / playbackRate)
-  var up = { saved: vid.currentTime, wasPlaying: !vid.paused, userSeek: null, seekListener: null }
+  // savedPos захвачен ВЫЗЫВАЮЩИМ кодом ДО асинхронного hlsStart — защита от сброса
+  // currentTime при ошибке декода/сети. fallback на vid.currentTime если не передано.
+  var pos = (typeof savedPos === 'number' && !isNaN(savedPos) && savedPos > 0) ? savedPos : vid.currentTime
+  var up = { saved: pos, wasPlaying: !vid.paused, userSeek: null, seekListener: null, restoring: false }
   console.log('[hls] upgrade t=' + up.saved.toFixed(2) + ' playing=' + up.wasPlaying)
-  startHls(vid, url, src, token, up)
+  startHls(vid, url, src, token, up, null)
 }
-// запуск hls.js; up (upgrade-режим) — { saved, wasPlaying, userSeek, seekListener },
-// для первоначального старта не передаётся
-function startHls(vid, url, src, token, up) {
-  destroyHls()
-  var inst = new Hls({ enableWorker: true, backBufferLength: 60 })
-  hls = inst
-  var retries = 0
-  var cleanupSeek = function () {
-    if (up && up.seekListener) { try { vid.removeEventListener('seeking', up.seekListener) } catch (e) {} up.seekListener = null }
+
+// upgradeToHls с предварительно выбранным уровнем (для switchToHls)
+function upgradeToHlsWithLevel(vid, url, src, targetHeight, token, savedPos) {
+  if (hls) return
+  var pos = (typeof savedPos === 'number' && !isNaN(savedPos) && savedPos > 0) ? savedPos : vid.currentTime
+  var up = { saved: pos, wasPlaying: !vid.paused, userSeek: null, seekListener: null, restoring: false }
+  console.log('[hls] upgrade with level ' + targetHeight + ' t=' + up.saved.toFixed(2))
+  startHls(vid, url, src, token, up, targetHeight)
+}
+
+// applyUpgradeSeek: рекурсивные попытки seek после загрузки метаданных (duration известен),
+// чтобы Chrome не clamp-ил позицию к seekable end. Макс 80 × 250ms ≈ 20s.
+function applyUpgradeSeek(vid, up, target) {
+  if (!isFinite(vid.duration) || vid.duration <= 0) {
+    // metadata ещё не загружен — ждём
+    setTimeout(function () {
+      if (video !== vid) return // устаревший элемент
+      applyUpgradeSeek(vid, up, target)
+    }, 250)
+    return
   }
-  // страховка: манифест не пришёл → снимаем спиннер и играем напрямую
-  var manifestTimer = setTimeout(function () {
-    if (token !== loadSeq || hls !== inst) return
-    console.log('[hls] manifest timeout → direct src')
-    cleanupSeek()
-    useDirect(vid, src, token)
-  }, 15000)
-  inst.on(Hls.Events.MANIFEST_PARSED, function () {
-    clearTimeout(manifestTimer)
-    if (token !== loadSeq || video !== vid) return
-    cleanupSeek()
-    var levels = inst.levels || []
-    if (up && levels.length <= 1) {
-      // REWORK#1 F1: single-variant — выбора качества нет → плеер не дёргаем:
-      // тихо возвращаемся на direct (позиция сохраняется) и снимаем сессию
-      // (F2: она никем не используется)
-      console.log('[hls] upgrade: single level → stay direct')
-      destroyHls()
-      restoreDirect(vid, src, up)
-      dropHlsSession()
-      return
+  // metadata загружен — можно безопасно ставить currentTime
+  up.restoring = true
+  try { vid.currentTime = target } catch (e) {}
+  // страховка: если Chrome всё равно clamp-ил — повтор через 400ms (макс 80 попыток суммарно)
+  setTimeout(function () {
+    up.restoring = false
+    if (video !== vid) return
+    if (Math.abs(vid.currentTime - target) > 1.5) {
+      applyUpgradeSeek(vid, up, target)
     }
-    var qw = document.getElementById('qualityWrap'); if (qw) qw.style.display = 'flex'
-    buildQualityMenu(levels)
-    applyLevelPref()
-    applyVol()
-    vid.playbackRate = speed
+  }, 600)
+}
+
+// m2 FIX: upgradeInProgress flag to suppress onerror during direct→HLS upgrade window
+  // (between vid.src='' + load() and hls.attachMedia(vid))
+  var upgradeInProgress = false
+
+  // запуск hls.js; up (upgrade-режим) — { saved, wasPlaying, userSeek, seekListener },
+  // для первоначального старта не передаётся
+  // targetHeight: если задан (не null), применяется после MANIFEST_PARSED
+  // S4: при upgrade (up задан) прерываем прямой стрим (vid.src → '' + load()),
+  // чтобы браузер отменил HTTP-запрос к /stream/<id> и не качал байты впустую
+  // параллельно с ffmpeg, читающим тот же источник.
+  function startHls(vid, url, src, token, up, targetHeight) {
     if (up) {
-      // REWORK#1 F1: возвращаем позицию, если пользователь не перемотал сам.
-      // cur мог сброситься в 0 при attachMedia (blob-src hls.js) — это не
-      // перемотка пользователя; реальные перемотки в окне upgrade ловили по
-      // событию seeking (up.userSeek). saved снят свежим при ответе main.
-      var cur = vid.currentTime
-      if (up.userSeek != null) { try { vid.currentTime = up.userSeek } catch (e) {} }
-      else if (Math.abs(cur - up.saved) < 2 || cur < 1) { try { vid.currentTime = up.saved } catch (e) {} }
-      if (up.wasPlaying) {
-        var p = vid.play()
-        if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
-      } else {
-        var pb = document.getElementById('playBtn'); if (pb) pb.textContent = '▶'
-      }
-      update()
-    } else {
-      var p2 = vid.play()
-      if (p2 && p2.catch) p2.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+      // Upgrade из direct: прерываем текущий прямой стрим до attachMedia,
+      // иначе браузер продолжает качать /stream/<id> параллельно с ffmpeg.
+      try { vid.pause() } catch (e) {}
+      upgradeInProgress = true
+      vid.src = ''
+      vid.load()
     }
-  })
-  inst.on(Hls.Events.LEVEL_SWITCHED, function () { if (token === loadSeq && hls === inst) markQuality() })
-  inst.on(Hls.Events.ERROR, function (evt, data) {
-    if (!data || !data.fatal) return
-    console.log('[hls] fatal:', data.type, data.details)
-    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retries < 2) { retries++; try { inst.startLoad() } catch (e) {} return }
-    if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retries < 2) { retries++; try { inst.recoverMediaError() } catch (e) {} return }
-    clearTimeout(manifestTimer)
-    cleanupSeek()
-    useDirect(vid, src, token)
-  })
-  inst.loadSource(url)
-  inst.attachMedia(vid)
-  if (up) {
-    // слушатель вешаем ПОСЛЕ attach: события самого attach не считаем, а вот
-    // перемотку пользователя до MANIFEST_PARSED — ловим (его позиция важнее saved)
-    up.seekListener = function () { up.userSeek = vid.currentTime }
-    try { vid.addEventListener('seeking', up.seekListener) } catch (e) {}
+    destroyHls()
+    var inst = new Hls({ enableWorker: true, backBufferLength: 60 })
+    hls = inst
+    var retries = 0
+    var cleanupSeek = function () {
+      if (up && up.seekListener) { try { vid.removeEventListener('seeking', up.seekListener) } catch (e) {} up.seekListener = null }
+    }
+    // m1 FIX: wrap in try/finally to ensure upgradeInProgress is always reset,
+    // even if Hls constructor or loadSource/attachMedia throws (async media error
+    // arrives after flag would be cleared in happy path)
+    try {
+      // страховка: манифест не пришёл → снимаем спиннер и играем напрямую
+      var manifestTimer = setTimeout(function () {
+        if (token !== loadSeq || hls !== inst) return
+        console.log('[hls] manifest timeout → direct src')
+        cleanupSeek()
+        upgradeInProgress = false
+        useDirect(vid, src, token)
+      }, 15000)
+      inst.on(Hls.Events.MANIFEST_PARSED, function () {
+        clearTimeout(manifestTimer)
+        if (token !== loadSeq || video !== vid) return
+        cleanupSeek()
+        var levels = inst.levels || []
+        qualityMode = 'hls'
+        // S3 REWORK: f.height на первом открытии может быть ещё 0 (пробе HLS
+        // как раз его и записывает) — меню выходило только с «Оригинал».
+        // Пересобираем лестницу из РЕАЛЬНЫХ уровней master-плейлиста:
+        // транскоды несут height+NAME, «Оригинал» идёт без RESOLUTION (height=0).
+        var seenH = {}
+        var rebuilt = []
+        for (var j = 0; j < levels.length; j++) {
+          var lh = levels[j].height || 0
+          var lkey = lh === 0 ? 'orig' : String(lh)
+          if (seenH[lkey]) continue
+          seenH[lkey] = true
+          rebuilt.push({ height: lh, label: lh === 0 ? 'Оригинал' : (levels[j].name || lh + 'p') })
+        }
+        rebuilt.sort(function (a, b) { return (a.height === 0 ? 1e9 : a.height) - (b.height === 0 ? 1e9 : b.height) })
+        if (rebuilt.length) currentQualityLadder = rebuilt
+        buildQualityMenuFromLadder(currentQualityLadder)
+        // Применяем сохранённый преф или targetHeight
+        if (targetHeight !== null) {
+          // Ищем уровень с нужной высотой
+          for (var i = 0; i < levels.length; i++) {
+            if (levels[i].height === targetHeight) {
+              try { hls.currentLevel = i } catch (e) {}
+              // Use 'original' sentinel for height=0 (original stream), numeric height otherwise
+              levelPref = targetHeight === 0 ? 'original' : targetHeight
+              try { localStorage.setItem(LEVEL_KEY, levelPref === 'original' ? 'original' : String(targetHeight)) } catch (e) {}
+              break
+            }
+          }
+        } else {
+          applyLevelPref()
+        }
+        applyVol()
+        vid.playbackRate = speed
+        if (up) {
+          // REWORK#1 F1: возвращаем позицию через applyUpgradeSeek — ждём metadata
+          // (duration > 0), чтобы Chrome не clamp-ил seek к seekable end.
+          // userSeek приоритетен, если пользователь перемотал (>0.5s), иначе saved.
+          var target = (up.userSeek != null && up.userSeek > 0.5) ? up.userSeek : up.saved
+          if (target > 0) applyUpgradeSeek(vid, up, target)
+          if (up.wasPlaying) {
+            var p = vid.play()
+            if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+          } else {
+            var pb = document.getElementById('playBtn'); if (pb) pb.textContent = '▶'
+          }
+          update()
+        } else {
+          var p2 = vid.play()
+          if (p2 && p2.catch) p2.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+        }
+      })
+      inst.on(Hls.Events.LEVEL_SWITCHED, function () { if (token === loadSeq && hls === inst) markQualityFromLadder() })
+      inst.on(Hls.Events.ERROR, function (evt, data) {
+        if (!data || !data.fatal) return
+        console.log('[hls] fatal:', data.type, data.details)
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retries < 2) { retries++; try { inst.startLoad() } catch (e) {} return }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retries < 2) { retries++; try { inst.recoverMediaError() } catch (e) {} return }
+        clearTimeout(manifestTimer)
+        cleanupSeek()
+        upgradeInProgress = false
+        useDirect(vid, src, token)
+      })
+      inst.loadSource(url)
+      inst.attachMedia(vid)
+    } finally {
+      // m1 FIX: always reset upgradeInProgress, even on exception
+      upgradeInProgress = false
+    }
+    if (up) {
+      // слушатель вешаем ПОСЛЕ attach: события самого attach не считаем, а вот
+      // перемотку пользователя до MANIFEST_PARSED — ловим (его позиция важнее saved)
+      // Игнорируем seeking во время нашего восстановления позиции (up.restoring)
+      // и слишком маленькие currentTime (<0.5s) — это шум от attach/load.
+      up.seekListener = function () {
+        if (up.restoring) return
+        var t = vid.currentTime
+        if (t > 0.5) up.userSeek = t
+      }
+      try { vid.addEventListener('seeking', up.seekListener) } catch (e) {}
+    }
   }
-}
 // direct после отмены upgrade: hls.js мог заменить src на blob → возвращаем
 // прямой src и позицию (REWORK#1 F1: single-variant путь)
 function restoreDirect(vid, src, up) {
@@ -2650,6 +2823,8 @@ function useDirect(vid, src, token) {
   if (token !== loadSeq || video !== vid) return
   var hadHls = !!hls
   destroyHls()
+  qualityMode = 'direct' // S3: сброс режима качества
+  buildQualityMenuFromLadder(currentQualityLadder)
   if (!src) {
     // T-20260925-010 S2: src у hlsPending-файла так и не появился — HLS не
     // состоялся (манифест/медиа-ошибка) → старый путь, а не «формат не поддерживается»
@@ -2694,69 +2869,179 @@ function setSpeed(s) {
   if (video) video.playbackRate = s
 }
 
-// ==== меню: качество (только при активном HLS) ====
+// ==== меню: качество (S3: всегда видно для видео, ленивый переход direct→HLS) ====
 function toggleQualityMenu() { toggleMenu('qualityMenu') }
-function buildQualityMenu(levels) {
+
+// Строит меню из заранее известной лестницы качества (currentQualityLadder)
+function buildQualityMenuFromLadder(ladder) {
   var m = document.getElementById('qualityMenu')
   m.innerHTML = ''
-  var auto = document.createElement('div')
-  auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
-  auto.onclick = function () { pickLevel(-1); closeMenus() }
-  m.appendChild(auto)
-  var seen = {}
-  var list = []
-  for (var i = 0; i < levels.length; i++) {
-    var h = levels[i] && levels[i].height
-    if (!h || seen[h]) continue // дубли по высоте (master может отдавать одинаковые)
-    seen[h] = 1
-    list.push({ h: h, idx: i })
+  // Пункт "Авто" — только в HLS-режиме (ABR работает только с hls.js)
+  if (qualityMode === 'hls') {
+    var auto = document.createElement('div')
+    auto.setAttribute('data-h', 'auto')
+    auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
+    auto.onclick = function () { pickAutoLevel(); closeMenus() }
+    m.appendChild(auto)
   }
-  list.sort(function (a, b) { return b.h - a.h }) // как в Telegram: сверху высокие
-  for (var j = 0; j < list.length; j++) {
-    (function (o) {
+  // Уровни из лестницы (уже отсортированы: низкие → высокие, "Оригинал" в конце)
+  // В меню показываем в обратном порядке (высокие сверху), как в Telegram
+  for (var i = ladder.length - 1; i >= 0; i--) {
+    (function (level) {
       var d = document.createElement('div')
-      d.setAttribute('data-h', o.h)
-      d.innerHTML = '<span>' + o.h + 'p</span><span class="chk"></span>'
-      d.onclick = function () { pickLevel(o.idx, o.h); closeMenus() }
+      var isOriginal = level.height === 0
+      d.setAttribute('data-h', isOriginal ? 'original' : String(level.height))
+      d.innerHTML = '<span>' + level.label + '</span><span class="chk"></span>'
+      d.onclick = function () { pickLevelFromLadder(level, isOriginal); closeMenus() }
       m.appendChild(d)
-    })(list[j])
+    })(ladder[i])
   }
-  markQuality()
+  markQualityFromLadder()
 }
-function pickLevel(idx, height) {
-  if (!hls) return
-  try { hls.currentLevel = idx } catch (e) {}
-  levelPref = (idx < 0 || height == null) ? 'auto' : height
+
+// M1 FIX: pickAutoLevel replaces deleted pickLevel(-1, null) for "Авто" button
+function pickAutoLevel() {
+  levelPref = 'auto'
+  try { localStorage.setItem(LEVEL_KEY, 'auto') } catch (e) {}
+  
+  if (qualityMode === 'hls' && hls) {
+    try { hls.currentLevel = -1 } catch (e) {} // enable ABR
+  }
+  markQualityFromLadder()
+}
+
+// Выбор уровня из лестницы (работает и в direct, и в hls режиме)
+function pickLevelFromLadder(level, isOriginal) {
+  var targetHeight = isOriginal ? 0 : level.height
+  levelPref = isOriginal ? 'original' : targetHeight
   try { localStorage.setItem(LEVEL_KEY, levelPref) } catch (e) {}
-  markQuality()
+  
+  if (qualityMode === 'direct' && !isOriginal) {
+    // В direct-режиме выбор качества ≠ "Оригинал" → переключаемся на HLS
+    switchToHls(targetHeight)
+    return
+  }
+  
+  if (qualityMode === 'hls' && hls) {
+    // В HLS-режиме ищем соответствующий уровень в hls.levels
+    var hlsLevels = hls.levels || []
+    for (var i = 0; i < hlsLevels.length; i++) {
+      if (hlsLevels[i].height === targetHeight) {
+        try { hls.currentLevel = i } catch (e) {}
+        break
+      }
+    }
+    // M5 FIX: "Оригинал" (height=0) should select the "Оригинал" level in hls.levels,
+    // not enable ABR (currentLevel=-1). Find level with height===0 (original stream).
+    if (isOriginal) {
+      for (var i = 0; i < hlsLevels.length; i++) {
+        if (hlsLevels[i].height === 0) {
+          try { hls.currentLevel = i } catch (e) {}
+          break
+        }
+      }
+    }
+  }
+  markQualityFromLadder()
 }
-// восстановление выбранного уровня после переключения файла/сессии
+
+// B2 FIX: Restore applyLevelPref() from HEAD - applies saved levelPref after MANIFEST_PARSED
 function applyLevelPref() {
   if (!hls || !hls.levels) return
   if (levelPref === 'auto') { if (!hls.autoLevelEnabled) hls.currentLevel = -1; return }
+  if (levelPref === 'original') {
+    // Find level with height===0 (original stream)
+    for (var i = 0; i < hls.levels.length; i++) {
+      if (hls.levels[i].height === 0) { hls.currentLevel = i; return }
+    }
+    return
+  }
   for (var i = 0; i < hls.levels.length; i++) {
     if (hls.levels[i].height === levelPref) { hls.currentLevel = i; return }
   }
 }
-// подпись кнопки: «Авто» пока ABR, иначе высота текущего уровня (LEVEL_SWITCHED)
-function markQuality() {
+
+// Обновляет подпись кнопки и чекмарки в меню на основе currentQualityLadder + levelPref
+function markQualityFromLadder() {
   var btn = document.getElementById('qualityBtn')
   var m = document.getElementById('qualityMenu')
   if (!btn || !m) return
+  
   var label = 'Авто'
-  if (hls && !hls.autoLevelEnabled && hls.currentLevel >= 0 && hls.levels && hls.levels[hls.currentLevel] && hls.levels[hls.currentLevel].height) {
-    label = hls.levels[hls.currentLevel].height + 'p'
+  if (qualityMode === 'hls' && hls && !hls.autoLevelEnabled && hls.currentLevel >= 0 && hls.levels && hls.levels[hls.currentLevel]) {
+    var activeLevel = hls.levels[hls.currentLevel]
+    if (activeLevel.height === 0) {
+      label = 'Оригинал'
+    } else if (activeLevel.height) {
+      label = activeLevel.height + 'p'
+    }
+  } else if (qualityMode === 'direct') {
+    // В direct-режиме показываем сохранённый преф или "Авто"
+    if (levelPref === 'original') {
+      label = 'Оригинал'
+    } else if (levelPref !== 'auto') {
+      label = levelPref + 'p'
+    }
   }
   btn.textContent = label
+  
   var items = m.children
   for (var i = 0; i < items.length; i++) {
     var it = items[i]
     var hAttr = it.getAttribute('data-h')
-    var on = hAttr === null ? (hls && hls.autoLevelEnabled) : (label === hAttr + 'p')
+    var on = false
+    if (hAttr === 'original') {
+      on = (levelPref === 'original')
+    } else if (hAttr === 'auto') {
+      on = (levelPref === 'auto')
+    } else if (hAttr !== null) {
+      var h = parseInt(hAttr, 10)
+      on = (levelPref !== 'auto' && levelPref !== 'original' && levelPref === h)
+    }
     var chk = it.querySelector('.chk')
     if (chk) chk.textContent = on ? '✓' : ''
   }
 }
+
+// Переключение из direct в HLS с выбранным качеством
+function switchToHls(targetHeight) {
+  if (!video || !video.src) return
+  var src = video.src
+  var api = window.electronAPI && window.electronAPI.preview
+  if (!api || typeof api.hlsStart !== 'function' || typeof Hls === 'undefined' || !Hls.isSupported()) return
+  
+  qualityMode = 'hls'
+  currentMsgId = video.__messageId || 0
+  if (!currentMsgId) return
+  
+  // M8 FIX: capture token/vid for race check (like upgradeToHls at line 2600)
+  // Захватываем позицию ДО асинхронного hlsStart — защита от сброса currentTime
+  var token = loadSeq
+  var vid = video
+  var savedPos = vid.currentTime
+  
+// Запускаем HLS-сессию
+  api.hlsStart(currentMsgId).then(function (r) {
+    // M8 FIX: check if user navigated away during hlsStart
+    if (token !== loadSeq || video !== vid) return
+    if (r && r.hlsUrl) {
+      upgradeToHlsWithLevel(video, r.hlsUrl, src, targetHeight, token, savedPos)
+    } else {
+      console.log('[hls] switchToHls failed:', r && r.error)
+      qualityMode = 'direct'
+      buildQualityMenuFromLadder(currentQualityLadder)
+    }
+  }).catch(function (e) {
+    if (token !== loadSeq || video !== vid) return
+    console.log('[hls] switchToHls error:', e && e.message)
+    qualityMode = 'direct'
+    buildQualityMenuFromLadder(currentQualityLadder)
+  })
+}
+
+// B3 FIX: Removed duplicate upgradeToHlsWithLevel (kept the one at ~line 2610).
+// Fixed call to use startHls (not non-existent startHlsWithLevel).
+// Signature: startHls(vid, url, src, token, up, targetHeight)
 
 // ==== громкость / mute (персист rodjer.preview.volume|muted) ====
 function applyVol() {
@@ -3105,7 +3390,11 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
       let needsConversion = !fs.existsSync(jpgPath)
       if (!needsConversion) {
         const stat = fs.statSync(jpgPath)
-        if (stat.size < 10000) needsConversion = true // Fix for old corrupted 3.5KB sips outputs
+        // MINOR 7a FIX: poisoned .heic.jpg unlink + needsConversion (like ensurePreviewCache)
+        if (stat.size < 10000 || !isJpegFile(jpgPath)) {
+          try { fs.unlinkSync(jpgPath) } catch {}
+          needsConversion = true
+        }
       }
       
       if (needsConversion) {
@@ -3151,14 +3440,19 @@ ipcMain.handle('file:get-local-url', async (_, filePath: string) => {
           console.error('HEIC convert FAIL for thumbnail:', filePath, e.message)
         }
       }
-      finalPath = jpgPath
+      // Verify the converted file exists and is valid JPEG before using it
+      if (fs.existsSync(jpgPath) && isJpegFile(jpgPath)) {
+        finalPath = jpgPath
+      } else {
+        log('warn', `[thumb] getLocalUrl HEIC conversion failed or invalid JPEG: ${jpgPath}`)
+        return { success: false, error: 'HEIC conversion failed' }
+      }
     }
     // Same semantics as src/lib/localFileUrl.ts (main can't import from src):
     // abs FS path → local-file:/// URL with drive letter in pathname (3 slashes).
-    let p = finalPath.replace(/\\/g, '/')
-    if (/^[A-Za-z]:/.test(p)) p = '/' + p
-    if (!p.startsWith('/')) p = '/' + p
-    const url = 'local-file://' + encodeURI(p)
+    // Use pathToFileURL for correct percent-encoding, then replace file:// → local-file://
+    const fileUrl = pathToFileURL(finalPath).href
+    const url = fileUrl.replace(/^file:\/\//, 'local-file://')
     log('info', `[thumb] getLocalUrl local-file → ${url}`)
     return { success: true, data: url }
   } catch (error) {
@@ -3180,6 +3474,10 @@ ipcMain.on('preview:close', (_, sessionId: string) => {
       .filter((n: number) => Number.isInteger(n) && n > 0)
     if (ids.length) {
       try { cleanupHlsForIds(ids) } catch (e) { log('warn', `[hls] cleanup on preview:close err=${(e as Error).message}`) }
+      // M2 FIX: Clear range cache for all messageIds in this preview session
+      for (const messageId of ids) {
+        rangeCache.clear(messageId)
+      }
     }
   }
   const win = previewWindows.get(id)

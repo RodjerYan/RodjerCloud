@@ -36,3 +36,16 @@ export function groupByDay(items: any[]) {
   })
   return years
 }
+
+/**
+ * Returns a resolution label for a given video height.
+ * Returns null if height is undefined or below 480p.
+ */
+export function resolutionLabel(height?: number): string | null {
+  if (!height || height < 480) return null
+  if (height >= 2160) return '4K'
+  if (height >= 1440) return '1440p'
+  if (height >= 1080) return '1080p'
+  if (height >= 720) return '720p'
+  return '480p'
+}

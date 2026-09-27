@@ -1,6 +1,23 @@
 export {}
 
 declare global {
+  interface TelegramFile {
+    messageId: number
+    fileName: string
+    fileSize: number
+    mimeType: string
+    uploadedAt: number
+    originalDate?: number
+    caption: string
+    chatId: string
+    isEncrypted?: boolean
+    isMultipart?: boolean
+    multipartIds?: number[]
+    width?: number
+    height?: number
+    duration?: number
+  }
+
   interface Window {
     electronAPI: {
       telegram: {
@@ -9,24 +26,24 @@ declare global {
         verifyCode: (code: string) => Promise<{ success: boolean; data?: any; error?: string; needs2FA?: boolean }>
         verify2FA: (password: string) => Promise<{ success: boolean; data?: any; error?: string }>
         reconnect: () => Promise<{ success: boolean; data?: any; error?: string }>
-        uploadFile: (filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        uploadFile: (filePath: string, id?: string, encrypt?: boolean, customFileName?: string) => Promise<{ success: boolean; data?: TelegramFile; error?: string }>
         cancelUpload: (id: string) => Promise<{ success: boolean; error?: string }>
         onUploadProgress: (cb: (data: { id?: string; sent: number; total: number; percent: number }) => void) => () => void
-        getUploadState: () => Promise<{ success: boolean; data?: { queue: any[]; activeUploads: number; uploadsInProgress: boolean }; error?: string }>
-        onQueueState: (cb: (data: { queue: any[]; activeUploads: number }) => void) => () => void
+        getUploadState: () => Promise<{ success: boolean; data?: { queue: TelegramFile[]; activeUploads: number; uploadsInProgress: boolean }; error?: string }>
+        onQueueState: (cb: (data: { queue: TelegramFile[]; activeUploads: number }) => void) => () => void
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
-        listFiles: () => Promise<{ success: boolean; data?: any[]; error?: string }>
-        listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
-        listFolderFilesFromCache: (folderId: string, limit: number, offsetId: number) => Promise<{ success: boolean; data?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
-        searchFolderFiles: (folderId: string, query: string, limit?: number, offsetId?: number) => Promise<{ success: boolean; files?: any[]; nextOffsetId?: number | null; total?: number; error?: string }>
+        listFiles: () => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
+        listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: TelegramFile[]; nextOffsetId?: number | null; total?: number; error?: string }>
+        listFolderFilesFromCache: (folderId: string, limit: number, offsetId: number) => Promise<{ success: boolean; data?: TelegramFile[]; nextOffsetId?: number | null; total?: number; error?: string }>
+        searchFolderFiles: (folderId: string, query: string, limit?: number, offsetId?: number) => Promise<{ success: boolean; files?: TelegramFile[]; nextOffsetId?: number | null; total?: number; error?: string }>
         getCategoryCounts: () => Promise<{ success: boolean; data?: Record<string, number>; error?: string }>
         getTotalSize: () => Promise<{ success: boolean; data?: { total: number; totalSize: number }; error?: string }>
-        getFilesByCategory: (category: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getFilesByCategory: (category: string) => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
         downloadFile: (messageId: number, fileName: string) => Promise<{ success: boolean; data?: any; error?: string }>
-        downloadThumbnail: (messageId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
+        downloadThumbnail: (messageId: number, fileName?: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
         onThumbnailReady: (cb: (data: { messageId: number; path: string }) => void) => () => void
         deleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
-        listTrash: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        listTrash: () => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
         restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         permDeleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         clearTrash: (messageIds: number[]) => Promise<{ success: boolean; data?: { deleted: number; ghostsDeleted: number; failed: number; total: number }; error?: string }>
@@ -34,7 +51,7 @@ declare global {
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>
         logout: () => Promise<{ success: boolean; error?: string }>
         getUserInfo: () => Promise<{ success: boolean; data?: { firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }; error?: string }>
-        searchGlobal: (query: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        searchGlobal: (query: string) => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
         saveGlobalMedia: (messageId: number, peerId: string, mediaDoc?: any, mediaType?: string, originalText?: string) => Promise<{ success: boolean; error?: string }>
         previewGlobalMedia: (previewKey: string) => Promise<{ success: boolean; data?: { filePath: string; mimeType: string }; error?: string }>
       }

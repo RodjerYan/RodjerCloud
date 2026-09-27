@@ -646,7 +646,7 @@ export default function TrashPage() {
               <div key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                 <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
                 <div className="mf-card-icon" data-type="trash">
-                  {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                  {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
                 </div>
                 <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
                 <div className="mf-card-meta">{fmtSize(f.fileSize)} · <TrashTimer trashedAt={f.trashedAt} /></div>
@@ -706,7 +706,7 @@ export default function TrashPage() {
                 <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')} style={{ viewTransitionName: `card_${f.messageId}` }}>
                   <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                   <td style={{ width: 36, height: 36, padding: 2, borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
-                    {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} /> : <span style={{ fontSize: 11, opacity: 0.5 }}>{(f.fileName.split('.').pop() || '?').slice(0, 3).toUpperCase()}</span>}
+                    {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : <span style={{ fontSize: 11, opacity: 0.5 }}>{(f.fileName.split('.').pop() || '?').slice(0, 3).toUpperCase()}</span>}
                   </td>
                   <td className="ellip" title={f.fileName}>{f.fileName}</td>
                   <td>{fmtSize(f.fileSize)}</td>
