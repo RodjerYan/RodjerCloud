@@ -129,12 +129,52 @@ export class TelegramService {
   private dimsNetQueue: { messageId: number; message: any }[] = []
   private processingDimsNetQueue = false
 
+  // Self-heal reconnect (T-20260927-002)
+  private lastSession: string | null = null
+  private suppressSelfHealUntil = 0
+  private lastSelfHealAttempt = 0
+  private selfHealTimer: ReturnType<typeof setInterval> | null = null
+
   constructor() {
     this.loadTrashState()
-    // Re-save to persist corrected timestamps (0 → Date.now())
+    // Re-save to persist corrected timestamps (0 → Date.now%)
     if (this.localTrashedIds.size > 0) {
       const hasZero = Array.from(this.localTrashedIds.values()).some(v => v === 0)
       if (hasZero) this.saveTrashState()
+    }
+    // Self-heal timer: check every 20s if client is disconnected and needs reconnect
+    this.selfHealTimer = setInterval(() => this.runSelfHealCheck(), 20_000)
+    if (this.selfHealTimer.unref) this.selfHealTimer.unref()
+  }
+
+  // T-20260927-002: Self-heal reconnect — фоновая проверка раз в 20s.
+  // Если клиент отключился (disconnected === true) и не идёт авторизация/reconnect/logout,
+  // пробуем переподключиться по сохранённой сессии.
+  private async runSelfHealCheck(): Promise<void> {
+    const now = Date.now()
+    // Кулдаун между попытками ≥30s
+    if (now - this.lastSelfHealAttempt < 30_000) return
+    // Подавление после штатных вызовов reconnect/startAuth/logout/initialize
+    if (now < this.suppressSelfHealUntil) return
+    if (!this.client) return
+    // telegramBaseClient имеет геттер disconnected
+    const disconnected = (this.client as any).disconnected === true
+    if (!disconnected) return
+    // Не пытаемся, если идёт авторизация
+    if (this.phoneCodeDef || this.passwordDef || this.authResolved === false) return
+    if (!this.lastSession) {
+      thumbLog('[self-heal] no lastSession, skipping')
+      return
+    }
+    this.lastSelfHealAttempt = now
+    try {
+      thumbLog('[self-heal] attempting reconnect...')
+      await this.reconnect(this.lastSession)
+      thumbLog('[self-heal] reconnect succeeded')
+      appLog('warn', '[self-heal] Telegram reconnected successfully')
+    } catch (e) {
+      thumbLog(`[self-heal] reconnect failed: ${(e as Error).message}`)
+      appLog('warn', `[self-heal] reconnect failed: ${(e as Error).message}`)
     }
   }
 
@@ -418,6 +458,8 @@ export class TelegramService {
     this.passwordDef = deferred<string>()
     this.codeRequested = deferred<void>()
     this.passwordRequested = deferred<void>()
+    // Suppress self-heal for 60s after starting auth flow
+    this.suppressSelfHealUntil = Date.now() + 60_000
 
     if (this.client) {
       try { await this.client.disconnect() } catch {}
@@ -537,6 +579,9 @@ export class TelegramService {
         }
         return { success: false, needs2FA: false, error: msg }
       }
+      // Save session on successful auth (code only, no 2FA)
+      try { this.lastSession = this.getSessionString() } catch {}
+      this.suppressSelfHealUntil = Date.now() + 60_000
       return { success: true, needs2FA: false }
     }
 
@@ -566,6 +611,9 @@ export class TelegramService {
       }
       return { success: false, error: msg || '2FA verification failed' }
     }
+    // Save session on successful 2FA
+    try { this.lastSession = this.getSessionString() } catch {}
+    this.suppressSelfHealUntil = Date.now() + 60_000
     return { success: true }
   }
 
@@ -667,12 +715,18 @@ export class TelegramService {
         if (m.lastDate >= activeMatch.lastDate) activeMatch = m
       }
       this.channelId = BigInt(activeMatch.entity.id.toString())
+      // Save session and suppress self-heal for 60s after successful reconnect
+      this.lastSession = sessionString
+      this.suppressSelfHealUntil = Date.now() + 60_000
       return {
         channelId: this.channelId.toString(),
         channelName: activeMatch.entity.title,
       }
     }
-    return await this.createPrivateChannel()
+    const result = await this.createPrivateChannel()
+    this.lastSession = sessionString
+    this.suppressSelfHealUntil = Date.now() + 60_000
+    return result
   }
 
   uploadFile(filePath: string, onProgress?: (sent: number, total: number) => void, encrypt?: boolean, customFileName?: string, checkCancelled?: () => boolean) {
@@ -1582,6 +1636,26 @@ export class TelegramService {
       : null
 
     return { files: slice, nextOffsetId, total: matched.length }
+  }
+
+  // D4 FIX: Global search across all cached files (not just current folder)
+  // Uses the existing fileCache (all 11115 files) - no new Telegram API calls
+  searchGlobal(query: string, limit = 100): { files: any[]; total: number } {
+    const lowerQuery = query.toLowerCase().trim()
+    if (!lowerQuery) return { files: [], total: 0 }
+
+    const all = this.getCachedFilesInstant()
+    const matched: any[] = []
+    for (const file of all) {
+      const nameMatch = file.fileName?.toLowerCase().includes(lowerQuery)
+      const tagMatch = file.tags?.some((t: string) => t.toLowerCase().includes(lowerQuery))
+      const typeMatch = file.mimeType?.toLowerCase().includes(lowerQuery)
+      if (nameMatch || tagMatch || typeMatch) matched.push(file)
+    }
+
+    matched.sort((a, b) => (b.date || b.uploadedAt || 0) - (a.date || a.uploadedAt || 0))
+
+    return { files: matched.slice(0, limit), total: matched.length }
   }
 
   async listFilesCached(): Promise<any[]> {
@@ -2898,6 +2972,8 @@ if (isEncrypted) {
       try { await this.client.disconnect() } catch {}
       this.client = null
     }
+    this.lastSession = null
+    this.suppressSelfHealUntil = Date.now() + 60_000
   }
 
   getSessionString(): string {

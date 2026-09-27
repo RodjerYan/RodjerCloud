@@ -728,16 +728,27 @@ export default function MyFilesPage() {
   }, [searchQuery])
 
   useEffect(() => {
-    if (!folderDrill) return
     const reqId = ++searchRequestIdRef.current
     if (debouncedQuery.trim()) {
-      window.electronAPI.telegram.searchFolderFiles(folderDrill, debouncedQuery, 50, 0).then((r: any) => {
-        if (reqId !== searchRequestIdRef.current) return
-        if (r.success) {
-          setSearchResults(processRawFiles(r.files || []))
-          setSearchTotal(r.total ?? 0)
-        }
-      })
+      if (folderDrill) {
+        // Folder-specific search
+        window.electronAPI.telegram.searchFolderFiles(folderDrill, debouncedQuery, 50, 0).then((r: any) => {
+          if (reqId !== searchRequestIdRef.current) return
+          if (r.success) {
+            setSearchResults(processRawFiles(r.files || []))
+            setSearchTotal(r.total ?? 0)
+          }
+        })
+      } else {
+        // D4 FIX: Global search across all cached files when in root (no folderDrill)
+        window.electronAPI.telegram.searchGlobal(debouncedQuery, 100).then((r: any) => {
+          if (reqId !== searchRequestIdRef.current) return
+          if (r.success) {
+            setSearchResults(processRawFiles(r.data || []))
+            setSearchTotal(r.total ?? 0)
+          }
+        })
+      }
     } else {
       setSearchResults([])
       setSearchTotal(0)

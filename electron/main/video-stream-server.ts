@@ -158,6 +158,73 @@ class RangeCache {
     return result
   }
 
+  // Получить максимально длинный ПОКРЫТЫЙ ПРЕФИКС [start..coveredEnd] из существующих entries.
+  // Возвращает { data: Buffer; coveredEnd: number } | null (null только если префикс пуст — нет данных от start).
+  // Не требует полного покрытия [start, end], в отличие от get().
+  getPrefix(messageId: number, start: number, end: number): { data: Buffer; coveredEnd: number } | null {
+    const list = this.entries.get(messageId)
+    if (!list || list.length === 0) return null
+
+    let neededStart = start
+    const chunks: Buffer[] = []
+    let totalLen = 0
+    let coveredEnd = start - 1
+
+    for (const entry of list) {
+      if (entry.end < neededStart) continue
+      if (entry.start > neededStart) break // дырка — префикс прерван
+
+      // entry.start <= neededStart <= entry.end
+      const chunkStart = neededStart - entry.start
+      const chunkEnd = Math.min(end, entry.end) - entry.start
+      const chunk = entry.data.subarray(chunkStart, chunkEnd + 1)
+      chunks.push(chunk)
+      totalLen += chunk.length
+      coveredEnd = entry.end
+      neededStart = entry.end + 1
+      entry.lastAccess = Date.now() // LRU touch
+
+      if (neededStart > end) break
+    }
+
+    if (coveredEnd < start) return null // префикс пуст — нет данных от start
+
+    const data = Buffer.concat(chunks, totalLen)
+    return { data, coveredEnd }
+  }
+
+  // Удалить все entries с end < belowOffset - keepBytes (данные ПОЗАДИ позиции чтения).
+  // Возвращает количество освобождённых байт.
+  evictBehind(messageId: number, belowOffset: number, keepBytes: number = 8 * 1024 * 1024): number {
+    const list = this.entries.get(messageId)
+    if (!list || list.length === 0) return 0
+
+    const threshold = belowOffset - keepBytes
+    if (threshold <= 0) return 0
+
+    let freed = 0
+    let i = 0
+    while (i < list.length) {
+      const entry = list[i]
+      if (entry.end < threshold) {
+        freed += entry.data.length
+        this.globalTotal -= entry.data.length
+        list.splice(i, 1)
+      } else {
+        i++
+      }
+    }
+
+    if (freed > 0) {
+      this.recalcTotalSize(messageId, list)
+      if (list.length === 0) {
+        this.entries.delete(messageId)
+        this.totalSize.delete(messageId)
+      }
+    }
+    return freed
+  }
+
   // Сохранить данные для диапазона [start, end] (включительно).
   // Сливает с соседними записями, вытесняет LRU при превышении лимита.
   set(messageId: number, start: number, end: number, data: Buffer): void {
@@ -228,6 +295,11 @@ class RangeCache {
     this.totalSize.set(messageId, total)
   }
 
+  // Public getter for totalSize (used by filler for cap checks)
+  getTotalSize(messageId: number): number {
+    return this.totalSize.get(messageId) || 0
+  }
+
   private evictLRU(messageId: number, list: RangeCacheEntry[]): void {
     let total = this.totalSize.get(messageId) || 0
     if (total <= RANGE_CACHE_MAX_BYTES) return
@@ -278,6 +350,189 @@ class RangeCache {
 }
 
 export const rangeCache = new RangeCache()
+
+// ===== Per-request fetch infrastructure (replaces filler) =====
+// Active fetch records for non-encrypted path: messageId -> fetch records
+// Max 3 concurrent fetches per messageId to prevent Telegram re-fetching same bytes.
+type ActiveFetch = {
+  start: number
+  end: number
+  promise: Promise<void>
+  progress: number // bytes delivered to cache
+  abortController: AbortController
+}
+
+const activeFetches = new Map<number, ActiveFetch[]>()
+
+// No-op stub to keep cleanup hooks working (was: stop filler)
+export function stopFillersForFile(_messageId: number): void {
+  // Filler architecture removed in R5c; no-op for backward compatibility
+}
+
+// Find an active fetch covering the given position for a messageId
+function findActiveFetch(messageId: number, pos: number): ActiveFetch | undefined {
+  const fetches = activeFetches.get(messageId)
+  if (!fetches) return undefined
+  return fetches.find(f => f.start <= pos && f.end >= pos)
+}
+
+// Count active fetches for a messageId
+function countActiveFetches(messageId: number): number {
+  return activeFetches.get(messageId)?.length ?? 0
+}
+
+// Remove a fetch record when done/failed
+function removeActiveFetch(messageId: number, fetch: ActiveFetch): void {
+  const list = activeFetches.get(messageId)
+  if (!list) return
+  const idx = list.indexOf(fetch)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+    if (list.length === 0) {
+      activeFetches.delete(messageId)
+    }
+  }
+}
+
+// Launch a fetch window [winStart, winEnd] for non-encrypted content
+// Writes chunks to rangeCache via onChunk; progress tracked in record.
+async function launchFetchWindow(
+  messageId: number,
+  winStart: number,
+  winEnd: number,
+  client: any,
+  parts: StreamPart[],
+  totalSize: number
+): Promise<void> {
+  const abortController = new AbortController()
+  const record: ActiveFetch = {
+    start: winStart,
+    end: winEnd,
+    promise: Promise.resolve(), // placeholder
+    progress: 0,
+    abortController,
+  }
+
+  // Add to active fetches before starting
+  let list = activeFetches.get(messageId)
+  if (!list) {
+    list = []
+    activeFetches.set(messageId, list)
+  }
+  list.push(record)
+
+  slog(`fetch start id=${messageId} pos=${winStart} winEnd=${winEnd}`)
+
+  record.promise = (async () => {
+    const MAX_RETRIES = 3
+    const RETRY_DELAYS = [1000, 2000, 4000] // ms
+    const CHUNK_WRITE_SIZE = 4 * 1024 * 1024 // 4MB chunks for set()
+
+    let pos = winStart
+    let attempt = 0
+    let written = 0 // bytes actually written to cache for this fetch window
+
+    while (pos <= winEnd && !abortController.signal.aborted) {
+      // Cap check: evict behind before writing new data
+      const currentTotal = rangeCache.getTotalSize(messageId)
+      if (currentTotal >= RANGE_CACHE_MAX_BYTES) {
+        const evicted = rangeCache.evictBehind(messageId, pos, 8 * 1024 * 1024)
+        if (evicted === 0) {
+          // Could not evict — wait briefly and retry once
+          await new Promise(r => setTimeout(r, 1000))
+          if (abortController.signal.aborted) break
+          const retryEvicted = rangeCache.evictBehind(messageId, pos, 8 * 1024 * 1024)
+          if (retryEvicted === 0) {
+            // Still no space — skip caching this chunk but continue fetching
+            slog(`fetch cap full id=${messageId} pos=${pos} — skipping cache write`)
+          }
+        }
+      }
+
+      // Find part covering pos
+      const part = parts.find(p => p.start <= pos && p.end >= pos)
+      if (!part) {
+        // Gap between parts — skip
+        pos = winEnd + 1
+        continue
+      }
+
+      const partRangeStart = pos
+      const partRangeEnd = Math.min(winEnd, part.end)
+      const prevPart = part.start > 0 ? parts.find(p => p.end === part.start - 1) : null
+
+      // Retry loop for this segment
+      let success = false
+      attempt = 0
+      while (attempt <= MAX_RETRIES && !abortController.signal.aborted && !success) {
+        try {
+          await fetchPartSegments({
+            client,
+            file: part.msg.media,
+            partStart: part.start,
+            partEnd: part.end,
+            reqStart: partRangeStart,
+            reqEnd: partRangeEnd,
+            isEncrypted: false,
+            previousPart: prevPart ? { msg: prevPart.msg, size: prevPart.size } : null,
+            signal: abortController.signal,
+            onChunk: async (_segmentIndex: number, _chunkIndex: number, data: Buffer, _isLastChunk: boolean, _isLastSegment: boolean) => {
+              if (abortController.signal.aborted) return
+
+              // Write to cache in CHUNK_WRITE_SIZE chunks
+              let offset = 0
+              while (offset < data.length && !abortController.signal.aborted) {
+                const chunkEnd = Math.min(offset + CHUNK_WRITE_SIZE, data.length)
+                const chunk = data.subarray(offset, chunkEnd)
+                const chunkStart = winStart + written + offset
+                const chunkEndAbs = winStart + written + chunkEnd - 1
+                rangeCache.set(messageId, chunkStart, chunkEndAbs, chunk)
+                written += chunk.length
+                record.progress = written
+                offset = chunkEnd
+              }
+            },
+          })
+          success = true
+        } catch (err: any) {
+          if (abortController.signal.aborted) break
+          attempt++
+          if (attempt <= MAX_RETRIES) {
+            const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)]
+            slog(`fetch retry id=${messageId} attempt=${attempt}/${MAX_RETRIES} delay=${delay}ms error=${err.message}`)
+            await new Promise(r => setTimeout(r, delay))
+          } else {
+            slog(`fetch fail id=${messageId} err=${err.message}`)
+            throw err
+          }
+        }
+      }
+
+      if (abortController.signal.aborted) break
+
+      const delivered = partRangeEnd - pos + 1
+      pos = partRangeEnd + 1
+    }
+
+    if (!abortController.signal.aborted) {
+      slog(`fetch done id=${messageId} bytes=${pos - winStart}`)
+      // Self-check: verify cache coverage matches what we wrote
+      const expectedEnd = winStart + written - 1
+      if (written > 0) {
+        const prefix = rangeCache.getPrefix(messageId, winStart, expectedEnd)
+        if (!prefix || prefix.coveredEnd < expectedEnd) {
+          const got = prefix ? `${winStart}-${prefix.coveredEnd}` : 'none'
+          slog(`cache coverage mismatch id=${messageId} expected=${winStart}-${expectedEnd} got=${got}`)
+        }
+      }
+    }
+  })()
+
+  // Cleanup on completion/failure
+  record.promise.finally(() => {
+    removeActiveFetch(messageId, record)
+  })
+}
 
 // Helper: write buffer with backpressure handling (drain/close/error race)
   // M4 FIX: check destroyed/writableEnded before write and after race; clean up listeners in finally
@@ -556,7 +811,6 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
           }
           return res.end()
         }
-        slog(`Range cache MISS ${reqStart}-${reqEnd}`)
       }
 
       // S4 FIX: Prefix/partial caching — always accumulate sent bytes (up to limit),
@@ -591,15 +845,15 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
         clientAborted = true
       })
 
-const key = isEncrypted ? (vaultService as any).getKey() : null
+      const key = isEncrypted ? (vaultService as any).getKey() : null
 
-      // AbortController for cancelling workers on client disconnect
+      // AbortController for cancelling workers on client disconnect (encrypted path only)
       const abortController = new AbortController()
-      req.on('close', () => {
-        slog(`Req closed early.`)
-        clientAborted = true
-        abortController.abort()
-      })
+      if (isEncrypted) {
+        req.on('close', () => {
+          abortController.abort()
+        })
+      }
 
       if (isEncrypted) {
         // ===== ENCRYPTED PATH: sequential (CBC chain requires ordered IV) =====
@@ -716,98 +970,110 @@ const key = isEncrypted ? (vaultService as any).getKey() : null
             currentReqStart += toSend.length
           }
         }
-      } else {
-        // ===== NON-ENCRYPTED PATH: ordered-parallel segmented fetch =====
-        // Process each part that overlaps with the requested range
-        for (const p of parts) {
-          if (bytesSent >= chunkSize) break
-          if (clientAborted) break
-          if (currentReqStart > p.end) continue
-          if (currentReqStart < p.start) currentReqStart = p.start
+} else {
+          // ===== NON-ENCRYPTED PATH: prefix-serve + 16MB window + single-flight =====
+          // Serve from cache prefix; launch bounded fetch windows on cache miss.
+          // Max 3 concurrent fetches per messageId to avoid Telegram re-fetching same bytes.
 
-          const partRangeStart = currentReqStart
-          const partRangeEnd = Math.min(reqEnd, p.end)
-          const partRangeSize = partRangeEnd - partRangeStart + 1
-          if (partRangeSize <= 0) continue
+          let pos = reqStart
+          const FETCH_WINDOW = 16 * 1024 * 1024 // 16MB
+          const MAX_WAIT_MS = 30000 // 30s total wait for data at position
+          const POLL_INTERVAL = 100 // ms
+          let waitStart = Date.now()
 
-          // Find previous part for cross-part IV (not needed for non-encrypted, but keep structure)
-          const prevPart = p.start > 0 ? parts.find(x => x.end === p.start - 1) : null
+          while (bytesSent < chunkSize && !clientAborted) {
+            if (res.destroyed || res.writableEnded) break
 
-          // Accumulate blocks for this part to cache after completion
-          const partSentChunks: Buffer[] = []
-          let partSentTotal = 0
-
-          await fetchPartSegments({
-            client,
-            file: p.msg.media,
-            partStart: p.start,
-            partEnd: p.end,
-            reqStart: partRangeStart,
-            reqEnd: partRangeEnd,
-            isEncrypted: false,
-            previousPart: prevPart ? { msg: prevPart.msg, size: prevPart.size } : null,
-            signal: abortController.signal,
-            onChunk: async (_segmentIndex: number, _chunkIndex: number, data: Buffer, _isLastChunk: boolean, _isLastSegment: boolean) => {
-              if (clientAborted) return
-              if (bytesSent >= chunkSize) return
-
+            // Try to serve from cache prefix
+            const prefix = rangeCache.getPrefix(messageId, pos, reqEnd)
+            if (prefix && prefix.data.length > 0) {
+              // Got data from cache — send it
               const remaining = chunkSize - bytesSent
-              const toSend = data.length > remaining ? data.subarray(0, remaining) : data
-              if (toSend.length === 0) return
-
-              if (shouldCache) {
-                partSentChunks.push(toSend)
-                partSentTotal += toSend.length
-                if (partSentTotal > RANGE_CACHE_MAX_BYTES) {
-                  shouldCache = false
-                  partSentChunks.length = 0
-                  partSentTotal = 0
+              const toSend = prefix.data.length > remaining ? prefix.data.subarray(0, remaining) : prefix.data
+              if (toSend.length > 0) {
+                if (!res.write(toSend)) {
+                  let resolveFn: () => void
+                  let resolved = false
+                  const onDrain = () => { if (!resolved) { resolved = true; resolveFn() } }
+                  const onClose = () => { if (!resolved) { resolved = true; resolveFn() } }
+                  const onError = () => { if (!resolved) { resolved = true; resolveFn() } }
+                  try {
+                    res.once('drain', onDrain)
+                    res.once('close', onClose)
+                    res.once('error', onError)
+                    await new Promise<void>((resolve) => { resolveFn = resolve })
+                  } finally {
+                    res.off('drain', onDrain)
+                    res.off('close', onClose)
+                    res.off('error', onError)
+                  }
+                  if (res.destroyed || res.writableEnded) break
                 }
+                bytesSent += toSend.length
+                pos = prefix.coveredEnd + 1
+                waitStart = Date.now() // reset wait timer on progress
+                continue
               }
-
-              if (res.destroyed || res.writableEnded) return
-              if (!res.write(toSend)) {
-                let resolveFn: () => void
-                let resolved = false
-                const onDrain = () => { if (!resolved) { resolved = true; resolveFn() } }
-                const onClose = () => { if (!resolved) { resolved = true; resolveFn() } }
-                const onError = () => { if (!resolved) { resolved = true; resolveFn() } }
-                try {
-                  res.once('drain', onDrain)
-                  res.once('close', onClose)
-                  res.once('error', onError)
-                  await new Promise<void>((resolve) => { resolveFn = resolve })
-                } finally {
-                  res.off('drain', onDrain)
-                  res.off('close', onClose)
-                  res.off('error', onError)
-                }
-                if (res.destroyed || res.writableEnded) return
-              }
-
-              bytesSent += toSend.length
-              currentReqStart += toSend.length
-            },
-          })
-
-          // Add this part's sent data to global sentChunks for caching
-          if (shouldCache && partSentTotal > 0) {
-            sentChunks.push(...partSentChunks)
-            sentTotal += partSentTotal
-            if (sentTotal > RANGE_CACHE_MAX_BYTES) {
-              shouldCache = false
-              sentChunks.length = 0
-              sentTotal = 0
             }
+
+            // Cache miss at current position — check for active fetch covering pos
+            const active = findActiveFetch(messageId, pos)
+            if (active) {
+              // Wait for active fetch to make progress
+              const waitLimit = Date.now() + 10000 // 10s max wait per poll cycle
+              while (Date.now() < waitLimit && !clientAborted && !res.destroyed && !res.writableEnded) {
+                const freshPrefix = rangeCache.getPrefix(messageId, pos, reqEnd)
+                if (freshPrefix && freshPrefix.data.length > 0) {
+                  // Data arrived — will be sent in next loop iteration
+                  break
+                }
+                // Check if fetch failed/aborted without covering our pos
+                if (active.abortController.signal.aborted) {
+                  // Fetch died — will launch new one in next iteration
+                  break
+                }
+                await new Promise(r => setTimeout(r, POLL_INTERVAL))
+              }
+              continue
+            }
+
+            // No active fetch covering pos — launch new fetch window if under limit
+            if (countActiveFetches(messageId) >= 3) {
+              // Wait for a slot to free up
+              await new Promise(r => setTimeout(r, POLL_INTERVAL))
+              continue
+            }
+
+            const winStart = pos
+            const winEnd = Math.min(pos + FETCH_WINDOW - 1, reqEnd)
+            await launchFetchWindow(messageId, winStart, winEnd, client, parts, totalSize)
+
+            // Wait for data to appear at pos (up to MAX_WAIT_MS total)
+            const waitLimit = Date.now() + MAX_WAIT_MS
+            let dataArrived = false
+            while (Date.now() < waitLimit && !clientAborted && !res.destroyed && !res.writableEnded) {
+              const freshPrefix = rangeCache.getPrefix(messageId, pos, reqEnd)
+              if (freshPrefix && freshPrefix.data.length > 0) {
+                dataArrived = true
+                break
+              }
+              await new Promise(r => setTimeout(r, POLL_INTERVAL))
+            }
+
+            if (!dataArrived) {
+              slog(`fetch wait timeout id=${messageId} pos=${pos} — no data after ${MAX_WAIT_MS}ms`)
+              break
+            }
+            waitStart = Date.now()
           }
         }
-      }
 
       // S4 FIX: Prefix/partial caching — cache whatever was actually sent (if > 0),
       // even on client abort or for open-ended ranges. The cached range is the
       // actual bytes sent: [reqStart, reqStart + sentTotal - 1].
       // m5 FIX: skip cache for multipart ranges
-      if (!isMultipartRange && shouldCache && sentTotal > 0) {
+      // NOTE: Encrypted path caches sent bytes here; non-encrypted path writes to cache via fetch windows.
+      if (isEncrypted && !isMultipartRange && shouldCache && sentTotal > 0) {
         const fullData = Buffer.concat(sentChunks, sentTotal)
         const actualEnd = reqStart + sentTotal - 1
         rangeCache.set(messageId, reqStart, actualEnd, fullData)

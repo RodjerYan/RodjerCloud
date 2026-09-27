@@ -53,12 +53,15 @@ export function resolveFfmpegPath(): string | false {
 // качать ОДИН И ТОТ ЖЕ файл одновременно (preview ушёл на старый путь, пока
 // сессия hls ещё качала) → карта in-flight, как у convertVideoToMp4. Иначе:
 // двойное скачивание + гонка «existsSync уже true, но файл недописан».
+// expectedSize: если передан и >0 — после скачивания проверяем размер файла;
+// несовпадение → удаляем файл, возвращаем false (обрезанный при disconnect).
 const srcDownloads = new Map<string, Promise<string | null>>()
 export function downloadPreviewSourceOnce(
   telegramService: any,
   messageId: number,
   targetPath: string,
-  onProgress?: (sent: number, total: number) => void
+  onProgress?: (sent: number, total: number) => void,
+  expectedSize?: number
 ): Promise<string | null> {
   const key = targetPath.toLowerCase()
   const existing = srcDownloads.get(key)
@@ -71,6 +74,19 @@ export function downloadPreviewSourceOnce(
       }
     } catch (e) {
       ffmpegLog(`download fail id=${messageId}: ${(e as Error).message}`)
+    }
+    // Целостность: если ожидаемый размер известен — проверяем
+    if (expectedSize && expectedSize > 0) {
+      try {
+        const actual = fs.statSync(targetPath).size
+        if (actual !== expectedSize) {
+          ffmpegLog(`size mismatch id=${messageId}: got ${actual}, expected ${expectedSize} → deleting`)
+          fs.unlinkSync(targetPath)
+          return null
+        }
+      } catch (e) {
+        ffmpegLog(`size check fail id=${messageId}: ${(e as Error).message}`)
+      }
     }
     return fs.existsSync(targetPath) ? targetPath : null
   })().finally(() => srcDownloads.delete(key))

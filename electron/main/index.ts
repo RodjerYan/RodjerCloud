@@ -1026,6 +1026,13 @@ ipcMain.handle('telegram:search-folder-files', async (_, folderId: string, query
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+// D4 FIX: Global search across all cached files
+ipcMain.handle('telegram:search-global', async (_, query: string, limit?: number) => {
+  try {
+    return { success: true, ...telegramService.searchGlobal(query, limit || 100) }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:get-category-counts', async () => {
   try {
     return { success: true, data: telegramService.getFileCategoryCounts() }
@@ -2027,11 +2034,12 @@ async function resolvePreviewSrc(dir: string, f: any, sessionId?: string): Promi
   const sendProgress = makePreviewProgressSender(sessionId)
   const ext = (f.fileName || '').split('.').pop()?.toLowerCase() || ''
   // T-20260925-002 S3: stream-аем только то, что Chromium реально декодирует
-  // (mp4=h264/aac, webm=vp8/9/av1).
+  // (mp4=h264/aac, webm=vp8/9/av1, mov=hevc/h264 — нативно в Chromium).
   if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) {
-    // mp4/webm — как раньше, напрямую в http-stream (S3 stream fix, не трогаем)
-    if (['mp4', 'webm'].includes(ext)) return { src: `http://127.0.0.1:14300/stream/${f.messageId}` }
-    // ==== T-20260925-010 S2: mov/mkv/avi — НЕ блокируем download+convert ====
+    // mp4/webm/mov — direct /stream (mov: HEVC/H.264 декодируется нативно, см. 13741).
+    // mkv/avi — Chromium НЕ декодирует контейнер → hlsPending (как раньше).
+    if (['mp4', 'webm', 'mov'].includes(ext)) return { src: `http://127.0.0.1:14300/stream/${f.messageId}` }
+    // ==== T-20260925-010 S2: mkv/avi — НЕ блокируем download+convert ====
     //   * mp4 уже лежит в preview-cache → мгновенный file:// (как раньше);
     //   * иначе hlsPending: preview сразу запускает HLS-сессию — hlsServer
     //     транскодит из http-stream ПОКА файл качается (S1), спиннер + #dl
@@ -2046,7 +2054,7 @@ async function resolvePreviewSrc(dir: string, f: any, sessionId?: string): Promi
   const rawPath = path.join(dir, `${f.messageId}_${f.fileName}`)
   const downloaded = await downloadPreviewSourceOnce(telegramService, f.messageId, rawPath, (sent, total) => {
     sendProgress({ phase: 'download', sent, total })
-  })
+  }, f.fileSize)
   if (!downloaded) return { src: '' }
   const displayPath = await ensurePreviewCache(rawPath)
   if (!fs.existsSync(displayPath)) return { src: '' }
@@ -2072,7 +2080,7 @@ async function resolvePreviewSlowSrc(dir: string, f: any, sessionId?: string): P
   }
   const downloaded = await downloadPreviewSourceOnce(telegramService, f.messageId, srcPath, (sent, total) => {
     sendProgress({ phase: 'download', sent, total })
-  })
+  }, f.fileSize)
   if (!downloaded) return ''
   // фаза convert: событие перед вызовом + «пинг» раз в 1s (percent не нужен —
   // только текст «Конвертация видео…»); по окончании тикер снимаем.
@@ -2117,6 +2125,44 @@ function loadHlsJsInline(): string {
   hlsJsInline = code ? code.replace(/<\/script/gi, '<\\/script') : ''
   if (!hlsJsInline) console.log('[hls] hls.js inline unavailable → preview uses direct src only')
   return hlsJsInline
+}
+
+// T-20260926-001 S1: Plyr inline (MIT) — аналогично hls.js, для file:// preview без CORS
+let plyrJsInline: string | undefined
+function loadPlyrJsInline(): string {
+  if (plyrJsInline !== undefined) return plyrJsInline
+  const candidates: string[] = []
+  try { candidates.push(require.resolve('plyr/dist/plyr.min.js')) } catch {}
+  try { candidates.push(path.join(app.getAppPath(), 'node_modules', 'plyr', 'dist', 'plyr.min.js')) } catch {}
+  let code: string | null = null
+  for (const p of candidates) {
+    try {
+      if (!p || !fs.existsSync(p)) continue
+      code = fs.readFileSync(p, 'utf-8')
+      break
+    } catch (e) { console.log(`[plyr] read inline failed ${p}: ${(e as Error).message}`) }
+  }
+  plyrJsInline = code ? code.replace(/<\/script/gi, '<\\/script') : ''
+  if (!plyrJsInline) console.log('[plyr] inline unavailable → native controls')
+  return plyrJsInline
+}
+
+let plyrCssInline: string | undefined
+function loadPlyrCssInline(): string {
+  if (plyrCssInline !== undefined) return plyrCssInline
+  const candidates: string[] = []
+  try { candidates.push(require.resolve('plyr/dist/plyr.css')) } catch {}
+  try { candidates.push(path.join(app.getAppPath(), 'node_modules', 'plyr', 'dist', 'plyr.css')) } catch {}
+  let code: string | null = null
+  for (const p of candidates) {
+    try {
+      if (!p || !fs.existsSync(p)) continue
+      code = fs.readFileSync(p, 'utf-8')
+      break
+    } catch (e) { console.log(`[plyr] read css inline failed ${p}: ${(e as Error).message}`) }
+  }
+  plyrCssInline = code || ''
+  return plyrCssInline
 }
 
 const previewWindows = new Map<number, BrowserWindow>()
@@ -2205,6 +2251,7 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
 <html>
 <head><meta charset="utf-8"><title>Preview</title>
 <style>
+${loadPlyrCssInline()}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #loader{width:40px;height:40px;border:3px solid rgba(255,255,255,0.1);border-top-color:#7c83ff;border-radius:50%;animation:spin .8s linear infinite;position:fixed;top:50%;left:50%;margin:-20px 0 0 -20px}
@@ -2213,7 +2260,7 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #top:hover{opacity:1}
 #close{position:fixed;top:12px;right:16px;z-index:20;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;line-height:1;-webkit-app-region:no-drag}
 #media{position:fixed;top:0;left:0;right:0;bottom:48px;display:flex;align-items:center;justify-content:center}
-#media video,#media img{max-width:100%;max-height:100%;border-radius:4px}
+#media video,#media img{width:100%;height:100%;object-fit:contain;border-radius:4px}
 #bar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(10,10,20,0.92);display:none;align-items:center;gap:8px;padding:6px 12px;height:48px;border-top:1px solid rgba(255,255,255,0.06)}
 #bar button{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:5px;padding:4px 10px;font:12px/1.2 Inter, system-ui, sans-serif;cursor:pointer;white-space:nowrap;transition:background .15s}
 #bar button:hover{background:rgba(255,255,255,0.18)}
@@ -2233,9 +2280,35 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 #vol::-moz-range-track{height:4px;border-radius:2px;background:rgba(255,255,255,0.18)}
 #vol::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#7c83ff;cursor:pointer}
 @media (max-width:640px){#vol{display:none}}
+
+/* T-20260926-001 S1: Plyr theme overrides for dark preview */
+.plyr--video .plyr__controls{background:linear-gradient(#0000,rgba(10,10,20,0.92))}
+.plyr--video .plyr__control:focus-visible,.plyr--video .plyr__control:hover,.plyr--video .plyr__control[aria-expanded=true]{background:#7c83ff;color:#fff}
+.plyr--full-ui.plyr--video input[type=range]::-webkit-slider-runnable-track{background-color:rgba(255,255,255,0.1)}
+.plyr--full-ui.plyr--video input[type=range]::-moz-range-track{background-color:rgba(255,255,255,0.1)}
+.plyr--full-ui.plyr--video input[type=range]::-ms-track{background-color:rgba(255,255,255,0.1)}
+/* Two-tone progress: played (#7c83ff) + buffered (lighter/transparent, like YouTube) */
+.plyr--video .plyr__progress__played{background:#7c83ff}
+.plyr--video .plyr__progress__buffer{background:rgba(124,131,255,0.35)}
+.plyr--full-ui.plyr--video input[type=range]:active::-webkit-slider-thumb{box-shadow:0 1px 1px rgba(35,40,47,0.15),0 0 0 1px rgba(35,40,47,0.2),0 0 0 3px rgba(255,255,255,0.5)}
+.plyr--full-ui.plyr--video input[type=range]:active::-moz-range-thumb{box-shadow:0 1px 1px rgba(35,40,47,0.15),0 0 0 1px rgba(35,40,47,0.2),0 0 0 3px rgba(255,255,255,0.5)}
+.plyr__menu__container{background:rgba(18,18,32,0.98);color:rgba(255,255,255,0.85)}
+.plyr__menu__container .plyr__control{color:rgba(255,255,255,0.85)}
+.plyr__menu__container .plyr__control[role=menuitemradio][aria-checked=true]:before{background:#7c83ff}
+.plyr__menu__container .plyr__control--forward:after{border-left-color:#7c83ff}
+.plyr__menu__container .plyr__control--back:after{border-right-color:#7c83ff}
+.plyr__tooltip{background:#fff;color:#1a1a2e}
+.plyr__tooltip:before{border-top-color:#fff}
+.plyr__control--overlaid{background:#7c83ff;color:#fff}
+.plyr:fullscreen{background:#0a0a14}
+
+/* T-20260927-001: Plyr/video fill — видео/Plyr занимают ВЕСЬ контейнер #media */
+#media .plyr{width:100%;height:100%}
+#media .plyr__video-wrapper{width:100%;height:100%}
+#media .plyr__video-wrapper video{width:100%;height:100%;object-fit:contain}
 </style></head>
 <body>
-<div id="top"><span id="fname" style="color:#fff;font:13px/1 Inter, system-ui, sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 Inter, system-ui, sans-serif"></span></div>
+<div id="top"><span id="fname" style="color:#fff;font:13px/1 Inter, system-ui, sans-serif;opacity:0.9">Загрузка...</span><span id="fpos" style="color:rgba(255,255,255,0.5);font:12px/1 Inter, system-ui, sans-serif"></span><div class="mwrap" id="qualityWrapTop" style="display:none"><button id="qualityBtnTop" onclick="toggleQualityMenu()">Авто</button><div class="menu" id="qualityMenuTop"></div></div></div>
 <button id="close" onclick="window.electronAPI.preview.close(sid)">✕</button>
 <div id="loader"></div>
 <div id="dl" style="display:none;position:fixed;top:calc(50% + 34px);left:50%;transform:translateX(-50%);z-index:11;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#fff;opacity:0.75;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;max-width:88%;overflow:hidden;text-overflow:ellipsis;pointer-events:none"></div>
@@ -2243,13 +2316,17 @@ body{background:#0a0a14;height:100vh;overflow:hidden;user-select:none}
 <div id="error" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f87171;font:14px/1.4 Inter, system-ui, sans-serif;text-align:center;max-width:80%"></div>
 <div id="bar"><button id="playBtn" onclick="togglePlay()">▶</button><div id="progress" onclick="seek(event)"><div id="progressFill"></div></div><span id="time">0:00 / 0:00</span><div class="mwrap" id="qualityWrap" style="display:none"><button id="qualityBtn" onclick="toggleQualityMenu()">Авто</button><div class="menu" id="qualityMenu"></div></div><div class="mwrap"><button id="speedBtn" onclick="toggleSpeedMenu()">1x</button><div class="menu" id="speedMenu"></div></div><button id="muteBtn" onclick="toggleMute()" title="Звук (M)">🔊</button><input type="range" id="vol" min="0" max="100" step="1" value="100" aria-label="Громкость" title="Громкость"><button onclick="toggleFs()" title="Во весь экран">⛶</button></div>
 <script>${loadHlsJsInline()}</script>
+<script>${loadPlyrJsInline()}</script>
 <script>
+// T-20260926-001 S1: Plyr availability flag (computed in main process, injected here)
+const PLYR_OK = ${loadPlyrJsInline() ? 'true' : 'false'}
 let sid = '${winId}'
 let total = ${files.length}
 let speed = 1
 let video = null
 // ==== T-20260925-003 S2: HLS + громкость + скорость + качество ====
 let hls = null          // текущий экземпляр Hls (null → HLS не активен)
+let hlsCappingTimer = null  // таймер для anti-thrash autoLevelCapping release
 let loadSeq = 0         // токен навигации: устаревшие async-старты игнорируются
 // REWORK#1 F1/F2: messageId текущего видео — нужен для фонового hlsStart и
 // для hlsDrop (снятие HLS-сессии при уходе на direct)
@@ -2261,7 +2338,7 @@ let currentMsgId = 0
 let pendingSlow = false
 // бюджет готовности HLS для hlsPending-файла: main отвечает ранним master'ом
 // (~2-5s, S1), 20s — запас; по истечении или по {error} → convert-fallback
-const HLS_PENDING_BUDGET_MS = 20000
+const HLS_PENDING_BUDGET_MS = 45000
 let volume = 1
 let muted = false
 let levelPref = 'auto'  // 'auto' | высота уровня (px) — восстановление после переключения файла
@@ -2282,6 +2359,8 @@ const STANDARD_HEIGHTS = [240, 480, 720, 1080, 1440, 2160]
 let currentQualityLadder = []
 // Режим: 'direct' | 'hls'
 let qualityMode = 'direct'
+// T-20260926-001 S1: Plyr instance (destroy on new file / window close)
+let plyrInst = null
 
 /**
  * Строит лестницу качества на основе реальной высоты исходного видео.
@@ -2310,8 +2389,14 @@ function renderMedia(files, idx, src, hlsPending) {
   loadSeq++
   const token = loadSeq
   destroyHls()
+  // T-20260926-001 S1: destroy previous Plyr instance
+  if (plyrInst) { try { plyrInst.destroy() } catch (e) {} plyrInst = null }
   // T-20260925-005 S2: новый файл → сбрасываем #dl (download/convert уже кончились)
   dlHideNow()
+  // T-20260925-010 S3: сбрасываем #error при смене файла, иначе dlShow-гард
+  // заблокирует показ прогресса на следующем файле после ошибки
+  var err = document.getElementById('error')
+  if (err) { err.textContent = ''; err.style.display = 'none' }
   // T-20260925-010 S2: hlsPending (mov/mkv/avi без готового mp4) → прямого src
   // нет, первый кадр придёт из HLS; до тех пор крутится лоадер + #dl
   pendingSlow = false
@@ -2344,7 +2429,8 @@ function renderMedia(files, idx, src, hlsPending) {
       // T-20260925-003 S3 / S4: preload=metadata — загружаем только метаданные (длительность, размеры),
       // не качаем весь файл вперёд. Для тяжёлых видео это убирает долгую предзагрузку.
       vid.preload = 'metadata'
-      vid.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
+      // D6 FIX: width/height 100% + object-fit:contain — растягивает маленькие видео на весь контейнер
+      vid.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:4px'
       try { vid.volume = volume; vid.muted = muted } catch (e) {}
       var directTried = false
       vid.onerror = function() {
@@ -2381,11 +2467,90 @@ function renderMedia(files, idx, src, hlsPending) {
       }
       el.appendChild(vid)
       video = vid
+      // T-20260926-001 S1: Instantiate Plyr if available
+      if (PLYR_OK && typeof Plyr !== 'undefined') {
+        try {
+          // Fixed duration from file object (f.duration in seconds)
+          var realDur = (typeof f.duration === 'number' && isFinite(f.duration) && f.duration > 0) ? f.duration : 0
+          if (realDur > 0) {
+            Object.defineProperty(vid, 'duration', {
+              get: function() { return realDur },
+              configurable: true
+            })
+          }
+          plyrInst = new Plyr(vid, {
+            controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'speed', 'settings', 'fullscreen'],
+            i18n: {
+              restart: 'Перезапуск',
+              rewind: 'Назад {seektime}с',
+              play: 'Воспроизвести',
+              pause: 'Пауза',
+              fastForward: 'Вперёд {seektime}с',
+              seek: 'Перемотка',
+              seekLabel: '{currentTime} из {duration}',
+              played: 'Просмотрено',
+              buffered: 'Загружено',
+              currentTime: 'Текущее время',
+              duration: 'Длительность',
+              volume: 'Громкость',
+              mute: 'Звук выкл',
+              unmute: 'Звук вкл',
+              enableCaptions: 'Включить субтитры',
+              disableCaptions: 'Выключить субтитры',
+              download: 'Скачать',
+              enterFullscreen: 'Во весь экран',
+              exitFullscreen: 'Выйти из полноэкранного',
+              frameTitle: 'Плеер для {title}',
+              captions: 'Субтитры',
+              settings: 'Настройки',
+              pip: 'PiP',
+              menuBack: 'Назад в меню',
+              speed: 'Скорость',
+              normal: 'Нормальная',
+              quality: 'Качество',
+              loop: 'Зациклить',
+              start: 'Начало',
+              end: 'Конец',
+              all: 'Все',
+              reset: 'Сброс',
+              disabled: 'Отключено',
+              enabled: 'Включено',
+              advertisement: 'Реклама',
+              qualityBadge: {
+                2160: '4K',
+                1440: '2K',
+                1080: '1080p',
+                720: '720p',
+                576: '576p',
+                480: '480p'
+              }
+            },
+            autoplay: vid.autoplay,
+            blankVideo: '',
+            hideYouTube: true,
+            settings: ['quality', 'speed', 'loop']
+          })
+          // Apply saved volume/muted/speed to Plyr instance
+          try { plyrInst.volume = volume } catch (e) {}
+          try { plyrInst.muted = muted } catch (e) {}
+          try { plyrInst.speed = speed } catch (e) {}
+          // Hide native #bar when Plyr is active
+          if (bar) bar.style.display = 'none'
+        } catch (e) {
+          console.log('[plyr] init failed:', e && e.message, '→ fallback to native controls')
+          plyrInst = null
+          if (bar) bar.style.display = 'flex'
+        }
+      } else {
+        if (!PLYR_OK) console.log('[plyr] inline unavailable → native controls')
+        if (bar) bar.style.display = 'flex'
+      }
     } else {
       var img = document.createElement('img')
       img.src = src
       img.draggable = false
-      img.style.cssText = 'max-width:100%;max-height:100%;border-radius:4px'
+      // D6 FIX: width/height 100% + object-fit:contain — consistent with video
+      img.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:4px'
       img.onerror = function() {
         if (ld) ld.style.display = 'none'
         dlHideNow()
@@ -2417,14 +2582,20 @@ function renderMedia(files, idx, src, hlsPending) {
     // Показываем меню качества всегда для видео (даже в direct-режиме)
     buildQualityMenuFromLadder(currentQualityLadder)
     var qw = document.getElementById('qualityWrap')
-    if (qw) qw.style.display = 'flex'
+    var qwTop = document.getElementById('qualityWrapTop')
+    var plyrActive = plyrInst !== null
+    if (qw) qw.style.display = plyrActive ? 'none' : 'flex'
+    if (qwTop) qwTop.style.display = (plyrActive && qualityMode === 'hls') ? 'flex' : 'none'
   } else {
     var qw = document.getElementById('qualityWrap')
+    var qwTop = document.getElementById('qualityWrapTop')
     if (qw) qw.style.display = 'none'
+    if (qwTop) qwTop.style.display = 'none'
   }
   
   if (isVideo && video) {
-    bar.style.display = 'flex'
+    // bar visibility is handled by Plyr init (hidden when Plyr active, flex when fallback)
+    if (!plyrInst) bar.style.display = 'flex'
     video.playbackRate = speed
     // S3: сохраняем messageId на видео для switchToHls
     video.__messageId = f.messageId
@@ -2474,6 +2645,8 @@ function fmtSizeT(b) {
   return parseFloat((b / Math.pow(1024, i)).toFixed(1)) + ' ' + u[i]
 }
 function dlShow(text) {
+  var err = document.getElementById('error')
+  if (err && err.style.display === 'block' && err.textContent && err.textContent.trim() !== '') return
   if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null }
   var el = document.getElementById('dl'); if (!el) return
   if (el.textContent !== text) el.textContent = text
@@ -2524,6 +2697,7 @@ function onPreviewProgress(d) {
 // ==== T-20260925-003 S2 + REWORK#1 F1: HLS (hls.js) поверх прямого src ====
 function destroyHls() {
   if (hls) { try { hls.destroy() } catch (e) {} hls = null }
+  if (hlsCappingTimer) { clearInterval(hlsCappingTimer); hlsCappingTimer = null }
   // S3: НЕ прячем меню качества — оно теперь всегда видно для видео
   // (прячем только при навигации на не-видео, см. renderMedia)
 }
@@ -2548,7 +2722,30 @@ function dropHlsSession() {
     vid.playbackRate = speed
     applyVol()
     var p = vid.play()
-    if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; dlHideNow() })
+    if (p && p.catch) {
+      p.catch(function (err) {
+        // D2 FIX: Handle autoplay policy rejection for direct playback too
+        if (err && err.name === 'NotAllowedError') {
+          console.log('[direct] autoplay blocked, waiting for user interaction or canplay')
+          var onCanPlay = function () {
+            vid.removeEventListener('canplay', onCanPlay)
+            document.removeEventListener('click', onUserInteraction)
+            document.removeEventListener('keydown', onUserInteraction)
+            vid.play().catch(function () {})
+          }
+          var onUserInteraction = function () {
+            vid.removeEventListener('canplay', onCanPlay)
+            document.removeEventListener('click', onUserInteraction)
+            document.removeEventListener('keydown', onUserInteraction)
+            vid.play().catch(function () {})
+          }
+          vid.addEventListener('canplay', onCanPlay, { once: true })
+          document.addEventListener('click', onUserInteraction, { once: true, passive: true })
+          document.addEventListener('keydown', onUserInteraction, { once: true, passive: true })
+        }
+        var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'; dlHideNow()
+      })
+    }
   }
 // старт воспроизведения: прямой src ставится МГНОВЕННО — первый кадр не ждёт
 // транскод/HLS. HLS запускается ТОЛЬКО по требованию (меню качества) или как
@@ -2590,6 +2787,7 @@ function startSlowPlayback(vid, messageId, token) {
       done()
       if (r && r.hlsUrl) {
         console.log('[hls] slow-start ready → ' + r.hlsUrl)
+        pendingSlow = false
         // Minor FIX: startHls signature is (vid, url, src, token, up, targetHeight) — 6 args
         startHls(vid, r.hlsUrl, '', token, null, null)
         return
@@ -2702,8 +2900,44 @@ function applyUpgradeSeek(vid, up, target) {
       vid.load()
     }
     destroyHls()
-    var inst = new Hls({ enableWorker: true, backBufferLength: 60 })
+    // F1 FIX: startLevel=0 forces hls.js to start with lowest quality (240p, ready in ~1ms)
+    // abrEwmaDefaultEstimate prevents ABR from jumping to highest level immediately
+    // F6 FIX: maxBufferLength/maxMaxBufferLength allow large forward buffer to prevent stutter
+    // fragLoadingTimeOut/MaxRetry increase resilience to slow segment fetches (Telegram flood-wait)
+    var inst = new Hls({
+      enableWorker: true,
+      backBufferLength: 60,
+      startLevel: 0,
+      abrEwmaDefaultEstimate: 500000,
+      maxBufferLength: 60,
+      maxMaxBufferLength: 180,
+      fragLoadPolicy: {
+        default: {
+          maxTimeToFirstByteMs: 10000,
+          maxLoadTimeMs: 30000,
+          timeoutRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+          errorRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000, backoff: 'exponential' }
+        }
+      }
+    })
     hls = inst
+    // R5b: anti-thrash — hold at level0 until buffer cushion + time gate
+    inst.autoLevelCapping = 0
+    var hlsStartTime = Date.now()
+    var cappingReleased = false
+    if (hlsCappingTimer) { clearInterval(hlsCappingTimer) }
+    hlsCappingTimer = setInterval(function () {
+      if (cappingReleased || token !== loadSeq || hls !== inst || !vid || vid.buffered.length === 0) return
+      var bufferedEnd = vid.buffered.end(vid.buffered.length - 1)
+      var cushion = bufferedEnd - vid.currentTime
+      var elapsed = Date.now() - hlsStartTime
+      if (cushion >= 15 && elapsed >= 5000) {
+        cappingReleased = true
+        clearInterval(hlsCappingTimer)
+        hlsCappingTimer = null
+        try { inst.autoLevelCapping = -1 } catch (e) {}
+      }
+    }, 500)
     var retries = 0
     var cleanupSeek = function () {
       if (up && up.seekListener) { try { vid.removeEventListener('seeking', up.seekListener) } catch (e) {} up.seekListener = null }
@@ -2719,13 +2953,14 @@ function applyUpgradeSeek(vid, up, target) {
         cleanupSeek()
         upgradeInProgress = false
         useDirect(vid, src, token)
-      }, 15000)
+      }, 30000)
       inst.on(Hls.Events.MANIFEST_PARSED, function () {
         clearTimeout(manifestTimer)
         if (token !== loadSeq || video !== vid) return
         cleanupSeek()
         var levels = inst.levels || []
         qualityMode = 'hls'
+        updateQualityMenuVisibility()
         // S3 REWORK: f.height на первом открытии может быть ещё 0 (пробе HLS
         // как раз его и записывает) — меню выходило только с «Оригинал».
         // Пересобираем лестницу из РЕАЛЬНЫХ уровней master-плейлиста:
@@ -2744,7 +2979,7 @@ function applyUpgradeSeek(vid, up, target) {
         buildQualityMenuFromLadder(currentQualityLadder)
         // Применяем сохранённый преф или targetHeight
         if (targetHeight !== null) {
-          // Ищем уровень с нужной высотой
+          // Ищем уровень с нужной высотой (upgrade из direct / switchToHls)
           for (var i = 0; i < levels.length; i++) {
             if (levels[i].height === targetHeight) {
               try { hls.currentLevel = i } catch (e) {}
@@ -2755,10 +2990,73 @@ function applyUpgradeSeek(vid, up, target) {
             }
           }
         } else {
-          applyLevelPref()
+          // F1 FIX: Defer saved levelPref until first frame (canplay/FRAG_BUFFERED).
+          // Start with startLevel=0 (240p, ready in ~1ms) for fastest first frame.
+          // After first frame, seamlessly upswitch to saved quality (buffer already growing).
+          var levelPrefApplied = false
+          var applySavedLevelPref = function () {
+            if (levelPrefApplied || !hls || hls !== inst) return
+            levelPrefApplied = true
+            applyLevelPref()
+            console.log('[hls] saved levelPref applied on first frame:', levelPref)
+          }
+          // Apply on first canplay (first frame ready) or first FRAG_BUFFERED with data
+          vid.addEventListener('canplay', applySavedLevelPref, { once: true })
+          inst.on(Hls.Events.FRAG_BUFFERED, function onFirstFrag() {
+            if (token !== loadSeq || video !== vid) return
+            // Only apply if we have actual buffered data (rs > 0 check via buffered.length)
+            if (vid.buffered && vid.buffered.length > 0) {
+              inst.off(Hls.Events.FRAG_BUFFERED, onFirstFrag)
+              applySavedLevelPref()
+            }
+          })
         }
         applyVol()
         vid.playbackRate = speed
+        
+        // F4 FIX: Autoplay handling - retry on ANY play() error (not just NotAllowedError)
+        // Track user-initiated pause to avoid auto-playing after manual pause
+        var userPaused = false
+        vid.addEventListener('pause', function onUserPause() {
+          if (!up.restoring) userPaused = true
+        })
+        
+        var tryPlay = function () {
+          var p = vid.play()
+          if (p && p.catch) {
+            p.catch(function (err) {
+              // F4 FIX: Handle ANY autoplay rejection - retry on canplay/loadeddata/user interaction
+              console.log('[hls] autoplay failed:', err && err.name, '→ will retry on canplay/loadeddata/interaction')
+              var retried = false
+              var retryPlay = function () {
+                if (retried || userPaused) return
+                retried = true
+                vid.play().catch(function () {})
+              }
+              // Retry once on canplay or loadeddata (data available)
+              vid.addEventListener('canplay', retryPlay, { once: true })
+              vid.addEventListener('loadeddata', retryPlay, { once: true })
+              // Also retry on user interaction
+              var onUserInteraction = function () {
+                if (retried) return
+                retryPlay()
+              }
+              document.addEventListener('click', onUserInteraction, { once: true, passive: true })
+              document.addEventListener('keydown', onUserInteraction, { once: true, passive: true })
+              var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none'
+            })
+          }
+        }
+        
+        // F4 FIX: Also retry play on hls.js FRAG_BUFFERED if video is paused and not user-paused
+        inst.on(Hls.Events.FRAG_BUFFERED, function () {
+          if (token !== loadSeq || video !== vid) return
+          if (vid.paused && !userPaused) {
+            console.log('[hls] FRAG_BUFFERED but paused → retry play')
+            vid.play().catch(function () {})
+          }
+        })
+        
         if (up) {
           // REWORK#1 F1: возвращаем позицию через applyUpgradeSeek — ждём metadata
           // (duration > 0), чтобы Chrome не clamp-ил seek к seekable end.
@@ -2766,18 +3064,18 @@ function applyUpgradeSeek(vid, up, target) {
           var target = (up.userSeek != null && up.userSeek > 0.5) ? up.userSeek : up.saved
           if (target > 0) applyUpgradeSeek(vid, up, target)
           if (up.wasPlaying) {
-            var p = vid.play()
-            if (p && p.catch) p.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+            tryPlay()
           } else {
             var pb = document.getElementById('playBtn'); if (pb) pb.textContent = '▶'
           }
           update()
         } else {
-          var p2 = vid.play()
-          if (p2 && p2.catch) p2.catch(function () { var ld = document.getElementById('loader'); if (ld) ld.style.display = 'none' })
+          // D2 FIX: Initial HLS start (HLS-first path) - always attempt autoplay
+          tryPlay()
         }
       })
       inst.on(Hls.Events.LEVEL_SWITCHED, function () { if (token === loadSeq && hls === inst) markQualityFromLadder() })
+      
       inst.on(Hls.Events.ERROR, function (evt, data) {
         if (!data || !data.fatal) return
         console.log('[hls] fatal:', data.type, data.details)
@@ -2825,6 +3123,7 @@ function useDirect(vid, src, token) {
   destroyHls()
   qualityMode = 'direct' // S3: сброс режима качества
   buildQualityMenuFromLadder(currentQualityLadder)
+  updateQualityMenuVisibility()
   if (!src) {
     // T-20260925-010 S2: src у hlsPending-файла так и не появился — HLS не
     // состоялся (манифест/медиа-ошибка) → старый путь, а не «формат не поддерживается»
@@ -2870,31 +3169,60 @@ function setSpeed(s) {
 }
 
 // ==== меню: качество (S3: всегда видно для видео, ленивый переход direct→HLS) ====
-function toggleQualityMenu() { toggleMenu('qualityMenu') }
+function toggleQualityMenu() { 
+  // Use top menu when Plyr is active, fallback menu otherwise
+  var plyrActive = plyrInst !== null
+  toggleMenu(plyrActive ? 'qualityMenuTop' : 'qualityMenu') 
+}
 
 // Строит меню из заранее известной лестницы качества (currentQualityLadder)
 function buildQualityMenuFromLadder(ladder) {
+  // Build for fallback menu (#bar)
   var m = document.getElementById('qualityMenu')
-  m.innerHTML = ''
-  // Пункт "Авто" — только в HLS-режиме (ABR работает только с hls.js)
-  if (qualityMode === 'hls') {
-    var auto = document.createElement('div')
-    auto.setAttribute('data-h', 'auto')
-    auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
-    auto.onclick = function () { pickAutoLevel(); closeMenus() }
-    m.appendChild(auto)
+  if (m) {
+    m.innerHTML = ''
+    // Пункт "Авто" — только в HLS-режиме (ABR работает только с hls.js)
+    if (qualityMode === 'hls') {
+      var auto = document.createElement('div')
+      auto.setAttribute('data-h', 'auto')
+      auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
+      auto.onclick = function () { pickAutoLevel(); closeMenus() }
+      m.appendChild(auto)
+    }
+    // Уровни из лестницы (уже отсортированы: низкие → высокие, "Оригинал" в конце)
+    // В меню показываем в обратном порядке (высокие сверху), как в Telegram
+    for (var i = ladder.length - 1; i >= 0; i--) {
+      (function (level) {
+        var d = document.createElement('div')
+        var isOriginal = level.height === 0
+        d.setAttribute('data-h', isOriginal ? 'original' : String(level.height))
+        d.innerHTML = '<span>' + level.label + '</span><span class="chk"></span>'
+        d.onclick = function () { pickLevelFromLadder(level, isOriginal); closeMenus() }
+        m.appendChild(d)
+      })(ladder[i])
+    }
   }
-  // Уровни из лестницы (уже отсортированы: низкие → высокие, "Оригинал" в конце)
-  // В меню показываем в обратном порядке (высокие сверху), как в Telegram
-  for (var i = ladder.length - 1; i >= 0; i--) {
-    (function (level) {
-      var d = document.createElement('div')
-      var isOriginal = level.height === 0
-      d.setAttribute('data-h', isOriginal ? 'original' : String(level.height))
-      d.innerHTML = '<span>' + level.label + '</span><span class="chk"></span>'
-      d.onclick = function () { pickLevelFromLadder(level, isOriginal); closeMenus() }
-      m.appendChild(d)
-    })(ladder[i])
+  // Build for top menu (Plyr active)
+  var mTop = document.getElementById('qualityMenuTop')
+  if (mTop) {
+    mTop.innerHTML = ''
+    if (qualityMode === 'hls') {
+      var auto = document.createElement('div')
+      auto.setAttribute('data-h', 'auto')
+      auto.innerHTML = '<span>Авто</span><span class="chk"></span>'
+      auto.onclick = function () { pickAutoLevel(); closeMenus() }
+      mTop.appendChild(auto)
+    }
+    for (var i = ladder.length - 1; i >= 0; i--) {
+      (function (level) {
+        var d = document.createElement('div')
+        var isOriginal = level.height === 0
+        d.setAttribute('data-h', isOriginal ? 'original' : String(level.height))
+        d.innerHTML = '<span>' + level.label + '</span><span class="chk"></span>'
+        d.onclick = function () { pickLevelFromLadder(level, isOriginal); closeMenus() }
+        mTop.appendChild(d)
+      })(ladder[i])
+    }
   }
   markQualityFromLadder()
 }
@@ -2963,10 +3291,21 @@ function applyLevelPref() {
 
 // Обновляет подпись кнопки и чекмарки в меню на основе currentQualityLadder + levelPref
 function markQualityFromLadder() {
+  // Update fallback menu (#bar)
   var btn = document.getElementById('qualityBtn')
   var m = document.getElementById('qualityMenu')
-  if (!btn || !m) return
-  
+  if (btn && m) {
+    updateQualityMenu(btn, m)
+  }
+  // Update top menu (Plyr active)
+  var btnTop = document.getElementById('qualityBtnTop')
+  var mTop = document.getElementById('qualityMenuTop')
+  if (btnTop && mTop) {
+    updateQualityMenu(btnTop, mTop)
+  }
+}
+
+function updateQualityMenu(btn, m) {
   var label = 'Авто'
   if (qualityMode === 'hls' && hls && !hls.autoLevelEnabled && hls.currentLevel >= 0 && hls.levels && hls.levels[hls.currentLevel]) {
     var activeLevel = hls.levels[hls.currentLevel]
@@ -3003,6 +3342,15 @@ function markQualityFromLadder() {
   }
 }
 
+// Helper to update quality menu visibility based on Plyr state and qualityMode
+function updateQualityMenuVisibility() {
+  var qw = document.getElementById('qualityWrap')
+  var qwTop = document.getElementById('qualityWrapTop')
+  var plyrActive = plyrInst !== null
+  if (qw) qw.style.display = plyrActive ? 'none' : 'flex'
+  if (qwTop) qwTop.style.display = (plyrActive && qualityMode === 'hls') ? 'flex' : 'none'
+}
+
 // Переключение из direct в HLS с выбранным качеством
 function switchToHls(targetHeight) {
   if (!video || !video.src) return
@@ -3011,6 +3359,7 @@ function switchToHls(targetHeight) {
   if (!api || typeof api.hlsStart !== 'function' || typeof Hls === 'undefined' || !Hls.isSupported()) return
   
   qualityMode = 'hls'
+  updateQualityMenuVisibility()
   currentMsgId = video.__messageId || 0
   if (!currentMsgId) return
   
@@ -3075,6 +3424,8 @@ function nav(dir) {
   closeMenus() // REWORK#1 F5: открытое меню качества/скорости не переживает смену файла
   loadSeq++ // отменяем недостартовавший HLS/pro-старт предыдущего файла
   destroyHls()
+  // T-20260926-001 S1: destroy Plyr instance on navigation
+  if (plyrInst) { try { plyrInst.destroy() } catch (e) {} plyrInst = null }
   document.getElementById('media').innerHTML = ''; video = null
   var ld = document.getElementById('loader'); if (ld) ld.style.display = 'block'
   dlHideNow() // T-20260925-005 S2: устаревший #dl предыдущего файла не переживает навигацию

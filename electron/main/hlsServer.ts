@@ -117,7 +117,7 @@ const START_TIMEOUT_MS = 15 * 1000
 // все транскоды (5:00/1080p → master ≈ 45s) и позволяет сделать upgrade
 // direct→HLS уже во время просмотра. Не успело → {error:'hls-not-ready'} →
 // preview остаётся на direct (non-event), сессию приберёт TTL/close.
-export const IPC_START_TIMEOUT_MS = 60 * 1000
+export const IPC_START_TIMEOUT_MS = 90 * 1000
 // TTL-джанк: простой сессии без запросов → kill + удалить каталог
 const IDLE_TTL_MS = 10 * 60 * 1000
 // суммарный лимит hls-cache (старые каталоги удаляются по mtime)
@@ -148,6 +148,13 @@ type HlsSession = {
   completed: Set<number>
   // M6 FIX: track last requested level to protect active playback from kill
   lastRequestedLevel: number | null
+  // F2 FIX: track levels whose playlist (stream_N.m3u8) has been served to client
+  // Never kill a level that has served its playlist — client may have segment URLs from it
+  servedPlaylists: Set<number>
+  // D1 FIX: codec info for remux optimization
+  videoCodec: string
+  audioCodec: string
+  canRemux: boolean
 }
 
 const sessions = new Map<number, HlsSession>()
@@ -178,10 +185,12 @@ function fileUsable(p: string): boolean {
   }
 }
 
-async function waitForFile(p: string, timeoutMs: number): Promise<boolean> {
+async function waitForFile(p: string, timeoutMs: number, checkTranscoding?: ChildProcess): Promise<boolean> {
   const t0 = Date.now()
   for (;;) {
     if (fileUsable(p)) return true
+    // D3 FIX: If we're waiting for a stream playlist and the transcoding process died, fail fast
+    if (checkTranscoding && checkTranscoding.killed) return false
     if (Date.now() - t0 >= timeoutMs) return false
     await sleep(200)
   }
@@ -242,6 +251,10 @@ export async function ensureHlsSession(messageId: number, waitMs: number = START
     srcHeight: 0,
     completed: new Set(),
     lastRequestedLevel: null,
+    servedPlaylists: new Set(),
+    videoCodec: '',
+    audioCodec: '',
+    canRemux: false,
   }
   sessions.set(messageId, session)
   ensureJunkTimer()
@@ -308,6 +321,10 @@ export async function handleHlsRequest(req: http.IncomingMessage, res: http.Serv
     }
 
     const isMaster = rel === 'master.m3u8'
+    // Parse levelIndex early for stream playlists (used in lazy transcoding and wait logic)
+    const streamMatch = rel.match(/^stream_(\d+)\.m3u8$/)
+    let levelIndex = streamMatch ? parseInt(streamMatch[1], 10) : -1
+    
     if (isMaster) {
       // первый запрос master стартует ffmpeg-сессию
       const r = await ensureHlsSession(messageId)
@@ -323,22 +340,19 @@ export async function handleHlsRequest(req: http.IncomingMessage, res: http.Serv
         
         // S3: lazy transcoding — если запрашивается stream_N.m3u8, которого ещё нет,
         // запускаем транскодинг для этого уровня
-        const streamMatch = rel.match(/^stream_(\d+)\.m3u8$/)
-        if (streamMatch) {
-          const levelIndex = parseInt(streamMatch[1], 10)
-          if (levelIndex >= 0 && levelIndex < s.qualityLadder.length) {
-            // M6 FIX: track last requested level to protect it from being killed
-            s.lastRequestedLevel = levelIndex
-            // M6 FIX: guard — if level already completed and playlist usable, skip start entirely
-            const playlistPath = path.join(s.dir, `stream_${levelIndex}.m3u8`)
-            if (s.completed.has(levelIndex) && fileUsable(playlistPath)) {
-              hlog(`level ${levelIndex} already completed, serving existing playlist id=${messageId}`)
-            } else {
-              // Запускаем транскодинг в фоне (не ждём завершения)
-              startLevelTranscoding(s, levelIndex).catch(e => {
-                hlog(`lazy transcode error id=${messageId} level=${levelIndex}: ${e.message}`)
-              })
-            }
+        // levelIndex already parsed above
+        if (levelIndex >= 0 && levelIndex < s.qualityLadder.length) {
+          // M6 FIX: track last requested level to protect it from being killed
+          s.lastRequestedLevel = levelIndex
+          // M6 FIX: guard — if level already completed and playlist usable, skip start entirely
+          const playlistPath = path.join(s.dir, `stream_${levelIndex}.m3u8`)
+          if (s.completed.has(levelIndex) && fileUsable(playlistPath)) {
+            hlog(`level ${levelIndex} already completed, serving existing playlist id=${messageId}`)
+          } else {
+            // Запускаем транскодинг в фоне (не ждём завершения)
+            startLevelTranscoding(s, levelIndex).catch(e => {
+              hlog(`lazy transcode error id=${messageId} level=${levelIndex}: ${e.message}`)
+            })
           }
         }
       }
@@ -356,22 +370,32 @@ export async function handleHlsRequest(req: http.IncomingMessage, res: http.Serv
       // Для stream_N.m3u8 ждём дольше, так как транскодинг может только стартовать
       const isStreamPlaylist = rel.match(/^stream_\d+\.m3u8$/)
       let waitTimeout = sessions.has(messageId) ? 3000 : 0
+      // Get session for stream playlist timeout calculation and transcoding check
+      const s = isStreamPlaylist ? sessions.get(messageId) : undefined
       if (isStreamPlaylist) {
-        // M7 FIX: timeout depends on level height — higher res takes longer to produce first segment
-        const levelMatch = rel.match(/^stream_(\d+)\.m3u8$/)
-        if (levelMatch) {
-          const levelIndex = parseInt(levelMatch[1], 10)
-          const s = sessions.get(messageId)
-          const levelHeight = s?.qualityLadder?.[levelIndex]?.height || 720
-          if (levelHeight >= 1440) waitTimeout = 30000      // 1440p/4K: up to 30s
-          else if (levelHeight >= 1080) waitTimeout = 20000 // 1080p: up to 20s
-          else waitTimeout = 10000                          // ≤720p: 10s
+        // F3 FIX: Increased waitTimeout to handle heavy HEVC transcoding
+        // 4K HEVC → 240p H.264 first segment can take 15-40s with libx264 veryfast
+        // levelIndex is already parsed above (outer scope)
+        const levelHeight = s?.qualityLadder?.[levelIndex]?.height || 720
+        const isOriginal = levelHeight === 0
+        if (isOriginal) {
+          waitTimeout = 45000  // Original (remux or transcode): 45s buffer for HEVC
+        } else if (levelHeight >= 1440) {
+          waitTimeout = 60000  // 1440p/4K: up to 60s (heavy transcode)
+        } else if (levelHeight >= 1080) {
+          waitTimeout = 45000  // 1080p: up to 45s
         } else {
-          waitTimeout = 10000
+          waitTimeout = 30000  // ≤720p: 30s (covers 240p/480p/720p from HEVC source)
         }
       }
-      const waited = await waitForFile(resolved, waitTimeout)
+      const waited = await waitForFile(resolved, waitTimeout, isStreamPlaylist ? s?.transcoding?.get(levelIndex) : undefined)
       if (!waited) {
+        // D3 FIX: Log more details for debugging 404s
+        const s2 = sessions.get(messageId)
+        const transcodingActive = s2?.transcoding?.has(levelIndex) ?? false
+        const completed = s2?.completed?.has(levelIndex) ?? false
+        const procDied = isStreamPlaylist && s2?.transcoding?.get(levelIndex)?.killed
+        hlog(`404: ${rel} id=${messageId} level=${levelIndex} transcodingActive=${transcodingActive} completed=${completed} procDied=${procDied} waitTimeout=${waitTimeout}ms`)
         res.writeHead(404)
         return void res.end('Not found')
       }
@@ -386,6 +410,16 @@ export async function handleHlsRequest(req: http.IncomingMessage, res: http.Serv
     res.writeHead(200, headers)
     if (req.method === 'HEAD') return void res.end()
     res.end(data)
+    
+    // F2 FIX: Mark playlist as served so we never kill this level's transcoding
+    // (client may have segment URLs from this playlist)
+    if (levelIndex >= 0) {
+      const s = sessions.get(messageId)
+      if (s && !s.servedPlaylists.has(levelIndex)) {
+        s.servedPlaylists.add(levelIndex)
+        hlog(`level ${levelIndex} playlist served id=${messageId}`)
+      }
+    }
   } catch (e: any) {
     hlog(`serve error: ${e?.message || e}`)
     if (!res.headersSent) {
@@ -449,7 +483,7 @@ function generateMasterPlaylist(session: HlsSession): string {
     
     // M3 FIX: use real aspect ratio from probe, not hardcoded 16:9
     const width = isOriginal ? sourceWidth : Math.round(height * sourceWidth / sourceHeight)
-    const resolution = isOriginal ? '' : `RESOLUTION=${width}x${height},`
+    const resolution = `RESOLUTION=${width}x${height},`
     lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},${resolution}NAME="${label}"`)
     lines.push(`stream_${i}.m3u8`)
   }
@@ -467,27 +501,30 @@ async function startLevelTranscoding(session: HlsSession, levelIndex: number): P
   if (session.completed.has(levelIndex)) return
   if (session.transcoding.has(levelIndex)) return // уже транскодится
   
-  // M6 FIX: limit parallel transcodes to 2. Protect lastRequestedLevel and the new levelIndex.
-  // Kill the oldest non-protected transcoding if we have 2+ already running.
+  // F2 FIX: Never kill a level that has already served its playlist (client has segment URLs)
+  // Never kill level 0 (lowest quality, starts first, ready in ~1ms)
+  // Allow up to 3 parallel transcodes. Only kill levels that never served their playlist.
   const running = Array.from(session.transcoding.entries())
-  if (running.length >= 2) {
-    // Find oldest that is NOT lastRequestedLevel and NOT the new levelIndex
+  if (running.length >= 3) {
+    // Find oldest that is NOT lastRequestedLevel, NOT the new levelIndex, NOT level 0,
+    // and has NOT served its playlist yet
     let victim: [number, ChildProcess] | null = null
     for (const entry of running) {
       const idx = entry[0]
-      if (idx !== session.lastRequestedLevel && idx !== levelIndex) {
+      const hasServedPlaylist = session.servedPlaylists.has(idx)
+      if (idx !== session.lastRequestedLevel && idx !== levelIndex && idx !== 0 && !hasServedPlaylist) {
         victim = entry
         break
       }
     }
-    // If both running are protected (lastRequested + new), allow 3rd parallel (rare)
+    // If all running are protected (lastRequested + new + level0 + served playlists), allow 4th parallel (very rare)
     if (victim) {
       const [oldestIndex, oldestProc] = victim
-      hlog(`stopping oldest transcode level ${oldestIndex} for new level ${levelIndex} id=${session.id}`)
+      hlog(`stopping oldest transcode level ${oldestIndex} for new level ${levelIndex} id=${session.id} (never served playlist)`)
       try { oldestProc.kill() } catch {}
       session.transcoding.delete(oldestIndex)
     }
-    // else: both active are protected → allow 3rd parallel temporarily
+    // else: all active are protected → allow 4th parallel temporarily
   }
   
   const level = session.qualityLadder[levelIndex]
@@ -495,6 +532,10 @@ async function startLevelTranscoding(session: HlsSession, levelIndex: number): P
   
   const bin = resolveFfmpegPath()
   if (!bin) throw new Error('ffmpeg-unavailable')
+  
+  // D1 FIX: For original quality level, if source is H.264/AAC, use -c copy (remux)
+  // This makes first segment appear almost instantly instead of waiting for transcoding
+  const useRemux = isOriginal && session.canRemux
   
   // Определяем параметры для этого уровня
   let scaleFilter = ''
@@ -524,13 +565,23 @@ async function startLevelTranscoding(session: HlsSession, levelIndex: number): P
   if (scaleFilter) {
     args.push('-filter:v:0', scaleFilter)
   }
-  args.push('-b:v:0', `${targetKbps}k`)
   
-  args.push(
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
-    '-force_key_frames', 'expr:gte(t,n_forced*4)'
-  )
-  if (session.hasAudio) args.push('-c:a', 'aac', '-b:a', '128k')
+  if (useRemux) {
+    // D1 FIX: Remux with -c copy - nearly instant first segment
+    args.push('-c', 'copy')
+    // For remux, we don't need force_key_frames (source already has keyframes)
+    // But we still need hls_time for segment duration
+    hlog(`start level ${levelIndex} (${level.label}) id=${session.id} REMUX (copy) input=${session.input.slice(0, 120)}`)
+  } else {
+    args.push('-b:v:0', `${targetKbps}k`)
+    args.push(
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+      // keyframe каждые 4s → сегменты ровно по hls_time (иначе x264-GOP 250 кадров)
+      '-force_key_frames', 'expr:gte(t,n_forced*4)'
+    )
+    if (session.hasAudio) args.push('-c:a', 'aac', '-b:a', '128k')
+    hlog(`start level ${levelIndex} (${level.label}) id=${session.id} kbps=${targetKbps} ${scaleFilter ? scaleFilter : 'original'} input=${session.input.slice(0, 120)}`)
+  }
   
   args.push('-f', 'hls', '-hls_time', '4')
   // Для lazy transcoding НЕ используем vod — master уже есть, плейлисты растут
@@ -538,8 +589,6 @@ async function startLevelTranscoding(session: HlsSession, levelIndex: number): P
   args.push('-hls_list_size', '0')
   args.push('-hls_segment_filename', path.join(session.dir, `seg_${levelIndex}_%05d.ts`))
   args.push(path.join(session.dir, `${streamName}.m3u8`))
-  
-  hlog(`start level ${levelIndex} (${level.label}) id=${session.id} kbps=${targetKbps} ${scaleFilter ? scaleFilter : 'original'} input=${session.input.slice(0, 120)}`)
   
   const proc = spawn(bin, args, { windowsHide: true })
   session.transcoding.set(levelIndex, proc)
@@ -590,6 +639,7 @@ async function startLevelTranscoding(session: HlsSession, levelIndex: number): P
 }
 
 async function launch(session: HlsSession): Promise<void> {
+  const tLaunch = Date.now()
   const getMeta = ctx!.getMeta
   const meta = await getMeta(session.id)
   if (!sessionAlive(session)) return abortLaunch(session)
@@ -663,22 +713,30 @@ async function launch(session: HlsSession): Promise<void> {
   session.srcKbps = srcKbps
   session.srcWidth = srcWidth
   session.srcHeight = srcHeight
+  // D1 FIX: save codec info for remux optimization
+  session.videoCodec = probe.videoCodec
+  session.audioCodec = probe.audioCodec
+  session.canRemux = probe.canRemux
 
   // Генерируем master.m3u8 СРАЗУ — меню качества доступно мгновенно
   const masterContent = generateMasterPlaylist(session)
   await fs.promises.writeFile(session.masterPath, masterContent, 'utf-8')
   session.masterGenerated = true
   session.ready = true
+  const tMaster = Date.now()
   
   hlog(
     `master ready id=${session.id} levels=${qualityLadder.length} ` +
     `src=${height ? height + 'p' : 'unknown'} kbps=${srcKbps} ` +
-    `${progressive ? 'growing-hls' : 'vod'} input=${input.slice(0, 120)}`
+    `${progressive ? 'growing-hls' : 'vod'} codec=v:${probe.videoCodec} a:${probe.audioCodec} remux=${probe.canRemux} ` +
+    `input=${input.slice(0, 120)} | timing: probe=${tMaster - tLaunch}ms`
   )
 
   // Запускаем транскодинг для ПЕРВОГО уровня (низший качества — быстрый старт)
   // hls.js с autoLevelEnabled=-1 сам выберет подходящий, но нам нужен хотя бы один готовый
   await startLevelTranscoding(session, 0)
+  const tFirstLevel = Date.now()
+  hlog(`first level started id=${session.id} | timing: total=${tFirstLevel - tLaunch}ms master=${tMaster - tLaunch}ms level0=${tFirstLevel - tMaster}ms`)
 }
 
 function fileExt(meta: HlsMeta): string {
@@ -702,6 +760,7 @@ async function resolveInputFallback(meta: HlsMeta): Promise<string> {
   const fileName = path.basename(String(meta.fileName || ''))
   if (!['mov', 'mkv', 'avi'].includes(fileExt(meta))) throw new Error('probe-failed')
   const messageId = meta.message?.id
+  const expectedSize = meta.message?.file?.size || 0
   const previewDir = path.join(app.getPath('userData'), 'preview-cache')
   fs.mkdirSync(previewDir, { recursive: true })
   const srcPath = path.join(previewDir, `${messageId}_${fileName}`)
@@ -715,7 +774,7 @@ async function resolveInputFallback(meta: HlsMeta): Promise<string> {
   const src = await downloadPreviewSourceOnce(ctx!.telegramService, messageId, srcPath, (sent, total) => {
     // фаза download → preview-окна (T-005 progress продолжает работать)
     sendProgress(messageId, { phase: 'download', sent, total })
-  })
+  }, expectedSize)
   if (!src) throw new Error('download-failed')
   sendProgress(messageId, { phase: 'convert' })
   const converted = await convertVideoToMp4(srcPath, mp4Path)
@@ -723,7 +782,17 @@ async function resolveInputFallback(meta: HlsMeta): Promise<string> {
   return converted
 }
 
-type Probe = { hasVideo: boolean; hasAudio: boolean; width: number; height: number; videoKbps: number; duration: number }
+type Probe = { 
+  hasVideo: boolean; 
+  hasAudio: boolean; 
+  width: number; 
+  height: number; 
+  videoKbps: number; 
+  duration: number;
+  videoCodec: string;
+  audioCodec: string;
+  canRemux: boolean;  // true if H.264/AAC - can use -c copy for original quality
+}
 
 // «ffmpeg -i <input>» без выхода: печатает сводку потоков и сразу завершается
 // (код 1 — это норма). Нужны height (решение 1 vs 2 варианта) и наличие аудио
@@ -741,6 +810,8 @@ export function parseProbe(out: string): Probe {
   let height = 0
   let videoKbps = 0
   let duration = 0
+  let videoCodec = ''
+  let audioCodec = ''
   // «Duration: 00:12:34.56, start: 0.000000, bitrate: 1234 kb/s»
   const dur = out.match(/Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/)
   if (dur) duration = parseInt(dur[1], 10) * 3600 + parseInt(dur[2], 10) * 60 + Math.round(parseFloat(dur[3]))
@@ -758,11 +829,19 @@ export function parseProbe(out: string): Probe {
       }
       const br = line.match(/(?:^|[\s,])(\d{2,6})\s*kb\/s/i)
       if (br) videoKbps = parseInt(br[1], 10)
+      // Detect video codec: h264, hevc, vp9, av1, etc.
+      const vc = line.match(/Video:\s*(\w+)/i)
+      if (vc) videoCodec = vc[1].toLowerCase()
     } else if (/Audio:/.test(line)) {
       hasAudio = true
+      // Detect audio codec: aac, mp3, opus, ac3, etc.
+      const ac = line.match(/Audio:\s*(\w+)/i)
+      if (ac) audioCodec = ac[1].toLowerCase()
     }
   }
-  return { hasVideo, hasAudio, width, height, videoKbps, duration }
+  // Can remux (copy) if video is H.264 (avc1/h264) and audio is AAC or no audio
+  const canRemux = hasVideo && (videoCodec === 'h264' || videoCodec === 'avc1') && (!hasAudio || audioCodec === 'aac')
+  return { hasVideo, hasAudio, width, height, videoKbps, duration, videoCodec, audioCodec, canRemux }
 }
 
 // раскладка проверена прогоном ffmpeg: 2 варианта (480p+source) и 1 вариант,
@@ -848,17 +927,39 @@ function dropSession(session: HlsSession): void {
   // REWORK#1 F3: флаг останавливает launch на следующей await-точке
   session.killed = true
   if (sessions.get(session.id) === session) sessions.delete(session.id)
-  // Kill all transcoding processes
-  for (const proc of session.transcoding.values()) {
+  // Kill all transcoding processes and collect exit promises
+  const exitPromises: Promise<void>[] = []
+  for (const [levelIdx, proc] of session.transcoding.entries()) {
     try {
-      proc.kill()
+      if (!proc.killed) {
+        const p = new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 3000) // max 3s wait
+          proc.once('exit', () => { clearTimeout(timeout); resolve() })
+        })
+        exitPromises.push(p)
+        proc.kill()
+      }
     } catch {}
   }
   session.transcoding.clear()
-  try {
-    fs.rmSync(session.dir, { recursive: true, force: true })
-  } catch (e) {
-    hlog(`rm ${session.dir} fail: ${(e as Error).message}`)
+  // Wait for ffmpeg processes to actually exit, THEN delete directory
+  // This prevents "Failed to open file" errors from ffmpeg writing to deleted dir
+  if (exitPromises.length > 0) {
+    Promise.all(exitPromises).then(() => {
+      try {
+        fs.rmSync(session.dir, { recursive: true, force: true })
+      } catch (e) {
+        hlog(`rm ${session.dir} fail: ${(e as Error).message}`)
+      }
+    }).catch(() => {
+      try { fs.rmSync(session.dir, { recursive: true, force: true }) } catch {}
+    })
+  } else {
+    try {
+      fs.rmSync(session.dir, { recursive: true, force: true })
+    } catch (e) {
+      hlog(`rm ${session.dir} fail: ${(e as Error).message}`)
+    }
   }
 }
 
