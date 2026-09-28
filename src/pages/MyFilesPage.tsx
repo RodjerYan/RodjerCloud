@@ -98,6 +98,19 @@ export default function MyFilesPage() {
   const [progressModal, setProgressModal] = useState<{ title: string; items: { name: string; status: 'pending' | 'active' | 'done' | 'error' }[]; current: number; total: number; visible: boolean; onClose?: () => void } | null>(null)
   const [folders, setFolders] = useState<any[]>([])
   const [fileFolders, setFileFolders] = useState<Record<number, string>>({})
+  // T-20260928-010: счётчики/обложки карточек папок из полного кэша main-процесса
+  // (renderer-массив `files` обрезан пагинацией — только первые 30 файлов,
+  // старый расчёт в карточках поэтому занижал до 0)
+  const [folderStats, setFolderStats] = useState<Record<string, { count: number; size: number; preview: { messageId: number; fileName: string; isVideo: boolean; width?: number; height?: number } | null }>>({})
+  // T-20260928-010: молча обновляем статистику папок; при ошибке — fallback на старый расчёт
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const r = await window.electronAPI.folders.stats()
+        if (r?.success && r?.data) setFolderStats(r.data)
+      } catch {}
+    })()
+  }, [folders, fileFolders])
   const [folderDrill, setFolderDrill] = useState<string | null>(null)
   // rework minor#2: upload живёт дольше рендера — замыкание .then видит
   // УСТАРЕВШИЙ folderDrill (равный targetFolderId в момент старта загрузки),
@@ -1975,6 +1988,10 @@ export default function MyFilesPage() {
                         const vidFiles = allFiles.filter((f: any) => /\.(mp4|mov|avi|mkv|webm)$/i.test(f.fileName));
                         const previewFile = imgFiles[0] || vidFiles[0];
                         const isPreviewVideo = previewFile && vidFiles.includes(previewFile);
+                        // T-20260928-010: обложка/счётчик из folders:stats, когда renderer-файлов мало (fallback — previewFile)
+                        const st = folderStats[sf.id];
+                        const coverFile = previewFile || (st?.preview ? { messageId: st.preview.messageId, fileName: st.preview.fileName, isVideo: st.preview.isVideo, width: st.preview.width, height: st.preview.height } : null);
+                        const isCoverVideo = coverFile ? (coverFile === previewFile ? !!isPreviewVideo : !!st?.preview?.isVideo) : false;
                         const cascadeFiles = imgFiles.slice(0, 3);
                         const totalCount = countFilesRecursive(sf.id);
                         const totalSize = allFiles.reduce((s: number, f: any) => s + (f.fileSize || 0), 0);
@@ -2008,10 +2025,10 @@ export default function MyFilesPage() {
                               onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                           <div className="mf-folder-preview">
-                            {previewFile ? (
+                            {coverFile ? (
                               <>
                                 <div className="mf-folder-cover">
-                                  <FileThumb messageId={previewFile.messageId} fileName={previewFile.fileName} isVideo={!!isPreviewVideo} typeLabel={isPreviewVideo ? 'Видео' : 'Изображения'} width={previewFile.width} height={previewFile.height} />
+                                  <FileThumb messageId={coverFile.messageId} fileName={coverFile.fileName} isVideo={!!isCoverVideo} typeLabel={isCoverVideo ? 'Видео' : 'Изображения'} width={coverFile.width} height={coverFile.height} />
                                 </div>
                                 <div className="mf-folder-overlay" />
                                 {cascadeFiles.length > 1 && (
@@ -2034,7 +2051,7 @@ export default function MyFilesPage() {
                             </button>
                           </div>
                           <div className="mf-folder-name" title={sf.name}>{sf.name}</div>
-                          <div className="mf-folder-meta">{totalCount} файл. · {fmtSize(totalSize)}</div>
+                          <div className="mf-folder-meta">{st ? `${st.count} файл. · ${fmtSize(st.size)}` : `${totalCount} файл. · ${fmtSize(totalSize)}`}</div>
                         </TiltCard>
                         );
                       })}
@@ -2116,7 +2133,9 @@ export default function MyFilesPage() {
                     <table className="mf-table mf-table-nohide">
                       <thead><tr><th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th></tr></thead>
                       <tbody>
-                        {currentLevelFolders.map(sf => (
+                        {currentLevelFolders.map(sf => {
+                          const st = folderStats[sf.id]
+                          return (
                           <tr key={sf.id} className="mf-folder-row" style={{ cursor: 'pointer', viewTransitionName: `folder-${sf.id}` }}
                               draggable={true}
                               onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', id: sf.id })) }}
@@ -2136,14 +2155,15 @@ export default function MyFilesPage() {
                               onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                             <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Folder size={16} style={{ color: '#7c83ff', flexShrink: 0 }} />{sf.name}</span></td>
-                            <td style={{ color: 'var(--text-dim)' }}>{countFilesRecursive(sf.id)} файл.</td>
+                            <td style={{ color: 'var(--text-dim)' }}>{st ? st.count : countFilesRecursive(sf.id)} файл.</td>
                             <td>{sf.createdAt ? new Date(sf.createdAt * 1000).toLocaleDateString() : '—'}</td>
                             <td>
                               <button title="Переименовать" onClick={(e) => { e.stopPropagation(); setRenameId(sf.id); setRenameVal(sf.name) }}><Pencil size={14} /></button>
                               <button title="Удалить" className="danger" onClick={(e) => { e.stopPropagation(); deleteFolder(sf.id, e) }}><Trash2 size={14} /></button>
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                         {sortedFiles.slice(0, visibleCount).map(f => {
                           const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
                           const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)

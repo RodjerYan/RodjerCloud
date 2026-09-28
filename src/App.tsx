@@ -100,10 +100,23 @@ function App() {
   // Magnetic Hover Effect removed per user request
 
   const fetchUserInfo = useCallback(async () => {
-    try {
-      const r = await window.electronAPI.telegram.getUserInfo()
-      if (r.success && r.data) setUserInfo(r.data)
-    } catch {}
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await Promise.race([
+          window.electronAPI.telegram.getUserInfo(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('getUserInfo timeout')), 10_000)),
+        ])
+        if (r?.success && r?.data) {
+          setUserInfo(r.data)
+          return
+        }
+        console.warn('[profile] getUserInfo attempt ' + attempt + ':', r)
+      } catch (error) {
+        console.warn('[profile] getUserInfo attempt ' + attempt + ':', error)
+      }
+      if (attempt < 3) await new Promise(res => setTimeout(res, 2500))
+    }
+    console.error('[profile] getUserInfo failed after 3 attempts')
   }, [])
 
   const handleDuckDone = useCallback(() => setShowDuckSplash(false), [])

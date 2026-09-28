@@ -659,7 +659,10 @@ ipcMain.handle('telegram:get-user-info', async () => {
   try {
     const info = await telegramService.getUserInfo()
     return { success: true, data: info }
-  } catch (error) { return { success: false, error: (error as Error).message } }
+  } catch (error) {
+    log('error', '[get-user-info] failed: ' + (error as Error).message)
+    return { success: false, error: (error as Error).message }
+  }
 })
 
 // ===== Upload queue =====
@@ -1911,6 +1914,62 @@ ipcMain.handle('folders:move-folder', async (_, folderId: string, parentId: stri
       await syncFoldersToTelegram()
       return { success: true, data: d }
     })
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+// T-20260928-010: folder card stats from full cache
+ipcMain.handle('folders:stats', async () => {
+  try {
+    const allFiles = telegramService.getCachedFilesInstant()
+    const d = await readFolders()
+    const folderList: any[] = d.folders || []
+    const fileFoldersMap: Record<string, string> = d.fileFolders || {}
+
+    // group all cached files by their direct folderId (keys are stringified messageIds)
+    const filesByFolder: Record<string, any[]> = {}
+    for (const f of allFiles as any[]) {
+      const fid = fileFoldersMap[String(f.messageId)]
+      if (!fid) continue
+      if (!filesByFolder[fid]) filesByFolder[fid] = []
+      filesByFolder[fid].push(f)
+    }
+
+    // ids of all descendants (recursive, same collect as in folders:delete)
+    const descendantIds = (id: string): Set<string> => {
+      const out = new Set<string>()
+      const collect = (parentId: string) => {
+        folderList.filter((x: any) => x.parentId === parentId && !out.has(x.id)).forEach((x: any) => { out.add(x.id); collect(x.id) })
+      }
+      collect(id)
+      return out
+    }
+
+    const data: Record<string, any> = {}
+    for (const folder of folderList) {
+      const ids = descendantIds(folder.id)
+      ids.add(folder.id)
+      let count = 0
+      let size = 0
+      for (const fid of ids) {
+        const list = filesByFolder[fid]
+        if (!list) continue
+        count += list.length
+        for (const f of list) size += f.fileSize || 0
+      }
+
+      // preview: direct files of THIS folder only (без потомков), messageId desc →
+      // первый попавшийся image или video (регексы те же, что в карточке папки)
+      const direct = (filesByFolder[folder.id] || []).slice().sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
+      const IMG_RE = /\.(jpg|jpeg|png|gif|webp)$/i
+      const VID_RE = /\.(mp4|mov|avi|mkv|webm)$/i
+      const pf = direct.find((f: any) => IMG_RE.test(f.fileName || '') || VID_RE.test(f.fileName || ''))
+      const preview = pf
+        ? { messageId: pf.messageId, fileName: pf.fileName || '', isVideo: VID_RE.test(pf.fileName || ''), width: pf.width, height: pf.height }
+        : null
+
+      data[folder.id] = { count, size, preview }
+    }
+    return { success: true, data }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

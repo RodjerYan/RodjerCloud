@@ -140,6 +140,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     rename: (id: string, name: string) => ipcRenderer.invoke('folders:rename', id, name),
     delete: (id: string) => ipcRenderer.invoke('folders:delete', id),
     listTrash: () => ipcRenderer.invoke('folders:list-trash'),
+    // T-20260928-010: folder card stats (count/size/preview) from full cache
+    stats: () => ipcRenderer.invoke('folders:stats'),
     restore: (id: string) => ipcRenderer.invoke('folders:restore', id),
     permDelete: (id: string) => ipcRenderer.invoke('folders:perm-delete', id),
     addFile: (folderId: string, messageId: number) => ipcRenderer.invoke('folders:add-file', folderId, messageId),
