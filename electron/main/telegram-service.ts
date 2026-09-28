@@ -31,6 +31,8 @@ const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
 const APP_LOG_PATH = path.join(app.getPath('userData'), 'rodjercloud.log')
 // T-20260925-002 P4: расширения видео (пробы размеров для file-cache)
 const VIDEO_EXT_RE = /\.(mov|mp4|m4v|mkv|webm|avi|3gp|mts|m2ts|flv|wmv)$/i
+// T-20260925-016 S2: video stream server port (matches index.ts:2041 hardcode)
+const STREAM_SERVER_PORT = 14300
 function thumbLog(msg: string) {
   try { fs.appendFileSync(APP_LOG_PATH, `[${new Date().toISOString()}] [info] [thumb] ${msg}\n`) } catch {}
 }
@@ -194,222 +196,277 @@ export class TelegramService {
       const tmpPath = task.cachePath + '.tmp.heic'
       if (fs.existsSync(tmpPath)) fs.rmSync(tmpPath, { force: true })
       
+      // Determine file type BEFORE any download (needed for HTTP-first video path)
+      const fileName = task.message.file?.name || ''
+      const ext = path.extname(fileName).toLowerCase()
+      const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
+      
+      let outputBuffer: Buffer = Buffer.alloc(0)
+      let ffmpegSucceeded = false
+      let downloaded = false
+      
       try {
-        // MAJOR 4 + ACCEPTANCE GAP 6: partial video download for large videos
-        if (task.partialVideo) {
-          await this.performPartialDownload(task.message, tmpPath, 16 * 1024 * 1024) // ~16MB
-        } else {
-          await this.performDownload(task.message, tmpPath)
-        }
-        
-        if (fs.existsSync(tmpPath) && (await fs.promises.stat(tmpPath)).size > 0) {
-          // Check if source is a video file (by extension or by probing)
-          const fileName = task.message.file?.name || ''
-          const ext = path.extname(fileName).toLowerCase()
-          const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
-
-          // Lazy probe: if video and cache lacks dimensions, probe the downloaded head file
-          // This populates width/height/duration in file-cache so grid badges appear without opening the video
-          if (isVideo && VIDEO_EXT_RE.test(fileName)) {
-            if (this.fileCache.length === 0) {
-              const disk = this.loadFileCache()
-              if (disk.length > 0) this.fileCache = disk
-            }
-            const cachedRow = this.fileCache.find((f: any) => f.messageId === task.messageId)
-            if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
-              try {
-                const dims = await this.probeVideoDims(tmpPath)
-                if (dims) {
-                  this.cacheVideoDimensions(task.messageId, dims.width, dims.height, dims.duration)
-                  thumbLog(`lazy probe dims id=${task.messageId} ${dims.width}x${dims.height} dur=${dims.duration}`)
-                }
-              } catch {
-                // probe errors must not break thumbnail pipeline
-              }
-            }
-          }
-
-          let outputBuffer: Buffer = Buffer.alloc(0)
-
-          if (isVideo) {
-            // For videos, ffmpeg reads directly from disk — no need to load into memory
-            // Generate video thumbnail using ffmpeg
-            const ffmpegPath = resolveFfmpegPath()
-            if (ffmpegPath) {
-              const thumbTmp = tmpPath + '.thumb.jpg'
-              let ffmpegSucceeded = false
-              try {
-                // Try -ss 1 first (keyframe at 1s), fallback to -ss 0 if no keyframe
+        // FIRST ATTEMPT (S2): HTTP input via stream server for videos — ffmpeg seeks to moov at tail via Range/206
+        // This works for MOV/MP4 with moov at end (non-faststart) without downloading the whole file.
+        if (isVideo) {
+          const ffmpegPath = resolveFfmpegPath()
+          if (ffmpegPath) {
+            const thumbTmp = tmpPath + '.thumb.jpg'
+            const httpInput = `http://127.0.0.1:${STREAM_SERVER_PORT}/stream/${task.messageId}`
+            try {
+              thumbLog(`heavy video http attempt id=${task.messageId} input=${httpInput}`)
+              await runFfmpeg(ffmpegPath, [
+                '-y', '-ss', '1', '-i', httpInput,
+                '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
+              ], 30000)
+              if (!fs.existsSync(thumbTmp) || fs.statSync(thumbTmp).size === 0 || !isJpegFile(thumbTmp)) {
+                // Fallback: try without -ss 1 (from beginning)
+                thumbLog(`heavy video http ffmpeg -ss 1 failed, retry -ss 0 id=${task.messageId}`)
                 await runFfmpeg(ffmpegPath, [
-                  '-y', '-ss', '1', '-i', tmpPath,
+                  '-y', '-ss', '0', '-i', httpInput,
                   '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
                 ], 30000)
-                if (!fs.existsSync(thumbTmp) || fs.statSync(thumbTmp).size === 0 || !isJpegFile(thumbTmp)) {
-                  // Fallback: try without -ss 1 (from beginning)
-                  thumbLog(`heavy video ffmpeg -ss 1 failed, retry -ss 0 id=${task.messageId}`)
-                  await runFfmpeg(ffmpegPath, [
-                    '-y', '-ss', '0', '-i', tmpPath,
-                    '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
-                  ], 30000)
-                }
-                if (fs.existsSync(thumbTmp) && fs.statSync(thumbTmp).size > 0 && isJpegFile(thumbTmp)) {
-                  outputBuffer = await fs.promises.readFile(thumbTmp)
-                  try { fs.unlinkSync(thumbTmp) } catch {}
-                  ffmpegSucceeded = true
-                } else {
-                  thumbLog(`heavy video ffmpeg produced invalid output id=${task.messageId}`)
-                  outputBuffer = Buffer.alloc(0)
-                  try { fs.unlinkSync(thumbTmp) } catch {}
-                }
-              } catch (e: any) {
-                thumbLog(`heavy video ffmpeg error id=${task.messageId}: ${e?.message}`)
+              }
+              if (fs.existsSync(thumbTmp) && fs.statSync(thumbTmp).size > 0 && isJpegFile(thumbTmp)) {
+                outputBuffer = await fs.promises.readFile(thumbTmp)
+                try { fs.unlinkSync(thumbTmp) } catch {}
+                ffmpegSucceeded = true
+                thumbLog(`heavy video http SUCCESS id=${task.messageId}`)
+              } else {
+                thumbLog(`heavy video http ffmpeg produced invalid output id=${task.messageId}`)
                 outputBuffer = Buffer.alloc(0)
                 try { fs.unlinkSync(thumbTmp) } catch {}
               }
-
-              // SCHEME A ESCALATION: if partialVideo failed and not yet escalated, queue full download (capped at 512MB)
-              if (!ffmpegSucceeded && task.partialVideo && !this.heavyThumbEscalated.has(task.messageId)) {
-                const fileSize = this.toNum(task.message.file?.size)
-                const MAX_FULL_DOWNLOAD = 512 * 1024 * 1024 // 512MB cap
-                if (fileSize > 0 && fileSize <= MAX_FULL_DOWNLOAD) {
-                  this.heavyThumbEscalated.add(task.messageId)
-                  thumbLog(`heavy video partial failed → escalating to full download id=${task.messageId} size=${fileSize}`)
-                  this.heavyThumbQueue.push({ messageId: task.messageId, message: task.message, cachePath: task.cachePath, partialVideo: false })
-                  // Clean up tmp and continue to next task (don't negative-cache yet)
-                  try { fs.unlinkSync(tmpPath) } catch {}
-                  continue
-                } else if (fileSize > MAX_FULL_DOWNLOAD) {
-                  thumbLog(`heavy video partial failed, file too large for full download (${fileSize} > ${MAX_FULL_DOWNLOAD}) id=${task.messageId}`)
-                }
-              }
-            } else {
-              thumbLog(`heavy video: ffmpeg not available id=${task.messageId}`)
+            } catch (e: any) {
+              thumbLog(`heavy video http ffmpeg error id=${task.messageId}: ${e?.message}`)
               outputBuffer = Buffer.alloc(0)
+              try { fs.unlinkSync(thumbTmp) } catch {}
             }
           } else {
-            // Non-video: read file into buffer for HEIC/image processing
-            outputBuffer = await fs.promises.readFile(tmpPath)
-            const isHeicBuf = outputBuffer.length > 12 &&
-              outputBuffer.toString('ascii', 4, 8) === 'ftyp' &&
-              ['heic', 'heix', 'hevc', 'mif1'].includes(outputBuffer.toString('ascii', 8, 12))
-
-            if (process.platform === 'darwin') {
-              const sipsTmp = tmpPath + '.jpg'
-              let sipsOk = false
-              try {
-                await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
-                outputBuffer = await fs.promises.readFile(sipsTmp)
-                // Validate sips output is actually JPEG
-                if (outputBuffer.length > 0 && isJpegFile(sipsTmp)) {
-                  sipsOk = true
-                } else {
-                  thumbLog(`heavy sips produced non-JPEG output id=${task.messageId}`)
-                }
-                try { fs.unlinkSync(sipsTmp) } catch {}
-              } catch (e: any) {
-                thumbLog(`heavy sips fail id=${task.messageId}: ${e?.message}`)
-                console.error('sips convert error:', e)
+            thumbLog(`heavy video: ffmpeg not available id=${task.messageId}`)
+            outputBuffer = Buffer.alloc(0)
+          }
+        }
+        
+        // FALLBACK: if HTTP attempt failed (or not a video), download and process locally
+        if (!ffmpegSucceeded) {
+          // MAJOR 4 + ACCEPTANCE GAP 6: partial video download for large videos
+          if (task.partialVideo) {
+            await this.performPartialDownload(task.message, tmpPath, 16 * 1024 * 1024) // ~16MB
+          } else {
+            await this.performDownload(task.message, tmpPath)
+          }
+          downloaded = true
+          
+          if (fs.existsSync(tmpPath) && (await fs.promises.stat(tmpPath)).size > 0) {
+            // Lazy probe: if video and cache lacks dimensions, probe the downloaded head file
+            // This populates width/height/duration in file-cache so grid badges appear without opening the video
+            if (isVideo && VIDEO_EXT_RE.test(fileName)) {
+              if (this.fileCache.length === 0) {
+                const disk = this.loadFileCache()
+                if (disk.length > 0) this.fileCache = disk
               }
-              // If sips failed or produced invalid output, fall through to heic-convert/nativeImage
-              if (!sipsOk) {
-                if (isHeicBuf) {
-                  const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
-                  const { Worker } = require('worker_threads')
-                  const outBuf = await new Promise<Buffer>((resolve, reject) => {
-                    const worker = new Worker(`
-                      const heicConvert = require('${heicPath}');
-                      const { parentPort, workerData } = require('worker_threads');
-                      async function run() {
-                        try {
-                          const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
-                          parentPort.postMessage({ success: true, buffer: out });
-                        } catch (e) {
-                          parentPort.postMessage({ success: false, error: e.message });
+              const cachedRow = this.fileCache.find((f: any) => f.messageId === task.messageId)
+              if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
+                try {
+                  const dims = await this.probeVideoDims(tmpPath)
+                  if (dims) {
+                    this.cacheVideoDimensions(task.messageId, dims.width, dims.height, dims.duration)
+                    thumbLog(`lazy probe dims id=${task.messageId} ${dims.width}x${dims.height} dur=${dims.duration}`)
+                  }
+                } catch {
+                  // probe errors must not break thumbnail pipeline
+                }
+              }
+            }
+            
+            if (isVideo) {
+              // For videos, ffmpeg reads directly from disk — no need to load into memory
+              // Generate video thumbnail using ffmpeg (legacy path on downloaded file)
+              const ffmpegPath = resolveFfmpegPath()
+              if (ffmpegPath) {
+                const thumbTmp = tmpPath + '.thumb.jpg'
+                try {
+                  thumbLog(`heavy video legacy attempt id=${task.messageId}`)
+                  // Try -ss 1 first (keyframe at 1s), fallback to -ss 0 if no keyframe
+                  await runFfmpeg(ffmpegPath, [
+                    '-y', '-ss', '1', '-i', tmpPath,
+                    '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
+                  ], 30000)
+                  if (!fs.existsSync(thumbTmp) || fs.statSync(thumbTmp).size === 0 || !isJpegFile(thumbTmp)) {
+                    // Fallback: try without -ss 1 (from beginning)
+                    thumbLog(`heavy video legacy ffmpeg -ss 1 failed, retry -ss 0 id=${task.messageId}`)
+                    await runFfmpeg(ffmpegPath, [
+                      '-y', '-ss', '0', '-i', tmpPath,
+                      '-frames:v', '1', '-vf', 'scale=320:-2', '-y', thumbTmp
+                    ], 30000)
+                  }
+                  if (fs.existsSync(thumbTmp) && fs.statSync(thumbTmp).size > 0 && isJpegFile(thumbTmp)) {
+                    outputBuffer = await fs.promises.readFile(thumbTmp)
+                    try { fs.unlinkSync(thumbTmp) } catch {}
+                    ffmpegSucceeded = true
+                    thumbLog(`heavy video legacy SUCCESS id=${task.messageId}`)
+                  } else {
+                    thumbLog(`heavy video legacy ffmpeg produced invalid output id=${task.messageId}`)
+                    outputBuffer = Buffer.alloc(0)
+                    try { fs.unlinkSync(thumbTmp) } catch {}
+                  }
+                } catch (e: any) {
+                  thumbLog(`heavy video legacy ffmpeg error id=${task.messageId}: ${e?.message}`)
+                  outputBuffer = Buffer.alloc(0)
+                  try { fs.unlinkSync(thumbTmp) } catch {}
+                }
+              } else {
+                thumbLog(`heavy video: ffmpeg not available id=${task.messageId}`)
+                outputBuffer = Buffer.alloc(0)
+              }
+            } else {
+              // Non-video: read file into buffer for HEIC/image processing
+              outputBuffer = await fs.promises.readFile(tmpPath)
+              const isHeicBuf = outputBuffer.length > 12 &&
+                outputBuffer.toString('ascii', 4, 8) === 'ftyp' &&
+                ['heic', 'heix', 'hevc', 'mif1'].includes(outputBuffer.toString('ascii', 8, 12))
+
+              if (process.platform === 'darwin') {
+                const sipsTmp = tmpPath + '.jpg'
+                let sipsOk = false
+                try {
+                  await execFileAsync('/usr/bin/sips', ['-Z', '320', '-s', 'format', 'jpeg', tmpPath, '--out', sipsTmp], { timeout: 15000 })
+                  outputBuffer = await fs.promises.readFile(sipsTmp)
+                  // Validate sips output is actually JPEG
+                  if (outputBuffer.length > 0 && isJpegFile(sipsTmp)) {
+                    sipsOk = true
+                  } else {
+                    thumbLog(`heavy sips produced non-JPEG output id=${task.messageId}`)
+                  }
+                  try { fs.unlinkSync(sipsTmp) } catch {}
+                } catch (e: any) {
+                  thumbLog(`heavy sips fail id=${task.messageId}: ${e?.message}`)
+                  console.error('sips convert error:', e)
+                }
+                // If sips failed or produced invalid output, fall through to heic-convert/nativeImage
+                if (!sipsOk) {
+                  if (isHeicBuf) {
+                    const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+                    const { Worker } = require('worker_threads')
+                    const outBuf = await new Promise<Buffer>((resolve, reject) => {
+                      const worker = new Worker(`
+                        const heicConvert = require('${heicPath}');
+                        const { parentPort, workerData } = require('worker_threads');
+                        async function run() {
+                          try {
+                            const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                            parentPort.postMessage({ success: true, buffer: out });
+                          } catch (e) {
+                            parentPort.postMessage({ success: false, error: e.message });
+                          }
                         }
-                      }
-                      run();
-                    `, { eval: true, workerData: outputBuffer })
-                    worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
-                      if (msg.success) resolve(Buffer.from(msg.buffer!))
-                      else reject(new Error(msg.error))
+                        run();
+                      `, { eval: true, workerData: outputBuffer })
+                      worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                        if (msg.success) resolve(Buffer.from(msg.buffer!))
+                        else reject(new Error(msg.error))
+                      })
+                      worker.on('error', reject)
+                      worker.on('exit', (code: number | null) => {
+                        if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                      })
                     })
-                    worker.on('error', reject)
-                    worker.on('exit', (code: number | null) => {
-                      if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
-                    })
-                  })
-                  const img = nativeImage.createFromBuffer(outBuf as Buffer)
-                  outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
-                } else {
-                  // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
-                  const img = nativeImage.createFromBuffer(outputBuffer)
-                  if (!img.isEmpty()) {
+                    const img = nativeImage.createFromBuffer(outBuf as Buffer)
                     outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
                   } else {
-                    thumbLog(`heavy nativeImage empty id=${task.messageId}`)
-                  }
-                }
-              }
-            } else if (isHeicBuf) {
-              const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
-              const { Worker } = require('worker_threads')
-              const outBuf = await new Promise<Buffer>((resolve, reject) => {
-                const worker = new Worker(`
-                  const heicConvert = require('${heicPath}');
-                  const { parentPort, workerData } = require('worker_threads');
-                  async function run() {
-                    try {
-                      const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
-                      parentPort.postMessage({ success: true, buffer: out });
-                    } catch (e) {
-                      parentPort.postMessage({ success: false, error: e.message });
+                    // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
+                    const img = nativeImage.createFromBuffer(outputBuffer)
+                    if (!img.isEmpty()) {
+                      outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+                    } else {
+                      thumbLog(`heavy nativeImage empty id=${task.messageId}`)
                     }
                   }
-                  run();
-                `, { eval: true, workerData: outputBuffer })
-                worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
-                  if (msg.success) resolve(Buffer.from(msg.buffer!))
-                  else reject(new Error(msg.error))
+                }
+              } else if (isHeicBuf) {
+                const heicPath = require.resolve('heic-convert').replace(/\\/g, '/')
+                const { Worker } = require('worker_threads')
+                const outBuf = await new Promise<Buffer>((resolve, reject) => {
+                  const worker = new Worker(`
+                    const heicConvert = require('${heicPath}');
+                    const { parentPort, workerData } = require('worker_threads');
+                    async function run() {
+                      try {
+                        const out = await heicConvert({ buffer: Buffer.from(workerData), format: 'JPEG', quality: 0.8 });
+                        parentPort.postMessage({ success: true, buffer: out });
+                      } catch (e) {
+                        parentPort.postMessage({ success: false, error: e.message });
+                      }
+                    }
+                    run();
+                  `, { eval: true, workerData: outputBuffer })
+                  worker.on('message', (msg: { success: boolean; buffer?: ArrayBuffer; error?: string }) => {
+                    if (msg.success) resolve(Buffer.from(msg.buffer!))
+                    else reject(new Error(msg.error))
+                  })
+                  worker.on('error', reject)
+                  worker.on('exit', (code: number | null) => {
+                    if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
+                  })
                 })
-                worker.on('error', reject)
-                worker.on('exit', (code: number | null) => {
-                  if (code !== 0) reject(new Error('heic-convert worker stopped with exit code ' + code))
-                })
-              })
-              const img = nativeImage.createFromBuffer(outBuf as Buffer)
-              outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
-            } else {
-              // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
-              const img = nativeImage.createFromBuffer(outputBuffer)
-              if (!img.isEmpty()) {
+                const img = nativeImage.createFromBuffer(outBuf as Buffer)
                 outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
               } else {
-                thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+                // plain jpg/png/webp/bmp — resize via nativeImage (no heic-convert)
+                const img = nativeImage.createFromBuffer(outputBuffer)
+                if (!img.isEmpty()) {
+                  outputBuffer = img.resize({ width: 320 }).toJPEG(80) as Buffer
+                } else {
+                  thumbLog(`heavy nativeImage empty id=${task.messageId}`)
+                }
               }
             }
-          }
-
-          // Only write if we have valid JPEG output
-          if (outputBuffer.length > 0 && outputBuffer[0] === 0xFF && outputBuffer[1] === 0xD8 && outputBuffer[2] === 0xFF) {
-            await fs.promises.writeFile(task.cachePath, outputBuffer)
-            try { fs.unlinkSync(tmpPath) } catch {}
-            thumbLog(`heavy done id=${task.messageId} bytes=${outputBuffer.length}`)
-
-            const { BrowserWindow } = require('electron')
-            BrowserWindow.getAllWindows().forEach((w: any) => {
-              if (!w.isDestroyed()) {
-                try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
-              }
-            })
           } else {
-            thumbLog(`heavy invalid output (not JPEG) id=${task.messageId} → skipping`)
+            thumbLog(`heavy empty-download id=${task.messageId}`)
+            // Clean up empty/partial tmp file
             try { fs.unlinkSync(tmpPath) } catch {}
             // Add to negative cache
             this.heavyThumbFailCache.set(task.messageId, Date.now())
+            continue
           }
         } else {
-          thumbLog(`heavy empty-download id=${task.messageId}`)
-          // Clean up empty/partial tmp file
+          // HTTP succeeded — skip download entirely
+          thumbLog(`heavy video http ok → skip download id=${task.messageId}`)
+        }
+
+        // SCHEME A ESCALATION: if partialVideo failed (both HTTP and legacy) and not yet escalated, queue full download (capped at 512MB)
+        if (!ffmpegSucceeded && task.partialVideo && !this.heavyThumbEscalated.has(task.messageId)) {
+          const fileSize = this.toNum(task.message.file?.size)
+          const MAX_FULL_DOWNLOAD = 512 * 1024 * 1024 // 512MB cap
+          if (fileSize > 0 && fileSize <= MAX_FULL_DOWNLOAD) {
+            this.heavyThumbEscalated.add(task.messageId)
+            thumbLog(`heavy video partial failed → escalating to full download id=${task.messageId} size=${fileSize}`)
+            this.heavyThumbQueue.push({ messageId: task.messageId, message: task.message, cachePath: task.cachePath, partialVideo: false })
+            // Clean up tmp and continue to next task (don't negative-cache yet)
+            try { fs.unlinkSync(tmpPath) } catch {}
+            continue
+          } else if (fileSize > MAX_FULL_DOWNLOAD) {
+            thumbLog(`heavy video partial failed, file too large for full download (${fileSize} > ${MAX_FULL_DOWNLOAD}) id=${task.messageId}`)
+          }
+        }
+
+        // Only write if we have valid JPEG output
+        if (outputBuffer.length > 0 && outputBuffer[0] === 0xFF && outputBuffer[1] === 0xD8 && outputBuffer[2] === 0xFF) {
+          await fs.promises.writeFile(task.cachePath, outputBuffer)
+          try { fs.unlinkSync(tmpPath) } catch {}
+          // Invalidate negative cache on success (allows retries if previously failed)
+          this.heavyThumbFailCache.delete(task.messageId)
+          thumbLog(`heavy done id=${task.messageId} bytes=${outputBuffer.length}`)
+
+          const { BrowserWindow } = require('electron')
+          BrowserWindow.getAllWindows().forEach((w: any) => {
+            if (!w.isDestroyed()) {
+              try { w.webContents.send('thumbnail-ready', { messageId: task.messageId, path: task.cachePath }) } catch {}
+            }
+          })
+        } else {
+          thumbLog(`heavy invalid output (not JPEG) id=${task.messageId} → skipping`)
           try { fs.unlinkSync(tmpPath) } catch {}
           // Add to negative cache
           this.heavyThumbFailCache.set(task.messageId, Date.now())

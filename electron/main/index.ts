@@ -13,7 +13,7 @@ import { StorageService } from './storage-service'
 import { AutoSyncService } from './auto-sync-service'
 import { BotService } from './bot-service'
 import { vaultService } from './vault-service'
-import { startVideoStreamServer, rangeCache } from './video-stream-server'
+import { startVideoStreamServer, rangeCache, getStreamMeta } from './video-stream-server'
 import { convertVideoToMp4, downloadPreviewSourceOnce, ffmpegLog } from './previewConverter'
 import { ensureHlsSession, cleanupHlsForIds, IPC_START_TIMEOUT_MS, setHlsProgressHandler, setHlsProbeHandler } from './hlsServer'
 
@@ -2192,8 +2192,14 @@ ipcMain.handle('preview:open', async (_, files: any[], idx: number) => {
   try {
     const f = files[idx]
     if (!f) return { success: false, error: 'File not found' }
-    
-    
+
+    // T-20260928-004 S6: fire-and-forget прогрев getStreamMeta — метаданные потока
+    // начнут считываться к моменту открытия превью. Не await'им наружу (не блокирует
+    // ответ ipcMain.handle), ошибка прогрева не ломает открытие preview (вложенный try/catch).
+    void (async () => {
+      try { await getStreamMeta(telegramService, Number(f.messageId)) } catch (e) { console.warn('[preview] warmup getStreamMeta failed:', f.messageId, e) }
+    })()
+
     const winId = nextPreviewId()
     const downloadDir = path.join(app.getPath('userData'), 'preview-cache')
     if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true })
@@ -2428,7 +2434,8 @@ function renderMedia(files, idx, src, hlsPending) {
       vid.autoplay = true
       // T-20260925-003 S3 / S4: preload=metadata — загружаем только метаданные (длительность, размеры),
       // не качаем весь файл вперёд. Для тяжёлых видео это убирает долгую предзагрузку.
-      vid.preload = 'metadata'
+      // T-20260928-004 S2: значение заменено на 'auto' (прогрев буфера для превью).
+      vid.preload = 'auto'
       // D6 FIX: width/height 100% + object-fit:contain — растягивает маленькие видео на весь контейнер
       vid.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:4px'
       try { vid.volume = volume; vid.muted = muted } catch (e) {}
@@ -2713,12 +2720,13 @@ function dropHlsSession() {
 // прямой src — ровно как до S2 (http-stream / file://), меню качества скрыто.
   // Общая для стартa (F1: мгновенный первый кадр) и fallback-а после HLS.
   // S4: preload=metadata — не качаем весь файл вперёд для тяжёлых видео.
+  // T-20260928-004 S2: значение заменено на 'auto' (прогрев буфера для превью).
   function applyDirectSrc(vid, src) {
     if (!src) { showVideoError('Формат не поддерживается в предпросмотре (нужен mp4/webm)'); return }
     try { vid.pause() } catch (e) {}
     vid.src = src
     vid.autoplay = true
-    vid.preload = 'metadata'
+    vid.preload = 'auto'
     vid.playbackRate = speed
     applyVol()
     var p = vid.play()

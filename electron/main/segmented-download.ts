@@ -3,7 +3,7 @@ import bigInt from 'big-integer'
 import * as crypto from 'crypto'
 
 // Configuration constants
-export const SEG_FETCH_CONCURRENCY = 2
+export const SEG_FETCH_CONCURRENCY = 3
 export const SEG_SEGMENT_SIZE = 8 * 1024 * 1024 // 8MB segments (each worker streams one segment)
 export const SEG_CHUNK_SIZE = 512 * 1024 // 512KB chunk size for iterDownload requestSize
 export const SEG_MAX_BUFFERED_SEGMENTS = SEG_FETCH_CONCURRENCY * 2 // max segments ahead of nextExpectedSegment

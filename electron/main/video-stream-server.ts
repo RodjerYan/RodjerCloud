@@ -37,9 +37,11 @@ const metaInflight = new Map<number, Promise<StreamMeta | null>>()
 // ===== T-20260925-002 S4: Range/seek cache =====
 // Кэширует байтовые диапазоны, уже отданные клиенту (после расшифровки/skipBytes).
 // Перемотка назад в горячий диапазон не идёт в TG — отдаётся из памяти.
-// Лимит: 128MB на сессию (messageId), вытеснение LRU по lastAccess.
-const RANGE_CACHE_MAX_BYTES = 128 * 1024 * 1024 // 128MB per messageId
-const RANGE_CACHE_GLOBAL_MAX_BYTES = 512 * 1024 * 1024 // 512MB global cap
+// Лимит: 256MB на сессию (messageId), вытеснение LRU по lastAccess.
+const RANGE_CACHE_MAX_BYTES = 256 * 1024 * 1024 // 256MB per messageId
+// Глобальный cap: 256×2 файла + 256MB запас на третий/частичные — 3 параллельных
+// read-ahead окна по 32MB (96MB) в одном файле тоже укладываются с запасом.
+const RANGE_CACHE_GLOBAL_MAX_BYTES = 768 * 1024 * 1024 // 768MB global cap
 const RANGE_CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes TTL for idle entries
 const RANGE_CACHE_JUNK_INTERVAL_MS = 60 * 1000 // 1 minute junk timer
 
@@ -195,7 +197,7 @@ class RangeCache {
 
   // Удалить все entries с end < belowOffset - keepBytes (данные ПОЗАДИ позиции чтения).
   // Возвращает количество освобождённых байт.
-  evictBehind(messageId: number, belowOffset: number, keepBytes: number = 8 * 1024 * 1024): number {
+  evictBehind(messageId: number, belowOffset: number, keepBytes: number = 16 * 1024 * 1024): number {
     const list = this.entries.get(messageId)
     if (!list || list.length === 0) return 0
 
@@ -436,12 +438,12 @@ async function launchFetchWindow(
       // Cap check: evict behind before writing new data
       const currentTotal = rangeCache.getTotalSize(messageId)
       if (currentTotal >= RANGE_CACHE_MAX_BYTES) {
-        const evicted = rangeCache.evictBehind(messageId, pos, 8 * 1024 * 1024)
+        const evicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
         if (evicted === 0) {
           // Could not evict — wait briefly and retry once
           await new Promise(r => setTimeout(r, 1000))
           if (abortController.signal.aborted) break
-          const retryEvicted = rangeCache.evictBehind(messageId, pos, 8 * 1024 * 1024)
+          const retryEvicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
           if (retryEvicted === 0) {
             // Still no space — skip caching this chunk but continue fetching
             slog(`fetch cap full id=${messageId} pos=${pos} — skipping cache write`)
@@ -974,6 +976,9 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
           // ===== NON-ENCRYPTED PATH: prefix-serve + 16MB window + single-flight =====
           // Serve from cache prefix; launch bounded fetch windows on cache miss.
           // Max 3 concurrent fetches per messageId to avoid Telegram re-fetching same bytes.
+          // T-20260928-004 S3: read-ahead formula (below) kept, but FW stays 16MB —
+          // FW=32MB covered the whole file for files <32MB, which blocked the separate
+          // moov-tail window (play waited for the full fetch: TTFF 1.1s → 4.2s, log evidence).
 
           let pos = reqStart
           const FETCH_WINDOW = 16 * 1024 * 1024 // 16MB
@@ -1045,7 +1050,11 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
             }
 
             const winStart = pos
-            const winEnd = Math.min(pos + FETCH_WINDOW - 1, reqEnd)
+            // S3: read-ahead — окно тянется от позиции чтения на весь FETCH_WINDOW,
+            // даже если клиент запросил меньший reqEnd (bytes=X-Y с маленьким Y).
+            // Если клиент запросил хвост (reqEnd ≥ pos+FETCH_WINDOW-1) — окно прежнее
+            // (как раньше min(pos+FW-1, reqEnd)); не дальше EOF.
+            const winEnd = Math.min(pos + FETCH_WINDOW - 1, totalSize - 1)
             await launchFetchWindow(messageId, winStart, winEnd, client, parts, totalSize)
 
             // Wait for data to appear at pos (up to MAX_WAIT_MS total)

@@ -7,8 +7,17 @@
  * Protocol handler (index.ts:311-344) decodes via decodeURIComponent.
  */
 function encodePathSegments(p: string): string {
-  // Split by '/', encode each segment, rejoin
-  return p.split('/').map(seg => encodeURIComponent(seg)).join('/')
+  // Split by '/', encode each segment, rejoin.
+  // Segments matching a drive-letter pattern "X:" (e.g. "C:") are NOT encoded,
+  // because Chromium cannot parse local-file:///C%3A/... — the colon must remain literal.
+  // All other segments are encoded with encodeURIComponent as before.
+  // Posix paths (/Users/A B/x.png) are unaffected because "Users" etc. don't match ^[A-Za-z]:$.
+  return p.split('/').map(seg => {
+    if (/^[A-Za-z]:$/.test(seg)) {
+      return seg; // keep drive‑letter segment literal
+    }
+    return encodeURIComponent(seg);
+  }).join('/')
 }
 
 export function toLocalFileUrl(absPath: string): string {
