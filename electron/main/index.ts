@@ -2484,7 +2484,6 @@ function renderMedia(files, idx, src, hlsPending) {
   // T-20260925-010 S2: slow → src у видео появится позже (startHls после
   // {hlsUrl} либо file:// после convert-fallback) — спиннер НЕ снимаем.
   currentMsgId = (isVideo && (src || slow)) ? f.messageId : 0
-  if (ld && !isVideo) ld.style.display = 'none'
   if (src || slow) {
     el.innerHTML = ''
     if (isVideo) {
@@ -2621,6 +2620,9 @@ function renderMedia(files, idx, src, hlsPending) {
         if (ld) ld.style.display = 'none'
         dlHideNow()
         if (err) { err.textContent = 'Не удалось загрузить файл'; err.style.display = 'block' }
+      }
+      img.onload = function() {
+        if (ld) ld.style.display = 'none'
       }
       el.appendChild(img)
       video = null

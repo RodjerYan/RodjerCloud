@@ -160,25 +160,35 @@ export const FileThumb: React.FC<FileThumbProps> = React.memo(({ messageId, file
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {url && !broken ? (
-        <>
-          <img
-            src={url}
-            loading="lazy"
-            decoding="async"
-            className="mf-gm-img"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onError={handleImageError}
-          />
-          {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
-          {resolution && <div className="mf-gm-resolution">{resolution}</div>}
-        </>
-      ) : (
-        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.02)', position: 'relative' }}>
-          {isVideo ? '🎬' : (typeLabel === 'Изображения' ? '🖼️' : '📄')}
-          {resolution && <div className="mf-gm-resolution">{resolution}</div>}
-        </div>
-      )}
+        {url && !broken ? (
+          <>
+            <img
+              src={url}
+              loading="lazy"
+              decoding="async"
+              className="mf-gm-img"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={handleImageError}
+            />
+            {isVideo && <div className="mf-gm-play"><Play size={22} /></div>}
+            {resolution && <div className="mf-gm-resolution">{resolution}</div>}
+          </>
+        ) : !url && !broken ? (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{
+              width: 24, height: 24,
+              border: '3px solid rgba(255,255,255,0.1)',
+              borderTopColor: '#7c83ff',
+              borderRadius: '50%',
+              animation: 'spin .8s linear infinite'
+            }} />
+          </div>
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.02)', position: 'relative' }}>
+            {isVideo ? '🎬' : (typeLabel === 'Изображения' ? '🖼️' : '📄')}
+            {resolution && <div className="mf-gm-resolution">{resolution}</div>}
+          </div>
+        )}
     </div>
   )
 })

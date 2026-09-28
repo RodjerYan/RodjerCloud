@@ -142,6 +142,11 @@ export class TelegramService {
   private lastIdsVerifyAt = 0
   private readonly IDS_VERIFY_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
+  // S4: stream activity tracker for verify yielding
+  private lastStreamActivityAt = 0
+  private readonly STREAM_QUIET_MS = 10_000 // stream silent ≥10s → verify proceeds
+  private readonly VERIFY_MAX_STALL_MS = 5 * 60_000 // total wait budget per verify run (5 min)
+
   constructor() {
     this.loadTrashState()
     // Re-save to persist corrected timestamps (0 → Date.now%)
@@ -501,7 +506,7 @@ export class TelegramService {
   getApiId(): number { return API_ID }
   getApiHash(): string { return API_HASH }
 
-  getClient() { return this.client }
+  getClient() { this.lastStreamActivityAt = Date.now(); return this.client }
   getChannelId() { return this.channelId }
 
   async getMessage(messageId: number) {
@@ -2003,10 +2008,23 @@ export class TelegramService {
     this.verifyingCacheIds = true
     const deletedIds: number[] = []
     const CHUNK = 100
+    let accumulatedStallMs = 0
 
     try {
       for (let i = 0; i < allIds.length; i += CHUNK) {
         const chunkIds = allIds.slice(i, i + CHUNK)
+
+        // S4: yield to active stream — wait for quiet period, but cap total stall
+        if (accumulatedStallMs < this.VERIFY_MAX_STALL_MS) {
+          const waitStart = Date.now()
+          while (Date.now() - this.lastStreamActivityAt < this.STREAM_QUIET_MS) {
+            await new Promise(r => setTimeout(r, 1000))
+            // Check budget after each sleep
+            if (Date.now() - waitStart + accumulatedStallMs >= this.VERIFY_MAX_STALL_MS) break
+          }
+          accumulatedStallMs += Date.now() - waitStart
+        }
+
         let fetched: any[] | null = null
 
         // Retry up to 4 times on flood (same pattern as healVideoDimensions)
@@ -3010,27 +3028,8 @@ if (isEncrypted) {
   async downloadThumbnail(messageId: number, fileName?: string): Promise<string | null> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     thumbLog(`downloadThumbnail enter id=${messageId} file=${fileName || ''}`)
-    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
-    if (!messages || messages.length === 0) { thumbLog(`no message id=${messageId}`); return null }
-    const message: any = messages[0]
-    if (!message.file) { thumbLog(`no file id=${messageId}`); return null }
 
-    // P4 rework-3: enqueue remote dims probe for videos without dimensions
-    // Fires on EVERY thumbnail request (including disk cache hits) so existing library gets probed
-    const extForProbe = fileName ? path.extname(fileName).toLowerCase() : ''
-    const isVideoForProbe = VIDEO_EXT_RE.test(extForProbe || (message.file?.name || ''))
-    if (isVideoForProbe) {
-      // Check cache for existing dims to avoid unnecessary probe
-      if (this.fileCache.length === 0) {
-        const disk = this.loadFileCache()
-        if (disk.length > 0) this.fileCache = disk
-      }
-      const cachedRow = this.fileCache.find((f: any) => f.messageId === messageId)
-      if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
-        this.enqueueDimsNetProbe(messageId, message)
-      }
-    }
-
+    // Part A: cache-first — check disk cache BEFORE any network call
     const cacheDir = path.join(app.getPath('userData'), 'thumb-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const cachePath = path.join(cacheDir, `${messageId}.jpg`)
@@ -3046,69 +3045,96 @@ if (isEncrypted) {
       try { fs.unlinkSync(cachePath) } catch {}
     }
 
-    const media = message.document || message.photo
-    const hasThumbs = media && media.thumbs && media.thumbs.length > 0
-    thumbLog(`id=${messageId} hasThumbs=${!!hasThumbs} thumbsLen=${media?.thumbs?.length ?? 0}`)
+    // Part B: semaphore for network section
+    await thumbAcquire()
+    try {
+      const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
+      if (!messages || messages.length === 0) { thumbLog(`no message id=${messageId}`); return null }
+      const message: any = messages[0]
+      if (!message.file) { thumbLog(`no file id=${messageId}`); return null }
 
-    let thumbDownloaded = false
-    if (hasThumbs) {
-      // Try to get a medium/large thumbnail to avoid blurriness
-      const sizesToTry = ['m', 'x', media.thumbs.length - 1, 1, 0]
-      for (const t of sizesToTry) {
-        try {
-          await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
-          if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0 && isJpegFile(cachePath)) {
-            thumbLog(`download ok id=${messageId} thumb=${String(t)} bytes=${fs.statSync(cachePath).size}`)
-            thumbDownloaded = true
-            break
-          }
-          thumbLog(`download empty/invalid id=${messageId} thumb=${String(t)}`)
-          try { fs.unlinkSync(cachePath) } catch {}
-        } catch (e: any) {
-          thumbLog(`download fail id=${messageId} thumb=${String(t)} err=${e?.message}`)
+      // P4 rework-3: enqueue remote dims probe for videos without dimensions
+      // Fires on EVERY thumbnail request (including disk cache hits) so existing library gets probed
+      const extForProbe = fileName ? path.extname(fileName).toLowerCase() : ''
+      const isVideoForProbe = VIDEO_EXT_RE.test(extForProbe || (message.file?.name || ''))
+      if (isVideoForProbe) {
+        // Check cache for existing dims to avoid unnecessary probe
+        if (this.fileCache.length === 0) {
+          const disk = this.loadFileCache()
+          if (disk.length > 0) this.fileCache = disk
+        }
+        const cachedRow = this.fileCache.find((f: any) => f.messageId === messageId)
+        if (cachedRow && !(cachedRow.width > 0) && !(cachedRow.height > 0)) {
+          this.enqueueDimsNetProbe(messageId, message)
         }
       }
-      if (!thumbDownloaded) {
-        thumbLog(`all thumb attempts failed id=${messageId} → falling back to heavy queue`)
+
+      const media = message.document || message.photo
+      const hasThumbs = media && media.thumbs && media.thumbs.length > 0
+      thumbLog(`id=${messageId} hasThumbs=${!!hasThumbs} thumbsLen=${media?.thumbs?.length ?? 0}`)
+
+      let thumbDownloaded = false
+      if (hasThumbs) {
+        // Try to get a medium/large thumbnail to avoid blurriness
+        const sizesToTry = ['m', 'x', media.thumbs.length - 1, 1, 0]
+        for (const t of sizesToTry) {
+          try {
+            await this.client.downloadMedia(message, { outputFile: cachePath, thumb: t } as any)
+            if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0 && isJpegFile(cachePath)) {
+              thumbLog(`download ok id=${messageId} thumb=${String(t)} bytes=${fs.statSync(cachePath).size}`)
+              thumbDownloaded = true
+              break
+            }
+            thumbLog(`download empty/invalid id=${messageId} thumb=${String(t)}`)
+            try { fs.unlinkSync(cachePath) } catch {}
+          } catch (e: any) {
+            thumbLog(`download fail id=${messageId} thumb=${String(t)} err=${e?.message}`)
+          }
+        }
+        if (!thumbDownloaded) {
+          thumbLog(`all thumb attempts failed id=${messageId} → falling back to heavy queue`)
+        }
       }
-    }
 
-    // BLOCKER 2 FIX: if thumb was successfully downloaded, return the cache path immediately
-    if (thumbDownloaded) {
-      return cachePath
-    }
-
-    const ext = fileName ? path.extname(fileName).toLowerCase() : ''
-    const fileSize = this.toNum(message.file?.size)
-    const isHeic = ext === '.heic' || ext === '.heif'
-    const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)
-    const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
-    const MAX_THUMB_SRC = 20 * 1024 * 1024
-    thumbLog(`no-thumbs id=${messageId} ext=${ext} size=${fileSize} isVideo=${isVideo}`)
-
-    // BLOCKER 3 + MAJOR 4 FIX: shouldHeavy only when !thumbDownloaded, both terms capped by MAX_THUMB_SRC
-    // For videos > MAX_THUMB_SRC: attempt partial download (~16MB) for ffmpeg thumbnail
-    const shouldHeavy = (!thumbDownloaded && hasThumbs && fileSize <= MAX_THUMB_SRC) ||
-                        ((isHeic || isImage) && fileSize <= MAX_THUMB_SRC) ||
-                        (isVideo && fileSize <= MAX_THUMB_SRC)
-    if (shouldHeavy) {
-      if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
-        this.heavyThumbQueue.push({ messageId, message, cachePath })
-        thumbLog(`queued heavy id=${messageId} kind=${isHeic ? 'heic' : isVideo ? 'video' : 'image'}`)
-        this.processHeavyThumbQueue()
+      // BLOCKER 2 FIX: if thumb was successfully downloaded, return the cache path immediately
+      if (thumbDownloaded) {
+        return cachePath
       }
-    } else if (isVideo) {
-      // ACCEPTANCE GAP 6: videos > MAX_THUMB_SRC — attempt partial download (~16MB) for thumbnail
-      if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
-        this.heavyThumbQueue.push({ messageId, message, cachePath, partialVideo: true })
-        thumbLog(`queued heavy (partial-video) id=${messageId} size=${fileSize}`)
-        this.processHeavyThumbQueue()
-      }
-    } else {
-      thumbLog(`skip id=${messageId} reason=${!isHeic && !isImage && !isVideo ? 'not-image' : 'too-big'}`)
-    }
 
-    return null
+      const ext = fileName ? path.extname(fileName).toLowerCase() : ''
+      const fileSize = this.toNum(message.file?.size)
+      const isHeic = ext === '.heic' || ext === '.heif'
+      const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)
+      const isVideo = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.3gp'].includes(ext)
+      const MAX_THUMB_SRC = 20 * 1024 * 1024
+      thumbLog(`no-thumbs id=${messageId} ext=${ext} size=${fileSize} isVideo=${isVideo}`)
+
+      // BLOCKER 3 + MAJOR 4 FIX: shouldHeavy only when !thumbDownloaded, both terms capped by MAX_THUMB_SRC
+      // For videos > MAX_THUMB_SRC: attempt partial download (~16MB) for ffmpeg thumbnail
+      const shouldHeavy = (!thumbDownloaded && hasThumbs && fileSize <= MAX_THUMB_SRC) ||
+                          ((isHeic || isImage) && fileSize <= MAX_THUMB_SRC) ||
+                          (isVideo && fileSize <= MAX_THUMB_SRC)
+      if (shouldHeavy) {
+        if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
+          this.heavyThumbQueue.push({ messageId, message, cachePath })
+          thumbLog(`queued heavy id=${messageId} kind=${isHeic ? 'heic' : isVideo ? 'video' : 'image'}`)
+          this.processHeavyThumbQueue()
+        }
+      } else if (isVideo) {
+        // ACCEPTANCE GAP 6: videos > MAX_THUMB_SRC — attempt partial download (~16MB) for thumbnail
+        if (!this.heavyThumbQueue.find(t => t.messageId === messageId)) {
+          this.heavyThumbQueue.push({ messageId, message, cachePath, partialVideo: true })
+          thumbLog(`queued heavy (partial-video) id=${messageId} size=${fileSize}`)
+          this.processHeavyThumbQueue()
+        }
+      } else {
+        thumbLog(`skip id=${messageId} reason=${!isHeic && !isImage && !isVideo ? 'not-image' : 'too-big'}`)
+      }
+
+      return null
+    } finally {
+      thumbRelease()
+    }
   }
 
 
