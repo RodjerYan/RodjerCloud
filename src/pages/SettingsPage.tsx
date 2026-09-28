@@ -238,6 +238,7 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
     if (r.success && r.data) {
       setDownloadPathState(r.data.filePath)
       setDownloadProgress(100)
+      setDownloading(false)
     } else {
       toast.error(r.error || 'Ошибка загрузки')
       setDownloading(false)
@@ -253,6 +254,65 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
     setDownloading(false)
     setUpdateModal(null)
   }
+
+  // UI state helpers per JSON spec
+  const getSubtitle = useCallback(() => {
+    if (!updateModal) return ''
+    if (downloading) return 'Подготовка обновления…'
+    if (downloadPathState && downloadProgress === 100) return 'Готово к установке'
+    return 'Доступно обновление'
+  }, [updateModal, downloading, downloadPathState, downloadProgress])
+
+  const showProgress = useCallback(() => {
+    return downloading || (downloadPathState && downloadProgress === 100)
+  }, [downloading, downloadPathState, downloadProgress])
+
+  const renderActions = useCallback(() => {
+    if (!updateModal) return null
+
+    if (downloading) {
+      return (
+        <button type="button" className="se-btn se-btn-primary" disabled>
+          Не закрывайте приложение
+        </button>
+      )
+    }
+
+    if (downloadPathState && downloadProgress === 100) {
+      return (
+        <>
+          <button type="button" className="se-btn se-btn-secondary" onClick={closeModal}>
+            Позже
+          </button>
+          <button
+            ref={primaryBtnRef}
+            type="button"
+            className="se-btn se-btn-primary"
+            onClick={installUpdate}
+          >
+            Установить сейчас
+          </button>
+        </>
+      )
+    }
+
+    // available state
+    return (
+      <>
+        <button type="button" className="se-btn se-btn-secondary" onClick={closeModal}>
+          Позже
+        </button>
+        <button
+          ref={primaryBtnRef}
+          type="button"
+          className="se-btn se-btn-primary"
+          onClick={startDownload}
+        >
+          Обновить до v{updateModal.latestVersion}
+        </button>
+      </>
+    )
+  }, [updateModal, downloading, downloadPathState, downloadProgress, closeModal, startDownload, installUpdate])
 
   return (
     <div className="se-root">
@@ -446,116 +506,83 @@ export default function SettingsPage({ channelInfo, onChangeChannel, updateAvail
             role="dialog"
             aria-modal="true"
             aria-labelledby="se-upd-title"
-            aria-describedby="se-upd-ver"
+            aria-describedby="se-upd-desc"
             tabIndex={-1}
             onClick={e => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="se-modal-x"
-              onClick={closeModal}
-              disabled={downloading}
-              aria-label="Закрыть"
-            >
-              <X size={16} />
-            </button>
-
-            <div className="se-modal-hero">
-              <div className="se-modal-icon" aria-hidden>
-                <Rocket size={28} strokeWidth={1.75} />
-              </div>
-              <h3 id="se-upd-title" className="se-modal-title">
-                Доступно обновление
-              </h3>
-              <p id="se-upd-ver" className="se-modal-sub">
-                Установите свежую версию — займёт пару минут
-              </p>
-            </div>
-
-            <div className="se-modal-versions" aria-label="Версии">
-              <span className="se-ver-chip current">
-                <span className="se-ver-label">сейчас</span>
-                <span className="se-ver-num">v{updateModal.currentVersion}</span>
-              </span>
-              <ArrowRight size={16} className="se-ver-arrow" aria-hidden />
-              <span className="se-ver-chip next">
-                <span className="se-ver-label">новая</span>
-                <span className="se-ver-num">v{updateModal.latestVersion}</span>
-              </span>
-            </div>
-
-            {notesNode && (
-              <div className="se-modal-notes" id="se-upd-notes">
-                <div className="se-notes-label">Что нового</div>
-                <div className="se-notes-body">{notesNode}</div>
-              </div>
+            {!downloading && (
+              <button
+                type="button"
+                className="se-modal-close"
+                onClick={closeModal}
+                aria-label="Закрыть"
+              >
+                <X size={16} />
+              </button>
             )}
 
-            {downloading && (
-              <div className="se-modal-progress" role="progressbar" aria-valuenow={downloadProgress} aria-valuemin={0} aria-valuemax={100} aria-label="Загрузка обновления">
-                <div className="se-modal-progress-text">
-                  <span>
-                    {downloadProgress < 100 ? 'Загрузка обновления…' : 'Готово к установке'}
-                  </span>
-                  <span className="se-progress-pct">{downloadProgress}%</span>
-                </div>
-                <div className="se-modal-progress-bar-wrap">
-                  <div className="se-modal-progress-bar" style={{ width: downloadProgress + '%' }} />
+            <div className="se-modal-header">
+              <img
+                src={iconUrl}
+                alt="RodjerCloud"
+                className="se-modal-icon"
+                aria-hidden="true"
+                width={96}
+                height={96}
+              />
+              <div className="se-modal-header-content">
+                <h2 id="se-upd-title" className="se-modal-title">
+                  RodjerCloud {updateModal.latestVersion}
+                </h2>
+                <p id="se-upd-desc" className="se-modal-subtitle">
+                  {getSubtitle()}
+                </p>
+                <div
+                  className="se-modal-progress"
+                  role="progressbar"
+                  aria-valuenow={downloadProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Прогресс загрузки обновления"
+                  style={{ display: showProgress() ? 'block' : 'none' }}
+                >
+                  <div
+                    className="se-modal-progress-fill"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
                 </div>
               </div>
-            )}
+            </div>
+
+            <div className="se-modal-body">
+              {notesNode ? (
+                <div className="se-modal-notes" id="se-upd-notes">
+                  <div className="se-notes-content">{notesNode}</div>
+                </div>
+              ) : (
+                <div className="se-modal-notes" id="se-upd-notes">
+                  <div className="se-notes-content">
+                    <p className="se-notes-empty">Подробности обновления недоступны.</p>
+                  </div>
+                </div>
+              )}
+
+              {updateModal.htmlUrl && (
+                <a
+                  className="se-modal-github-link"
+                  href={updateModal.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Полные заметки на GitHub
+                  <ExternalLink size={12} />
+                </a>
+              )}
+            </div>
 
             <div className="se-modal-actions">
-              {!downloading && !downloadPathState && (
-                <>
-                  <button type="button" className="v3-btn ghost" onClick={closeModal}>
-                    Позже
-                  </button>
-                  <button
-                    ref={primaryBtnRef}
-                    type="button"
-                    className="v3-btn primary se-modal-cta"
-                    onClick={startDownload}
-                  >
-                    <Download size={15} />
-                    Обновить до v{updateModal.latestVersion}
-                  </button>
-                </>
-              )}
-              {downloading && (
-                <button type="button" className="v3-btn" disabled>
-                  Не закрывайте приложение
-                </button>
-              )}
-              {downloadProgress === 100 && downloadPathState && (
-                <>
-                  <button type="button" className="v3-btn ghost" onClick={closeModal}>
-                    Позже
-                  </button>
-                  <button
-                    ref={primaryBtnRef}
-                    type="button"
-                    className="v3-btn primary se-modal-cta"
-                    onClick={installUpdate}
-                  >
-                    <ExternalLink size={15} />
-                    Установить сейчас
-                  </button>
-                </>
-              )}
+              {renderActions()}
             </div>
-
-            {updateModal.htmlUrl && (
-              <a
-                className="se-modal-notes-link"
-                href={updateModal.htmlUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                Полные заметки на GitHub
-                <ExternalLink size={12} />
-              </a>
-            )}
           </div>
         </div>,
         document.body

@@ -137,6 +137,11 @@ export class TelegramService {
   private lastSelfHealAttempt = 0
   private selfHealTimer: ReturnType<typeof setInterval> | null = null
 
+  // T-20260928-001: verify cached IDs against server to detect remote deletions
+  private verifyingCacheIds = false
+  private lastIdsVerifyAt = 0
+  private readonly IDS_VERIFY_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
+
   constructor() {
     this.loadTrashState()
     // Re-save to persist corrected timestamps (0 → Date.now%)
@@ -1973,6 +1978,89 @@ export class TelegramService {
     appLog('info', `[dims] done: healed ${healed}/${targets.length}`)
   }
 
+  // T-20260928-001: verify cached message IDs against server to detect
+  // files deleted on other devices. Runs at most once per 10 minutes.
+  // Pattern mirrors healVideoDimensions: chunked getMessages(ids), flood-safe,
+  // data-loss safe (skip chunk on any uncertainty), only remove on explicit null.
+  private async verifyCachedIdsAgainstServer(): Promise<void> {
+    if (!this.client || !this.channelId || this.verifyingCacheIds) return
+    const now = Date.now()
+    if (now - this.lastIdsVerifyAt < this.IDS_VERIFY_COOLDOWN_MS) return
+
+    // Ensure cache is loaded (pattern from healVideoDimensions)
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    if (this.fileCache.length === 0) return
+
+    // Collect all valid messageIds from cache, excluding locally trashed
+    const allIds = this.fileCache
+      .map((f: any) => f.messageId)
+      .filter((id: any) => typeof id === 'number' && id > 0 && !this.localTrashedIds.has(id))
+    if (allIds.length === 0) return
+
+    this.verifyingCacheIds = true
+    const deletedIds: number[] = []
+    const CHUNK = 100
+
+    try {
+      for (let i = 0; i < allIds.length; i += CHUNK) {
+        const chunkIds = allIds.slice(i, i + CHUNK)
+        let fetched: any[] | null = null
+
+        // Retry up to 4 times on flood (same pattern as healVideoDimensions)
+        for (let attempt = 0; attempt < 4 && !fetched; attempt++) {
+          try {
+            fetched = await withTimeout(
+              this.client.getMessages(this.channelId as any, {
+                ids: chunkIds,
+                waitTime: 0,
+              } as any),
+              60000,
+              `verifyIds chunk ${i / CHUNK + 1}`
+            )
+          } catch (e: any) {
+            const msg = e?.message || ''
+            if (msg.includes('flood') || msg.includes('420') || msg.includes('Too Many')) {
+              console.warn(`[verifyCachedIds] flood wait #${attempt + 1}`)
+              await new Promise(r => setTimeout(r, 15000))
+              continue
+            }
+            console.warn('[verifyCachedIds] chunk failed:', msg)
+            break
+          }
+        }
+
+        // DATA-LOSS SAFE: if fetch failed/timeout or length mismatch, skip chunk entirely
+        if (!fetched || fetched.length !== chunkIds.length) {
+          console.warn(`[verifyCachedIds] chunk ${i / CHUNK + 1} skipped (fetch failed or length mismatch)`)
+          break
+        }
+
+        // gramjs returns null/undefined at index for deleted messages
+        for (let j = 0; j < chunkIds.length; j++) {
+          if (!fetched[j]) {
+            deletedIds.push(chunkIds[j])
+          }
+        }
+
+        // Small delay between chunks to be flood-safe (pattern from healVideoDimensions)
+        await new Promise(r => setTimeout(r, 300))
+      }
+
+      if (deletedIds.length > 0) {
+        this.removeIdsFromFileCache(deletedIds)
+        appLog('warn', `[sync] verified ${allIds.length} ids, removed ${deletedIds.length} deleted`)
+      } else {
+        appLog('info', `[sync] verified ${allIds.length} ids, removed 0 deleted`)
+      }
+    } finally {
+      this.verifyingCacheIds = false
+      this.lastIdsVerifyAt = Date.now()
+    }
+  }
+
   // P4: HLS-проба уже замерила реальные размеры — сохраняем в file-cache,
   // чтобы бейдж разрешения появился в сетке после первого открытия видео.
   cacheVideoDimensions(messageId: number, width: number, height: number, duration?: number): boolean {
@@ -2321,6 +2409,8 @@ export class TelegramService {
         }
         await this.listFilesPromise
       }
+      // T-20260928-001: verify cached IDs against server to detect remote deletions
+      try { await this.verifyCachedIdsAgainstServer() } catch (e) { console.warn('[syncFilesInBackground] verifyCachedIds error:', (e as Error).message) }
       // P4: дозаполняем width/height/duration у старых строк кэша
       await this.healVideoDimensions()
       // P4 rework-3: локальный probe исходников на диске (mdfind + ffmpeg) для видео без dims
