@@ -3819,26 +3819,65 @@ if (isEncrypted) {
     }
   }
 
+  /** Rejects if `p` doesn't settle within `ms` — bounds calls that can hang forever (e.g. getFile transfer). */
+  private withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)
+      p.then(v => { clearTimeout(timer); resolve(v) }, e => { clearTimeout(timer); reject(e) })
+    })
+  }
+
   async getUserInfo(): Promise<{ firstName: string; lastName?: string; username?: string; photoPath?: string; isVideo?: boolean }> {
     if (!this.client) throw new Error('Client not initialized')
-    const me = await this.client.getMe() as any
+    const client = this.client
+    const me = await this.withTimeout(client.getMe(), 5000, 'getMe') as any
     const info: any = { firstName: me.firstName || '', lastName: me.lastName, username: me.username }
 
-    if (me.photo) {
-      const cacheDir = path.join(app.getPath('userData'), 'profile-cache')
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+    const cacheDir = path.join(app.getPath('userData'), 'profile-cache')
+    // 1) Serve a cached avatar instantly (newest file wins if both .jpg and .mp4 exist) — no network here.
+    let cachedFile = ''
+    let cachedVideo = false
+    let cachedMtime = -1
+    const candidates: [string, boolean][] = [
+      [path.join(cacheDir, 'avatar.mp4'), true],
+      [path.join(cacheDir, 'avatar.jpg'), false],
+    ]
+    for (const [file, isVideo] of candidates) {
       try {
-        const buffer = await this.client.downloadProfilePhoto(me, { isBig: true }) as Buffer
-        if (buffer && buffer.length > 8) {
-          const isMp4 = buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
-          const ext = isMp4 ? '.mp4' : '.jpg'
-          const cachePath = path.join(cacheDir, `avatar${ext}`)
-          fs.writeFileSync(cachePath, buffer)
-          info.photoPath = cachePath
-          info.isVideo = isMp4
+        if (fs.existsSync(file)) {
+          const mtime = fs.statSync(file).mtimeMs
+          if (mtime > cachedMtime) { cachedMtime = mtime; cachedFile = file; cachedVideo = isVideo }
         }
-      } catch (e) {
-        console.warn('Failed to download profile photo:', e)
+      } catch {}
+    }
+    if (cachedFile) { info.photoPath = cachedFile; info.isVideo = cachedVideo }
+
+    if (me.photo) {
+      const downloadAndCache = async (): Promise<void> => {
+        try {
+          if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+          const buffer = await this.withTimeout(
+            client.downloadProfilePhoto(me, { isBig: true }) as Promise<Buffer>,
+            8000,
+            'downloadProfilePhoto'
+          )
+          if (buffer && buffer.length > 8) {
+            const isMp4 = buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
+            const ext = isMp4 ? '.mp4' : '.jpg'
+            fs.writeFileSync(path.join(cacheDir, `avatar${ext}`), buffer)
+            // Not applied to `info` when running in the background — newest-mtime pick above serves it next call.
+          }
+        } catch (e) {
+          console.warn('Failed to download profile photo:', e)
+        }
+      }
+
+      if (cachedFile) {
+        // 2) Avatar already served from cache → refresh in the background for the next call (fire-and-forget).
+        void downloadAndCache()
+      } else {
+        // 3) No cache yet → bounded wait (≤8s); a network failure never fails/delays the response beyond that.
+        await downloadAndCache()
       }
     }
 
