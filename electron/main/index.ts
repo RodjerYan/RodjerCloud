@@ -2097,7 +2097,36 @@ async function resolvePreviewSrc(dir: string, f: any, sessionId?: string): Promi
   if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) {
     // mp4/webm/mov — direct /stream (mov: HEVC/H.264 декодируется нативно, см. 13741).
     // mkv/avi — Chromium НЕ декодирует контейнер → hlsPending (как раньше).
-    if (['mp4', 'webm', 'mov'].includes(ext)) return { src: `http://127.0.0.1:14300/stream/${f.messageId}` }
+    if (['mp4', 'webm', 'mov'].includes(ext)) {
+      // T-20260929-004 S1: файл уже скачан в preview-cache → отдаём локально,
+      // без сетевого TTFB на каждый просмотр (/stream качает из Telegram заново).
+      // Порядок: 1) конверсия h264+faststart (атомарная запись rename — ей можно
+      // доверять, гарантированно декодируется); 2) сырой файл ТОЛЬКО при точном
+      // совпадении размера — в preview-cache встречаются обрезанные остатки
+      // недокачки (3.8МБ из 17.8МБ) → Chromium err=4 (MEDIA_ERR_SRC_NOT_SUPPORTED);
+      // 3) иначе /stream. Обрезанный кэш бесполезен и мешает → удаляем.
+      // имя НЕ mp4Path — ниже по ветке mkv/avi уже есть одноимённая переменная
+      const mp4Cached = path.join(dir, `${f.messageId}_preview.mp4`)
+      try {
+        if (fs.existsSync(mp4Cached) && fs.statSync(mp4Cached).size > 0) {
+          return { src: pathToFileURL(mp4Cached).href }
+        }
+      } catch {}
+      const rawCached = path.join(dir, `${f.messageId}_${f.fileName}`)
+      try {
+        const expectedSize = Number(f.fileSize) || 0
+        if (expectedSize > 0 && fs.existsSync(rawCached)) {
+          const rawSize = fs.statSync(rawCached).size
+          if (rawSize > 0 && rawSize === expectedSize) {
+            return { src: pathToFileURL(rawCached).href }
+          }
+          // несовпадение (fileSize известен) → обрезанный кэш не отдаём и чистим
+          try { fs.unlinkSync(rawCached) } catch {}
+        }
+        // expectedSize=0 (fileSize неизвестен) → сырой кэш не верифицируем → не отдаём
+      } catch {}
+      return { src: `http://127.0.0.1:14300/stream/${f.messageId}` }
+    }
     // ==== T-20260925-010 S2: mkv/avi — НЕ блокируем download+convert ====
     //   * mp4 уже лежит в preview-cache → мгновенный file:// (как раньше);
     //   * иначе hlsPending: preview сразу запускает HLS-сессию — hlsServer
@@ -2111,6 +2140,10 @@ async function resolvePreviewSrc(dir: string, f: any, sessionId?: string): Promi
     return { src: '', hlsPending: true }
   }
   const rawPath = path.join(dir, `${f.messageId}_${f.fileName}`)
+  // T-20260928-012 S2: стартовое событие — подпись «Загрузка…» под кружком
+  // появляется сразу, не дожидаясь первого байта (~23s сетевого старта).
+  // Кэш-хит (файл уже скачан) — не шлём, чтобы не мигало.
+  if (!fs.existsSync(rawPath)) sendProgress({ phase: 'download', sent: 0, total: Number(f.fileSize) || 0 })
   const downloaded = await downloadPreviewSourceOnce(telegramService, f.messageId, rawPath, (sent, total) => {
     sendProgress({ phase: 'download', sent, total })
   }, f.fileSize)
@@ -2445,6 +2478,11 @@ function buildQualityLadder(sourceHeight) {
 }
 
 function renderMedia(files, idx, src, hlsPending) {
+  // T-20260929-004 S2: poster из preview:load (window.__poster) → забираем в
+  // локальную и СРАЗУ чистим глобал: он приходит только при начальной загрузке,
+  // иначе poster предыдущего файла «прилип бы» к следующему (nav).
+  var posterSrc = window.__poster || ''
+  window.__poster = ''
   if (!files || !files[idx]) return
   const f = files[idx]
   const vExt = (f.fileName||'').split('.').pop().toLowerCase()
@@ -2494,6 +2532,9 @@ function renderMedia(files, idx, src, hlsPending) {
       // не качаем весь файл вперёд. Для тяжёлых видео это убирает долгую предзагрузку.
       // T-20260928-004 S2: значение заменено на 'auto' (прогрев буфера для превью).
       vid.preload = 'auto'
+      // T-20260929-004 S2: первый кадр-заглушка из thumb-cache (<messageId>.jpg),
+      // пока идёт буферизация/сетевой TTFB. Пустой posterSrc → просто не вешаем.
+      if (posterSrc) { try { vid.poster = posterSrc } catch (e) {} }
       // D6 FIX: width/height 100% + object-fit:contain — растягивает маленькие видео на весь контейнер
       vid.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:4px'
       try { vid.volume = volume; vid.muted = muted } catch (e) {}
@@ -3538,6 +3579,8 @@ document.addEventListener('click', function (e) {
   if (!e.target || !e.target.closest || !e.target.closest('.mwrap')) closeMenus()
 })
 document.getElementById('media').onclick = function(e) {
+  // T-20260928-012 S1: контролы Plyr (пауза/громкость/…) не листают файлы
+  if (e.target && e.target.closest && e.target.closest('.plyr')) return
   if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG') return
   var w = window.innerWidth
   if (e.clientX < w * 0.3) nav(-1)
@@ -3556,7 +3599,12 @@ if (window.electronAPI && window.electronAPI.preview && typeof window.electronAP
 window.electronAPI.preview.getSession(sid).then(r => {
   if (r.success) {
     window.electronAPI.preview.load(sid).then(r2 => {
-      if (r2.success) renderMedia(r2.data.files, r2.data.idx, r2.data.src, r2.data.hlsPending)
+      if (r2.success) {
+        // T-20260929-004 S2: poster приходит только из preview:load; nav его не
+        // несёт — renderMedia забирает значение и сразу чистит (см. ниже)
+        window.__poster = (r2.data && r2.data.poster) || ''
+        renderMedia(r2.data.files, r2.data.idx, r2.data.src, r2.data.hlsPending)
+      }
       else showError(r2.error || 'load failed')
     }).catch(function(e) { showError('load error: ' + e.message) })
   } else {
@@ -3602,7 +3650,15 @@ ipcMain.handle('preview:load', async (_, sessionId: string) => {
     // T-20260925-005 S2: sessionId — чтобы слать preview:progress в это окно.
     // T-20260925-010 S2: mov/mkv/avi → hlsPending (src пустой, НЕ ошибка).
     const r = await resolvePreviewSrc(s.dir, f, sessionId)
-    return { success: true, data: { files: s.files, idx: s.idx, src: r.src, hlsPending: !!r.hlsPending } }
+    // ==== T-20260929-004 S2: poster из thumb-cache (<messageId>.jpg) ====
+    // Превью-скрипт работает в renderer без fs → file:// poster приходит из main
+    // в data.poster; скрипт кладёт его в window.__poster и вешает на <video>.
+    let poster = ''
+    try {
+      const tp = path.join(app.getPath('userData'), 'thumb-cache', `${f.messageId}.jpg`)
+      if (fs.existsSync(tp) && fs.statSync(tp).size > 0) poster = pathToFileURL(tp).href
+    } catch {}
+    return { success: true, data: { files: s.files, idx: s.idx, src: r.src, hlsPending: !!r.hlsPending, poster } }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 

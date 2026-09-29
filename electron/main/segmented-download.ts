@@ -54,8 +54,11 @@ export async function fetchPartSegments(opts: SegmentedDownloadOptions): Promise
   const rangeEnd = Math.min(reqEnd, partEnd)
   if (rangeStart > rangeEnd) return
 
-  // Align first segment start down to 4096 boundary (for skipBytes handling)
-  const firstSegmentStart = Math.floor(rangeStart / 4096) * 4096
+  // Align first segment start down to 4096 boundary (for skipBytes handling).
+  // T-20260929-004: выравнивание в ПРОСТРАНСТВЕ PART (не merged) — иначе для
+  // part2 (start % 4096 != 0) первый сегмент уезжал НИЖЕ partStart →
+  // отрицательный offset iterDownload. Для part1 (start=0) идентично старому.
+  const firstSegmentStart = partStart + Math.floor((rangeStart - partStart) / 4096) * 4096
   const lastSegmentEnd = rangeEnd
 
   // Generate segment boundaries: each segment is SEG_SEGMENT_SIZE, aligned to 4096
@@ -128,7 +131,7 @@ export async function fetchPartSegments(opts: SegmentedDownloadOptions): Promise
 
     decipherInitialized = true
 
-    if (segmentAbsStart === 0 && partStart === 0) {
+    if (segmentAbsStart === partStart && partStart === 0) {
       // Beginning of the very first part
       decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex!, 'hex'))
       decipher.setAutoPadding(false)
@@ -136,7 +139,7 @@ export async function fetchPartSegments(opts: SegmentedDownloadOptions): Promise
       // Need to fetch previous 16 bytes for IV
       let iv: Buffer | null = null
 
-      if (segmentAbsStart === 0 && partStart > 0 && previousPart) {
+      if (segmentAbsStart === partStart && partStart > 0 && previousPart) {
         // Get last 16 bytes of the previous part
         try {
           const prevIter = client.iterDownload({
@@ -152,11 +155,11 @@ export async function fetchPartSegments(opts: SegmentedDownloadOptions): Promise
         } catch (e) {
           console.error('[seg-fetch] Failed to fetch cross-part IV:', e)
         }
-      } else if (segmentAbsStart >= 16) {
+      } else if (segmentAbsStart - partStart >= 16) {
         try {
           const prevIter = client.iterDownload({
             file: file,
-            offset: bigInt(segmentAbsStart - 16),
+            offset: bigInt(segmentAbsStart - partStart - 16),
             limit: 16,
             requestSize: 16,
           })
@@ -212,7 +215,12 @@ export async function fetchPartSegments(opts: SegmentedDownloadOptions): Promise
         const chunkCount = Math.ceil(segmentSize / SEG_CHUNK_SIZE)
         const iter = client.iterDownload({
           file,
-          offset: bigInt(segment.absStart),
+          // T-20260929-004: offset относительно НАЧАЛА PART (file: part.msg.media —
+          // это отдельный файл), а не merged-координата. Для part1 (partStart=0)
+          // совпадает со старым поведением; для part2 абсолютный offset > size(part)
+          // → Telegram возвращал 0 байт: moov-хвост и весь read-ahead больших
+          // мультипартичных файлов не писались в кэш → «Буферизация…» вечно.
+          offset: bigInt(segment.absStart - partStart),
           requestSize: SEG_CHUNK_SIZE,
           limit: chunkCount,
         })

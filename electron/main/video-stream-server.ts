@@ -302,6 +302,15 @@ class RangeCache {
     return this.totalSize.get(messageId) || 0
   }
 
+  // T-20260929-004 диагностика: снимок entries для лога (пусто/диапазоны/возраст)
+  snapshot(messageId: number): string {
+    const list = this.entries.get(messageId)
+    if (!list || list.length === 0) return 'empty'
+    return list
+      .map(e => `${e.start}-${e.end}(${e.data.length},age=${Date.now() - e.lastAccess}ms)`)
+      .join(' | ')
+  }
+
   private evictLRU(messageId: number, list: RangeCacheEntry[]): void {
     let total = this.totalSize.get(messageId) || 0
     if (total <= RANGE_CACHE_MAX_BYTES) return
@@ -341,6 +350,9 @@ class RangeCache {
       this.entries.delete(messageId)
       this.totalSize.delete(messageId)
     }
+    // T-20260929-004 S3a: кэш файла сброшен (закрытие превью) — на следующем
+    // открытии окно moov-хвоста должно запуститься заново
+    tailPrefetchStarted.delete(messageId)
   }
 
   // M2 FIX: Public method to clear all caches (used on app shutdown if needed)
@@ -348,6 +360,7 @@ class RangeCache {
     this.entries.clear()
     this.totalSize.clear()
     this.globalTotal = 0
+    tailPrefetchStarted.clear()
   }
 }
 
@@ -362,6 +375,7 @@ type ActiveFetch = {
   promise: Promise<void>
   progress: number // bytes delivered to cache
   abortController: AbortController
+  isTail?: boolean // T-20260929-004 S3a: приоритетное moov-хвостовое окно
 }
 
 const activeFetches = new Map<number, ActiveFetch[]>()
@@ -398,13 +412,15 @@ function removeActiveFetch(messageId: number, fetch: ActiveFetch): void {
 
 // Launch a fetch window [winStart, winEnd] for non-encrypted content
 // Writes chunks to rangeCache via onChunk; progress tracked in record.
+// T-20260929-004 S3a: isTail=true — приоритетное окно moov-хвоста (см. launchMoovTailWindow).
 async function launchFetchWindow(
   messageId: number,
   winStart: number,
   winEnd: number,
   client: any,
   parts: StreamPart[],
-  totalSize: number
+  totalSize: number,
+  isTail: boolean = false
 ): Promise<void> {
   const abortController = new AbortController()
   const record: ActiveFetch = {
@@ -413,6 +429,7 @@ async function launchFetchWindow(
     promise: Promise.resolve(), // placeholder
     progress: 0,
     abortController,
+    isTail,
   }
 
   // Add to active fetches before starting
@@ -436,17 +453,23 @@ async function launchFetchWindow(
 
     while (pos <= winEnd && !abortController.signal.aborted) {
       // Cap check: evict behind before writing new data
-      const currentTotal = rangeCache.getTotalSize(messageId)
-      if (currentTotal >= RANGE_CACHE_MAX_BYTES) {
-        const evicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
-        if (evicted === 0) {
-          // Could not evict — wait briefly and retry once
-          await new Promise(r => setTimeout(r, 1000))
-          if (abortController.signal.aborted) break
-          const retryEvicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
-          if (retryEvicted === 0) {
-            // Still no space — skip caching this chunk but continue fetching
-            slog(`fetch cap full id=${messageId} pos=${pos} — skipping cache write`)
+      // T-20260929-004 S3a: хвостовое окно НЕ вытесняет «за спиной» — его pos
+      // в конце файла обрушил бы головной кэш, который читает клиент (у файлов
+      // >256MB evictBehind(pos=хвост) удалял бы всё ниже хвост-16MB). Кэш в
+      // пределах лимита держат set()-LRU (evictLRU/enforceGlobalCap).
+      if (!isTail) {
+        const currentTotal = rangeCache.getTotalSize(messageId)
+        if (currentTotal >= RANGE_CACHE_MAX_BYTES) {
+          const evicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
+          if (evicted === 0) {
+            // Could not evict — wait briefly and retry once
+            await new Promise(r => setTimeout(r, 1000))
+            if (abortController.signal.aborted) break
+            const retryEvicted = rangeCache.evictBehind(messageId, pos, 16 * 1024 * 1024)
+            if (retryEvicted === 0) {
+              // Still no space — skip caching this chunk but continue fetching
+              slog(`fetch cap full id=${messageId} pos=${pos} — skipping cache write`)
+            }
           }
         }
       }
@@ -516,8 +539,8 @@ async function launchFetchWindow(
       pos = partRangeEnd + 1
     }
 
-    if (!abortController.signal.aborted) {
-      slog(`fetch done id=${messageId} bytes=${pos - winStart}`)
+      if (!abortController.signal.aborted) {
+      slog(`fetch done id=${messageId} bytes=${pos - winStart} written=${written}`)
       // Self-check: verify cache coverage matches what we wrote
       const expectedEnd = winStart + written - 1
       if (written > 0) {
@@ -531,9 +554,67 @@ async function launchFetchWindow(
   })()
 
   // Cleanup on completion/failure
-  record.promise.finally(() => {
-    removeActiveFetch(messageId, record)
-  })
+  // T-20260929-004 S3a: окно (в т.ч. moov-хвост) живёт вне запроса — никто не
+  // await'ит record.promise, поэтому отказ воркера логируется здесь, а не уходит
+  // в unhandledRejection. removeActiveFetch выполняется в обоих случаях.
+  record.promise
+    .catch((err: any) => slog(`fetch window fail id=${messageId} ${winStart}-${winEnd} err=${err?.message}`))
+    .finally(() => {
+      removeActiveFetch(messageId, record)
+    })
+}
+
+// ===== T-20260929-004 S3a: приоритетное окно moov-хвоста =====
+// Chromium для MP4/MOV с moov в конце шлёт ВТОРОЙ Range-запрос в хвост файла.
+// Если хвост не качается параллельно, этот запрос ловит либо активное окно с
+// головы, либо пустой кэш и ждёт, пока read-ahead дойдёт до конца по строгому
+// порядку 8MB-сегментов (десятки секунд → первый кадр не стартует).
+// Решение: на ПЕРВОМ Range-запросе к messageId запускаем отдельное окно хвоста
+// [max(FETCH_WINDOW, total-4MB) .. EOF]. Оно стартует ДО окон read-ahead и
+// качается независимо от порядка сегментов с головы; окно ≤4MB → ровно один
+// 8MB-сегмент seg-fetch, т.е. +1 параллельный download к Telegram. Окно живёт
+// в общем activeFetches (учитывается лимитом 3) и помечено isTail — чтобы
+// головной read-ahead обрезал своё окно по его началу (см. winEnd ниже).
+const FETCH_WINDOW = 16 * 1024 * 1024 // 16MB — окно read-ahead от позиции чтения
+const TAIL_PREFETCH_BYTES = 4 * 1024 * 1024 // последние 4MB — moov-индекс всегда в хвосте
+const tailPrefetchStarted = new Set<number>() // messageId -> хвостовое окно уже запускали
+
+// Активное хвостовое окно, начинающееся строго ПОЗЖЕ winStart и не дальше winEnd
+// (т.е. попадающее в окно, которое собирается запустить головной read-ahead).
+function findTailFetchAhead(messageId: number, winStart: number, winEnd: number): ActiveFetch | undefined {
+  const list = activeFetches.get(messageId)
+  if (!list) return undefined
+  return list.find(f => f.isTail && f.start > winStart && f.start <= winEnd)
+}
+
+// Запускает (не чаще одного раза на messageId) приоритетное окно хвоста.
+// Вызывается из /stream-хендлера до старта окон read-ahead.
+function launchMoovTailWindow(messageId: number, totalSize: number, client: any, parts: StreamPart[]): void {
+  if (tailPrefetchStarted.has(messageId)) return
+
+  // Начало хвоста не раньше конца первого окна с головы — иначе байты
+  // скачивались бы дважды (головное окно [0, FETCH_WINDOW) и так их возьмёт).
+  const tailStart = Math.max(FETCH_WINDOW, totalSize - TAIL_PREFETCH_BYTES)
+  if (tailStart >= totalSize) {
+    // файл ≤ 16MB — его целиком покрывает первое окно read-ahead
+    tailPrefetchStarted.add(messageId)
+    return
+  }
+
+  // Уже в кэше / уже качается — окно не нужно
+  const cached = rangeCache.getPrefix(messageId, tailStart, totalSize - 1)
+  if ((cached && cached.coveredEnd >= totalSize - 1) || findActiveFetch(messageId, tailStart)) {
+    tailPrefetchStarted.add(messageId)
+    return
+  }
+
+  // Нет свободного слота (лимит 3 активных окна на файл) — не занимаем чужой:
+  // Set НЕ помечаем, попробуем на следующем Range-запросе
+  if (countActiveFetches(messageId) >= 3) return
+  tailPrefetchStarted.add(messageId)
+
+  slog(`moov-tail prefetch id=${messageId} pos=${tailStart} winEnd=${totalSize - 1}`)
+  void launchFetchWindow(messageId, tailStart, totalSize - 1, client, parts, totalSize, true)
 }
 
 // Helper: write buffer with backpressure handling (drain/close/error race)
@@ -979,10 +1060,17 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
           // T-20260928-004 S3: read-ahead formula (below) kept, but FW stays 16MB —
           // FW=32MB covered the whole file for files <32MB, which blocked the separate
           // moov-tail window (play waited for the full fetch: TTFF 1.1s → 4.2s, log evidence).
+          // T-20260929-004 S3a: «separate moov-tail window» теперь реально существует —
+          // launchMoovTailWindow() ниже запускает окно хвоста до старта read-ahead.
+
+          // S3a: первый Range-запрос к messageId → приоритетное окно хвоста (moov).
+          // Запускается ДО окон read-ahead и идёт параллельно с ними, поэтому
+          // второй Range-запрос Chromium в хвост либо cache-HIT, либо дожидается
+          // уже идущего окна, а не строгого порядка 8MB-сегментов с головы.
+          if (hasRange) launchMoovTailWindow(messageId, totalSize, client, parts)
 
           let pos = reqStart
-          const FETCH_WINDOW = 16 * 1024 * 1024 // 16MB
-          const MAX_WAIT_MS = 30000 // 30s total wait for data at position
+          const MAX_WAIT_MS = 8000 // 8s (was 30s) — общий бюджет ожидания данных на позиции
           const POLL_INTERVAL = 100 // ms
           let waitStart = Date.now()
 
@@ -1054,7 +1142,13 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
             // даже если клиент запросил меньший reqEnd (bytes=X-Y с маленьким Y).
             // Если клиент запросил хвост (reqEnd ≥ pos+FETCH_WINDOW-1) — окно прежнее
             // (как раньше min(pos+FW-1, reqEnd)); не дальше EOF.
-            const winEnd = Math.min(pos + FETCH_WINDOW - 1, totalSize - 1)
+            let winEnd = Math.min(pos + FETCH_WINDOW - 1, totalSize - 1)
+            // S3a: не наезжать на активное moov-хвостовое окно — иначе головной
+            // read-ahead скачал бы его байты второй раз. Обрезка не может сделать
+            // окно пустым: tail.start > winStart ⇒ winEnd = tail.start-1 ≥ winStart
+            // (случай pos внутри хвоста отсекается веткой findActiveFetch выше).
+            const tailAhead = findTailFetchAhead(messageId, winStart, winEnd)
+            if (tailAhead) winEnd = tailAhead.start - 1
             await launchFetchWindow(messageId, winStart, winEnd, client, parts, totalSize)
 
             // Wait for data to appear at pos (up to MAX_WAIT_MS total)
@@ -1070,7 +1164,17 @@ export function startVideoStreamServer(telegramService: TelegramService, port: n
             }
 
             if (!dataArrived) {
-              slog(`fetch wait timeout id=${messageId} pos=${pos} — no data after ${MAX_WAIT_MS}ms`)
+              slog(`fetch wait timeout id=${messageId} pos=${pos} — no data after ${MAX_WAIT_MS}ms (sent=${bytesSent}/${chunkSize}) entries=[${rangeCache.snapshot(messageId)}] total=${rangeCache.getTotalSize(messageId)} global=${(rangeCache as any).globalTotal ?? '?'}`)
+              // S3b: заголовки (206 + Content-Length) уже ушли (flushHeaders выше).
+              // Тело НЕ началось (0 байтов) → рвём соединение так же, как catch
+              // ниже (rework minor#4, res.destroy): клиент сразу получает ошибку
+              // докачки и не висит, ожидая Content-Length при пустом теле.
+              // Частично отданные байты закрываем штатным res.end() (как раньше) —
+              // FIN доотправляет то, что уже записано, RST же мог бы их потерять.
+              if (bytesSent === 0 && !res.destroyed && !res.writableEnded) {
+                try { res.destroy() } catch {}
+                return
+              }
               break
             }
             waitStart = Date.now()
