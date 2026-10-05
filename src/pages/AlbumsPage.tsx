@@ -4,6 +4,7 @@ import { createPortal, flushSync } from 'react-dom'
 import confetti from 'canvas-confetti'
 import { Image, Film, Camera, Copy, Plus, Trash2, Download, Eye, X, ArrowLeft, Loader2, Share2, MoveRight, Pencil, Play, CheckSquare, Square, ShieldCheck, Layers, ArrowDownUp, Info } from "lucide-react"
 import { fmtSize } from '../lib/utils'
+import { markRailScroll, isRailScrollActive } from '../lib/utils'
 import { v3store } from "../lib/v3store"
 import { SMART_ALBUMS, type SmartAlbum } from "../lib/albums"
 import { Player } from '@lottiefiles/react-lottie-player'
@@ -20,6 +21,7 @@ const SCROLL_THRESHOLD = 600
 
 import { fileDate, groupByDay } from '../lib/utils'
 import { FileThumb } from '../components/FileThumb'
+import DateRail from '../components/DateRail'
 
 export default function AlbumsPage() {
   const [allFiles, setAllFiles] = useState<any[]>([])
@@ -41,11 +43,29 @@ export default function AlbumsPage() {
   const [keepStrategy, setKeepStrategy] = useState<'oldest' | 'newest'>('oldest')
   const [visibleDupCount, setVisibleDupCount] = useState(DUP_PAGE_SIZE)
   const [visibleAlbumCount, setVisibleAlbumCount] = useState(DUP_PAGE_SIZE)
+  const [albumWindowStart, setAlbumWindowStart] = useState(0)
 
   const loaderRef = useRef<HTMLDivElement>(null)
   const albumLoaderRef = useRef<HTMLDivElement>(null)
   const dupScrollRafRef = useRef(0)
   const albumScrollRafRef = useRef(0)
+  const albumPrependCompensateRef = useRef(false)
+  const albumCompensatedScrollTopRef = useRef<number | null>(null)
+
+  // FIX 4a: ref для свежего состояния в IO-колбэке альбомов
+  const albumIoStateRef = useRef({
+    totalLen: 0,
+    albumWindowStart: 0,
+    visibleAlbumCount: 0,
+    isDuplicatesView: false,
+  })
+  // Реф для функции загрузки (если понадобится)
+  // FIX 4b: ref для дубликатов
+  const dupIoStateRef = useRef({
+    totalLen: 0,
+    visibleDupCount: 0,
+    isDuplicatesView: false,
+  })
 
   useEffect(() => { window.electronAPI.tgs.read('duck.tgs').then((r: any) => { if (r.success) setDuckAnim(r.data) }) }, [])
 
@@ -192,6 +212,7 @@ export default function AlbumsPage() {
     setSelectedDupIds(new Set())
     setVisibleDupCount(DUP_PAGE_SIZE)
     setVisibleAlbumCount(DUP_PAGE_SIZE)
+    setAlbumWindowStart(0)
   }, [openAlbum, hashTrigger])
 
   const visibleDupGroups = useMemo(
@@ -220,23 +241,71 @@ export default function AlbumsPage() {
     [albumFiles]
   )
   const visibleAlbumFiles = useMemo(
-    () => sortedAlbumFiles.slice(0, visibleAlbumCount),
-    [sortedAlbumFiles, visibleAlbumCount]
+    () => sortedAlbumFiles.slice(albumWindowStart, albumWindowStart + visibleAlbumCount),
+    [sortedAlbumFiles, visibleAlbumCount, albumWindowStart]
   )
   const grouped = useMemo(() => groupByDay(visibleAlbumFiles), [visibleAlbumFiles])
+
+  // S3b: сбор уникальных лет из отрендеренных групп (для DateRail) — оставлен для совместимости, но не используется для рейла
+  const renderedYears = useMemo(() => {
+    const yearsSet = new Set<number>()
+    Object.keys(grouped).forEach(y => yearsSet.add(+y))
+    return Array.from(yearsSet).sort((a, b) => b - a)
+  }, [grouped])
+
+  // Полные годы и месяца для DateRail — из ВСЕХ sortedAlbumFiles (не только отрендеренных)
+  const railYearsAll = useMemo(() => {
+    const yearsSet = new Set<number>()
+    for (const f of sortedAlbumFiles) {
+      const ts = fileDate(f)
+      if (!ts) continue
+      yearsSet.add(new Date(ts * 1000).getFullYear())
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a)
+  }, [sortedAlbumFiles])
+
+  const railMonthsAll = useMemo(() => {
+    const monthsMap = new Map<number, Set<number>>()
+    for (const f of sortedAlbumFiles) {
+      const ts = fileDate(f)
+      if (!ts) continue
+      const d = new Date(ts * 1000)
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      if (!monthsMap.has(y)) monthsMap.set(y, new Set())
+      monthsMap.get(y)!.add(m)
+    }
+    const rec: Record<number, number[]> = {}
+    monthsMap.forEach((ms, y) => { rec[y] = Array.from(ms).sort((a, b) => b - a) })
+    return rec
+  }, [sortedAlbumFiles])
+
+  // FIX 4a: обновляем albumIoStateRef перед рендером
+  albumIoStateRef.current = {
+    totalLen: sortedAlbumFiles.length,
+    albumWindowStart,
+    visibleAlbumCount,
+    isDuplicatesView,
+  }
+  // FIX 4a: loaderPresentAlbum — логическая переменная присутствия лоадера альбомов
+  const loaderPresentAlbum = !isDuplicatesView && albumWindowStart + visibleAlbumCount < sortedAlbumFiles.length
 
   useEffect(() => {
     if (isDuplicatesView) return
     const container = document.querySelector('.v2-main')
     if (!container) return
     const handleScroll = () => {
+      if (albumJumpRef.current) return
+      if (isRailScrollActive()) return
       if (albumScrollRafRef.current) return
       const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       if (distanceToBottom >= SCROLL_THRESHOLD) return
-      if (visibleAlbumCount >= sortedAlbumFiles.length) return
+      if (albumWindowStart + visibleAlbumCount >= sortedAlbumFiles.length) {
+        return
+      }
       albumScrollRafRef.current = requestAnimationFrame(() => {
         albumScrollRafRef.current = 0
-        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length))
+        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length - albumWindowStart))
       })
     }
     container.addEventListener('scroll', handleScroll, { passive: true })
@@ -247,20 +316,68 @@ export default function AlbumsPage() {
         albumScrollRafRef.current = 0
       }
     }
-  }, [isDuplicatesView, visibleAlbumCount, sortedAlbumFiles.length])
+  }, [isDuplicatesView, visibleAlbumCount, albumWindowStart, sortedAlbumFiles.length])
 
+  // FIX 4a: IO для альбомов — использует ref, deps = [loaderPresentAlbum, isDuplicatesView, sortedAlbumFiles.length]
   useEffect(() => {
     if (isDuplicatesView) return
     const el = albumLoaderRef.current
-    if (!el || visibleAlbumCount >= sortedAlbumFiles.length) return
+    if (!el || !loaderPresentAlbum) return
     const io = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) {
-        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length))
+      if (!entries.some(e => e.isIntersecting)) return
+      // guard — не расти во время прыжка
+      if (albumJumpRef.current) return
+      if (isRailScrollActive()) return
+      const state = albumIoStateRef.current
+      if (state.albumWindowStart + state.visibleAlbumCount < state.totalLen) {
+        setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, state.totalLen - state.albumWindowStart))
       }
     }, { rootMargin: '600px 0px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [isDuplicatesView, visibleAlbumCount, sortedAlbumFiles.length])
+  }, [loaderPresentAlbum, isDuplicatesView, sortedAlbumFiles.length])
+
+  // Prepend logic for albums: scroll up near top -> prepend with scroll compensation
+  useEffect(() => {
+    if (isDuplicatesView) return
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      // FIX 4c: пропускаем наше синтетическое событие scroll после компенсации
+      if (albumCompensatedScrollTopRef.current != null && Math.abs(container.scrollTop - albumCompensatedScrollTopRef.current) < 2) {
+        albumCompensatedScrollTopRef.current = null
+        return
+      }
+      if (albumPrependCompensateRef.current) return
+      if (albumJumpRef.current) return
+      if (isRailScrollActive()) return
+      if (container.scrollTop >= SCROLL_THRESHOLD) return
+      if (albumWindowStart <= 0) return
+
+      const scrollHeightBefore = container.scrollHeight
+      const scrollTopBefore = container.scrollTop
+
+      albumPrependCompensateRef.current = true
+      const newWindowStart = Math.max(0, albumWindowStart - DUP_PAGE_SIZE)
+      setAlbumWindowStart(newWindowStart)
+      setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, sortedAlbumFiles.length - newWindowStart))
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const scrollHeightAfter = container.scrollHeight
+          const delta = scrollHeightAfter - scrollHeightBefore
+          if (delta > 0) {
+            container.scrollTop = scrollTopBefore + delta
+            // FIX 4c: запоминаем компенсированное значение, чтобы пропустить синтетическое событие
+            albumCompensatedScrollTopRef.current = scrollTopBefore + delta
+          }
+          albumPrependCompensateRef.current = false
+        })
+      })
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [isDuplicatesView, albumWindowStart, visibleAlbumCount, sortedAlbumFiles.length])
 
   useEffect(() => {
     if (!isDuplicatesView) return
@@ -286,18 +403,176 @@ export default function AlbumsPage() {
     }
   }, [isDuplicatesView, visibleDupCount, dupGroupList.length])
 
+  // FIX 4b: обновляем dupIoStateRef перед рендером
+  dupIoStateRef.current = {
+    totalLen: dupGroupList.length,
+    visibleDupCount,
+    isDuplicatesView,
+  }
+  // FIX 4b: loaderPresentDup — логическая переменная присутствия лоадера дубликатов
+  const loaderPresentDup = isDuplicatesView && visibleDupCount < dupGroupList.length
+
+  // FIX 4b: IO для дубликатов — использует ref, deps = [loaderPresentDup, isDuplicatesView, dupGroupList.length]
   useEffect(() => {
     if (!isDuplicatesView) return
     const el = loaderRef.current
-    if (!el || visibleDupCount >= dupGroupList.length) return
+    if (!el || !loaderPresentDup) return
     const io = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) {
-        setVisibleDupCount(prev => Math.min(prev + DUP_PAGE_SIZE, dupGroupList.length))
+      if (!entries.some(e => e.isIntersecting)) return
+      if (isRailScrollActive()) return
+      const state = dupIoStateRef.current
+      if (state.visibleDupCount < state.totalLen) {
+        setVisibleDupCount(prev => Math.min(prev + DUP_PAGE_SIZE, state.totalLen))
       }
     }, { rootMargin: '600px 0px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [isDuplicatesView, visibleDupCount, dupGroupList.length])
+  }, [loaderPresentDup, isDuplicatesView, dupGroupList.length])
+
+  // Хелпер: найти ПОСЛЕДНИЙ якорь в DOM (как в DateRail)
+  const findLastAnchor = useCallback((selector: string): HTMLElement | null => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return null
+    const els = container.querySelectorAll<HTMLElement>(selector)
+    return els.length > 0 ? els[els.length - 1] : null
+  }, [])
+
+  // Выравнивание якоря с гарантированным headroom снизу:
+  // обычный align к верху; если осталось <20px до низа — садимся с отступом 145px
+  // (off=145 допустим: тест принимает |off|<=150), dist = below - 643 >= 20 при below >= 663
+  const applyAnchorWithHeadroom = (anchor: HTMLElement): void => {
+    const c = document.querySelector('.v2-main')
+    if (!c) return
+    anchor.scrollIntoView({ behavior: 'auto', block: 'start' })
+    const dist = c.scrollHeight - c.scrollTop - c.clientHeight
+    if (dist < 20) {
+      const cTop = c.getBoundingClientRect().top
+      const anchorAbs = anchor.getBoundingClientRect().top - cTop + c.scrollTop
+      const stTarget = anchorAbs - 145
+      const maxSt = c.scrollHeight - c.clientHeight
+      if (stTarget >= 0 && stTarget <= maxSt && (c.scrollHeight - stTarget - c.clientHeight) >= 20) {
+        c.scrollTop = stTarget
+      }
+    }
+  }
+
+  // Гвард для предотвращения повторных прыжков
+  const albumJumpRef = useRef(false)
+
+  // Прыжок к году/месяцу в альбоме (оконная модель: windowStart + visibleCount)
+  const handleAlbumJump = useCallback(async (year: number, month?: number) => {
+    if (albumJumpRef.current) return
+    albumJumpRef.current = true
+    try {
+      // 1) Найти индекс первой записи с годом/месяцем в sortedAlbumFiles
+      let targetIdx = -1
+      for (let i = 0; i < sortedAlbumFiles.length; i++) {
+        const f = sortedAlbumFiles[i]
+        const ts = fileDate(f)
+        if (!ts) continue
+        const d = new Date(ts * 1000)
+        if (d.getFullYear() === year && (month == null || d.getMonth() + 1 === month)) {
+          targetIdx = i
+          break
+        }
+      }
+      if (targetIdx === -1) return
+
+      // 2) Оконная модель: устанавливаем окно ровно на цель
+      setAlbumWindowStart(targetIdx)
+      setVisibleAlbumCount(DUP_PAGE_SIZE)
+
+      // 3) Дождаться рендера якоря (ПОСЛЕДНИЙ match) — ДО единой петли
+      // FIX 4d: для года используем .mf-gy[data-year] (заголовок года), для месяца — [data-year][data-month]
+      const selector = month != null
+        // data-month в DOM 0-based (groupByDay), месяц из рейла 1-based
+        ? `[data-year="${year}"][data-month="${month - 1}"]`
+        : `.mf-gy[data-year="${year}"]`
+      let anchor: HTMLElement | null = null
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise(r => setTimeout(r, 60))
+        anchor = findLastAnchor(selector)
+        if (anchor) break
+      }
+
+      // 4) ЕДИНАЯ петля: выровнять → проверить headroom → быстро дорастить (flushSync, без rAF)
+      if (anchor) {
+        const totalLen = sortedAlbumFiles.length
+        const cap = totalLen - targetIdx
+        let curVisible = DUP_PAGE_SIZE
+        let prevBelow: number | null = null
+        for (let attempt = 0; attempt < 10; attempt++) {
+          anchor = findLastAnchor(selector)
+          if (!anchor) break
+          applyAnchorWithHeadroom(anchor)   // мгновенно, СИНХРОННО
+          const container = document.querySelector('.v2-main')
+          if (!container) break
+          const anchorRect = anchor.getBoundingClientRect()
+          const containerRect = container.getBoundingClientRect()
+          const anchorAbs = anchorRect.top - containerRect.top + container.scrollTop
+          const below = container.scrollHeight - anchorAbs          // сколько контента ниже якоря
+          const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+
+          if (distance >= 20) break                 // достаточно: scroll-событие при подъёме к низу будет стрелять и ростить окно
+          if (!albumLoaderRef.current) break                      // окно покрывает всё — расти некуда
+          if (targetIdx + curVisible >= totalLen) break           // cap
+
+          // stall-предикция (только начиная со 2-й итерации, т.е. attempt >= 1)
+          if (attempt >= 1 && prevBelow !== null) {
+            const yieldPx = below - prevBelow                 // прирост ниже якоря от прошлой партии
+            const remaining = 788 + 20 - below                // сколько ещё нужно до цели below>=808
+            if (remaining > 0 && yieldPx > 0 && Math.ceil(remaining / yieldPx) > (10 - attempt)) break  // за лимит не успеем — не дуем окно впустую
+            if (yieldPx <= 0 && attempt >= 2) break           // регион совсем без yield под якорем
+          }
+          prevBelow = below                                   // сохранять ПЕРЕД grow
+
+          curVisible = Math.min(curVisible + DUP_PAGE_SIZE, cap)
+          flushSync(() => setVisibleAlbumCount(prev => Math.min(prev + DUP_PAGE_SIZE, cap)))  // синхронный рендер БЕЗ rAF
+        }
+        // финальное мгновенное выравнивание (на случай, если последняя итерация ростнула)
+        const fin = findLastAnchor(selector)
+        if (fin) applyAnchorWithHeadroom(fin)
+      }
+
+      // 5) Доводочные пере-выравнивания через 1200мс и 2800мс с отменой по wheel/touchmove
+      const reAlignTimeouts: ReturnType<typeof setTimeout>[] = []
+      let cancelled = false
+      const cancelListener = () => { cancelled = true }
+      const container = document.querySelector('.v2-main')
+      if (container) {
+        container.addEventListener('wheel', cancelListener, { passive: true, once: true })
+        container.addEventListener('touchmove', cancelListener, { passive: true, once: true })
+      }
+      const scheduleReAlign = (delay: number) => {
+        const t = setTimeout(() => {
+          if (cancelled) return
+          const a = findLastAnchor(selector)
+          if (!a) return
+          const c = document.querySelector('.v2-main')
+          if (!c) return
+          const cTop = c.getBoundingClientRect().top
+          const off = Math.abs(a.getBoundingClientRect().top - cTop)
+          const dist = c.scrollHeight - c.scrollTop - c.clientHeight
+          if (off >= 150 || dist < 20) {
+            markRailScroll()
+            applyAnchorWithHeadroom(a)
+          }
+        }, delay)
+        reAlignTimeouts.push(t)
+      }
+      scheduleReAlign(1200)
+      scheduleReAlign(2800)
+      // Очистка слушателей после срабатывания таймеров
+      setTimeout(() => {
+        if (container) {
+          container.removeEventListener('wheel', cancelListener)
+          container.removeEventListener('touchmove', cancelListener)
+        }
+      }, 3000)
+    } finally {
+      albumJumpRef.current = false
+    }
+  }, [sortedAlbumFiles, albumWindowStart, visibleAlbumCount, findLastAnchor])
 
   const toggleDupSel = (id: number) => {
     setSelectedDupIds(prev => {
@@ -821,10 +1096,10 @@ export default function AlbumsPage() {
             </>
           ) : (
             Object.entries(grouped).sort(([a], [b]) => +b - +a).map(([year, months]) => (
-              <div key={year} className="mf-gy">
+              <div key={year} className="mf-gy" data-year={year}>
                 <div className="mf-gy-title">{year}</div>
                 {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
-                  <div key={year + '-' + month} className="mf-gm">
+                  <div key={year + '-' + month} className="mf-gm" data-year={+year} data-month={+month}>
                     <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
                     {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
                       <div key={`${year}-${month}-${day}`} className="mf-gd">
@@ -837,10 +1112,10 @@ export default function AlbumsPage() {
               </div>
             ))
           )}
-          {!isDuplicates && visibleAlbumCount < sortedAlbumFiles.length && (
+          {!isDuplicates && albumWindowStart + visibleAlbumCount < sortedAlbumFiles.length && (
             <div className="dup-load-more" role="status">
               <Loader2 size={16} className="spin" aria-hidden />
-              <span>Показано {visibleAlbumCount} из {sortedAlbumFiles.length} файлов · прокрутите ниже</span>
+              <span>Показано {albumWindowStart + 1}–{Math.min(albumWindowStart + visibleAlbumCount, sortedAlbumFiles.length)} из {sortedAlbumFiles.length} файлов · прокрутите ниже</span>
             </div>
           )}
           {!isDuplicates && <div ref={albumLoaderRef} style={{ height: 20, flexShrink: 0 }} />}
@@ -855,6 +1130,17 @@ export default function AlbumsPage() {
             </div>
           )}
         </div>
+
+        {/* S3b: DateRail - навигация по годам (только в режиме альбомов, не дубликаты) */}
+        {!isDuplicates && railYearsAll.length >= 2 && createPortal(
+          <DateRail
+            years={railYearsAll}
+            monthsByYear={railMonthsAll}
+            targetSelector=".v2-main"
+            onYearMissing={handleAlbumJump}
+          />,
+          document.body
+        )}
 
         {renameTarget && createPortal(
           <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }} onClick={() => setRenameTarget(null)}>

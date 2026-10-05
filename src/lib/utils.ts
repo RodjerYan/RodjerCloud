@@ -1,3 +1,5 @@
+import { parseDateFromName } from './dateParser'
+
 export function fmtSize(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B'
   const k = 1024
@@ -23,10 +25,16 @@ export function fileDate(f: any): number {
   return f.uploadedAt || f.originalDate || 0
 }
 
+export function effectiveDate(f: any): number {
+  return parseDateFromName(f.fileName || '') || f.originalDate || f.uploadedAt || 0
+}
+
 export function groupByDay(items: any[]) {
   const years: Record<number, Record<number, Record<number, any[]>>> = {}
   items.forEach(f => {
-    const d = new Date(fileDate(f) * 1000)
+    const ts = effectiveDate(f)
+    if (!ts) return
+    const d = new Date(ts * 1000)
     if (!isFinite(d.getTime())) return
     const y = d.getFullYear(), m = d.getMonth(), day = d.getDate()
     if (!years[y]) years[y] = {}
@@ -49,3 +57,37 @@ export function resolutionLabel(height?: number): string | null {
   if (height >= 720) return '720p'
   return '480p'
 }
+
+/** Counter of active programmatic scrolls (jumps). Incremented by markProgrammaticScroll, decremented by clearProgrammaticScroll. */
+let _programmaticScrollCount = 0
+
+/** Counter of active rail-initiated scrolls. Incremented by markRailScroll, decremented by clearRailScroll. */
+let _railScrollCount = 0
+
+/** Increment programmatic scroll counter. Call before each programmatic scroll (scrollIntoView, scrollTop set). */
+export const markProgrammaticScroll = (): void => {
+  _programmaticScrollCount++
+}
+
+/** Decrement programmatic scroll counter. Call after programmatic scroll completes (in rAF/finally). */
+export const clearProgrammaticScroll = (): void => {
+  _programmaticScrollCount = Math.max(0, _programmaticScrollCount - 1)
+}
+
+/** Check if any programmatic scroll is in progress. */
+export const isProgrammaticScroll = (): boolean => _programmaticScrollCount > 0
+
+/** Increment rail scroll counter (also increments programmatic counter). Call before each rail-initiated programmatic scroll. */
+export const markRailScroll = (): void => {
+  _railScrollCount++
+  markProgrammaticScroll()
+}
+
+/** Decrement rail scroll counter (also decrements programmatic counter). Call after rail-initiated programmatic scroll completes. */
+export const clearRailScroll = (): void => {
+  _railScrollCount = Math.max(0, _railScrollCount - 1)
+  clearProgrammaticScroll()
+}
+
+/** Check if any rail-initiated scroll is in progress. Used to gate prepend/bottom-growth during jumps. */
+export const isRailScrollActive = (): boolean => _railScrollCount > 0

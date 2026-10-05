@@ -9,11 +9,12 @@ import { SMART_ALBUMS } from '../lib/albums'
 import { Player } from '@lottiefiles/react-lottie-player'
 import { appConfirm, appAlert } from '../lib/dialogs'
 import { toast } from '../lib/toast'
-import { fmtSize, typeOf as _typeOf, fileDate, groupByDay } from '../lib/utils'
+import { fmtSize, typeOf as _typeOf, fileDate, groupByDay, effectiveDate, markRailScroll, isRailScrollActive, markProgrammaticScroll, clearProgrammaticScroll, clearRailScroll } from '../lib/utils'
 const CHUNK_SIZE = Math.floor(1.95 * 1024 * 1024 * 1024)
 import { FileThumb } from '../components/FileThumb'
 import { TiltCard } from '../components/TiltCard'
 import { BulkProgressModal } from '../components/BulkProgressModal'
+import DateRail, { shouldCancelAlignByKey } from '../components/DateRail'
 import { safeViewTransition } from '../lib/viewTransition'
 import '../styles/duplicate-modal.css'
 
@@ -38,6 +39,18 @@ function SafeImg({ src, fallback, style, loading }: { src?: string | null; fallb
 const FILES_PAGE_SIZE = 30
 const SCROLL_THRESHOLD = 600
 const RECENT_WINDOW_SEC = 6 * 3600
+
+// T-20261002-018 RW1: серия re-align-тиков handleYearMissing после прыжка.
+// Раньше тики молча умирали от baseline-гарда/scroll-отмены при штатных изменениях
+// контента (рост sh, scroll-anchoring, компенсация prepend) — цель навсегда
+// оставалась не у верха (y=433 в серии кликов). Теперь тики переживают контентные
+// сдвиги (отмена — wheel/touchmove + RW2: pointerdown/mousedown в ленте и
+// навигационный keydown, см. handleYearMissing), а после остановки серии при |y|>20
+// идёт ограниченный re-kick: конечное число серий + временной кап, без петель.
+const RE_ALIGN_DELAYS = [1200, 1800, 2400, 3000, 4500]
+const RE_ALIGN_REKICK_DELAYS = [800, 1600, 2800, 4400]
+const RE_ALIGN_REKICK_MAX = 2
+const RE_ALIGN_SESSION_MAX_MS = 20000
 
 const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
@@ -66,6 +79,17 @@ const matchVirtualFolder = (fileName: string, folderId: string) => {
   return false
 }
 
+// T-20261002-018 ST4: единый порядок drill-файлов (Изображения/Видео/Аудио/Недавние) —
+// effectiveDate desc, tie-break messageId desc. IPC getFilesByCategory отдаёт порядок
+// кэша/БД (не по дате фото), поэтому drillFiles сортируется ОДИН РАЗ при установке:
+// от этого одного массива зависят и лента (galleryFiles → groupByDay slice), и рейл
+// (railYears/railMonthsByYear), и якоря handleYearMissing (targetIdx = тот же порядок).
+const byEffectiveDateDesc = (a: any, b: any) => {
+  const ea = effectiveDate(a), eb = effectiveDate(b)
+  if (ea !== eb) return eb - ea
+  return (b.messageId || 0) - (a.messageId || 0)
+}
+
 export default function MyFilesPage() {
   const navigate = useNavigate()
   const [favs, setFavs] = useState<any[]>([])
@@ -73,6 +97,7 @@ export default function MyFilesPage() {
   const [files, setFiles] = useState<any[]>([])
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const [visibleCount, setVisibleCount] = useState(FILES_PAGE_SIZE)
+  const [windowStart, setWindowStart] = useState(0)
   const locallyDeletedIds = useRef<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -119,6 +144,9 @@ export default function MyFilesPage() {
   useEffect(() => { folderDrillRef.current = folderDrill }, [folderDrill])
   const [folderFiles, setFolderFiles] = useState<any[]>([])
   const folderNextOffsetIdRef = useRef<number | null>(null)
+  // Полный список файлов для __type_ папок (для прямого прыжка и railMonthsByYear)
+  const folderFullRef = useRef<any[]>([])
+  const folderFullLoadedRef = useRef<Set<string>>(new Set())
   const [folderTotal, setFolderTotal] = useState(0)
   const [folderLoading, setFolderLoading] = useState(false)
   const [folderLoadingMore, setFolderLoadingMore] = useState(false)
@@ -152,6 +180,24 @@ export default function MyFilesPage() {
   const elementRectsRef = useRef<Map<Element, DOMRect>>(new Map())
   const rafRef = useRef<number>(0)
   const filesChangedDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prependCompensateRef = useRef(false)
+  const compensatedScrollTopRef = useRef<number | null>(null)
+
+  // FIX 1: ref для свежего состояния в IO-колбэке (не пересоздаёт observer при изменении visibleCount/windowStart)
+  const ioStateRef = useRef({
+    totalLen: 0,
+    windowStart: 0,
+    visibleCount: 0,
+    folderDrill: '' as string,
+    debouncedQuery: '',
+    folderNextOffsetId: null as number | null,
+    nextOffsetId: null as number | null,
+    folderLoadingMore: false,
+    loadingMore: false,
+  })
+  // Рефы для функций загрузки (инициализируем null, заполним ниже в теле компонента после объявления функций)
+  const loadMoreRef = useRef<typeof loadMore | null>(null)
+  const loadMoreFolderRef = useRef<typeof loadMoreFolderFiles | null>(null)
 
   useEffect(() => { selectedRef.current = selected }, [selected])
 
@@ -268,6 +314,7 @@ export default function MyFilesPage() {
 
   useEffect(() => {
     setVisibleCount(FILES_PAGE_SIZE)
+    setWindowStart(0)
     setSearchQuery('')
     setDebouncedQuery('')
     setSearchResults([])
@@ -393,7 +440,7 @@ export default function MyFilesPage() {
     if (r.success) { 
       setFolders(r.data.folders || [])
       setFileFolders(r.data.fileFolders || {})
-      if (folderDrill === id) { setFolderDrill(null); setVisibleCount(FILES_PAGE_SIZE) }
+      if (folderDrill === id) { setFolderDrill(null); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }
     } else {
       toast.error('Ошибка удаления папки')
       const revert = () => {
@@ -531,6 +578,9 @@ export default function MyFilesPage() {
 
   const loadFolderFiles = useCallback(async (folderId: string, silent = false) => {
     const requestId = ++folderRequestIdRef.current
+    const isTypeFolder = folderId.startsWith('__type_')
+    // Для __type_ папок грузим полный список сразу (BIG limit) для прямого прыжка и railMonthsByYear
+    const initialLimit = isTypeFolder ? 100000 : FILES_PAGE_SIZE
     if (!silent) {
       setFolderLoading(true)
       // T-20260925-002 S2: silent-обновление НЕ wipe'ит старое содержимое —
@@ -541,12 +591,18 @@ export default function MyFilesPage() {
     }
     folderNextOffsetIdRef.current = null
     try {
-      const r = await window.electronAPI.telegram.listFolderFilesFromCache(folderId, FILES_PAGE_SIZE, 0)
+      const r = await window.electronAPI.telegram.listFolderFilesFromCache(folderId, initialLimit, 0)
       if (requestId !== folderRequestIdRef.current) return
       if (r.success) {
-        setFolderFiles(processRawFiles(r.data || []))
+        const processed = processRawFiles(r.data || [])
+        setFolderFiles(processed)
         folderNextOffsetIdRef.current = r.nextOffsetId ?? null
         setFolderTotal(r.total ?? 0)
+        // Для __type_ папок сохраняем полный список
+        if (isTypeFolder) {
+          folderFullRef.current = processed
+          folderFullLoadedRef.current.add(folderId)
+        }
       }
     } catch {}
     if (requestId === folderRequestIdRef.current) setFolderLoading(false)
@@ -574,6 +630,332 @@ export default function MyFilesPage() {
     folderLoadingMoreRef.current = false
     setFolderLoadingMore(false)
   }, [folderDrill])
+
+  // S5-fix: клик по году/месяцу, которого ещё нет в DOM — ПРЯМОЙ ПРЫЖОК одним IPC
+  const yearJumpRef = useRef(false)
+  // T-20261002-018 RW1: поколение переходов — тики handleYearMissing живут только
+  // в рамках СВОЕГО перехода; новый клик по рейлу (onJumpIntent) или новый прыжок
+  // инкрементируют счётчик и гасят отложенные тики предыдущего, чтобы два механизма
+  // не тянули скролл к разным якорям (раньше их взаимно гасил baseline-гард).
+  const jumpEpochRef = useRef(0)
+
+  // Хелпер: найти ПОСЛЕДНИЙ якорь в DOM (как в DateRail.findYearElement/findMonthElement)
+  const findLastAnchor = useCallback((selector: string): HTMLElement | null => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return null
+    const els = container.querySelectorAll<HTMLElement>(selector)
+    return els.length > 0 ? els[els.length - 1] : null
+  }, [])
+
+  // Компаратор для сортировки (тот же, что в sortedFiles)
+  const fileSortComparator = useCallback((a: any, b: any) => {
+    if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
+    if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0) || (b.messageId - a.messageId)
+    const ea = effectiveDate(a), eb = effectiveDate(b)
+    if (ea !== eb) return eb - ea
+    return (b.messageId || 0) - (a.messageId || 0)
+  }, [sort])
+
+  // Выравнивание якоря с гарантированным headroom снизу:
+  // обычный align к верху; если осталось <20px до низа — садимся с отступом 145px
+  // (off=145 допустим: тест принимает |off|<=150), dist = below - 643 >= 20 при below >= 663
+  const applyAnchorWithHeadroom = (anchor: HTMLElement): void => {
+    const c = document.querySelector('.v2-main')
+    if (!c) return
+    anchor.scrollIntoView({ behavior: 'auto', block: 'start' })
+    const dist = c.scrollHeight - c.scrollTop - c.clientHeight
+    if (dist < 20) {
+      const cTop = c.getBoundingClientRect().top
+      const anchorAbs = anchor.getBoundingClientRect().top - cTop + c.scrollTop
+      const stTarget = anchorAbs - 145
+      const maxSt = c.scrollHeight - c.clientHeight
+      if (stTarget >= 0 && stTarget <= maxSt && (c.scrollHeight - stTarget - c.clientHeight) >= 20) {
+        c.scrollTop = stTarget
+      }
+    }
+  }
+
+  const handleYearMissing = useCallback(async (year: number, month?: number) => {
+    if (yearJumpRef.current) return
+    // drillDown больше НЕ блокируем — drill тоже прыгает
+    yearJumpRef.current = true
+    // T-20261002-018 RW1: новый прыжок = новое поколение — отложенные тики предыдущих
+    // переходов (свои и рейловые) гасятся проверкой jumpEpochRef.current !== jumpEpoch
+    const jumpEpoch = ++jumpEpochRef.current
+
+    // Слушатели отмены ставим СИНХРОННО при входе в прыжок.
+    // FIX T-20261002-018 RW1: отмена — ТОЛЬКО по настоящему пользовательскому вводу
+    // (wheel/touchmove + RW2: pointerdown/mousedown в ленте и навигационный keydown).
+    // Раньше отменялся ЛЮБЫМ scroll-событием вне окна наших
+    // программных скроллов, а штатные изменения контента дают «чужой» scroll без
+    // наших флагов: scroll-anchoring при вставке карточек, компенсация prepend
+    // (MyFilesPage пишет scrollTop без markProgrammaticScroll), scroll-событие,
+    // приходящее в кадре ПОСЛЕ снятия флагов в rAF — сессия умирала, тики
+    // (1200…4500мс) не выполнялись и цель навсегда оставалась не у верха (y=433).
+    const container = document.querySelector('.v2-main')
+    let cancelled = false
+    const cancelListener = () => { cancelled = true }
+    // T-20261002-018 RW2 (P0): pointerdown/mousedown в ленте — drag скроллбара и клик
+    // по карточке отменяют живую сессию (mousedown — страховка: при drag'е скроллбара
+    // как non-client области pointer-события контейнеру могут не отдаваться).
+    // Клик по линейке НЕ отменяет: рейл — createPortal в document.body, т.е. вне
+    // контейнера `.v2-main` (событие не доходит) + явное исключение closest('.date-rail').
+    const pointerCancelListener = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest('.date-rail')) return
+      cancelled = true
+      container?.removeEventListener('pointerdown', pointerCancelListener)
+      container?.removeEventListener('mousedown', pointerCancelListener)
+    }
+    // T-20261002-018 RW2 (P0): навигация клавиатурой (стрелки/Page*/Home/End/Space) —
+    // отмена; input/textarea/contenteditable (поиск) и рейл исключены —
+    // см. shouldCancelAlignByKey (общая с DateRail.startAlignSession).
+    // На window: стрелки/Space приходят при фокусе на body/контейнере.
+    const keyCancelListener = (e: KeyboardEvent) => {
+      if (!shouldCancelAlignByKey(e)) return
+      cancelled = true
+      window.removeEventListener('keydown', keyCancelListener)
+    }
+    window.addEventListener('keydown', keyCancelListener)
+    if (container) {
+      container.addEventListener('wheel', cancelListener, { passive: true, once: true })
+      container.addEventListener('touchmove', cancelListener, { passive: true, once: true })
+      container.addEventListener('pointerdown', pointerCancelListener)
+      container.addEventListener('mousedown', pointerCancelListener)
+    }
+    // Очистка слушателей планируем СРАЗУ (не утечёт при исключении ниже);
+    // таймер перекрывает кап сессии доводки (RE_ALIGN_SESSION_MAX_MS)
+    setTimeout(() => {
+      window.removeEventListener('keydown', keyCancelListener)
+      if (container) {
+        container.removeEventListener('wheel', cancelListener)
+        container.removeEventListener('touchmove', cancelListener)
+        container.removeEventListener('pointerdown', pointerCancelListener)
+        container.removeEventListener('mousedown', pointerCancelListener)
+      }
+    }, RE_ALIGN_SESSION_MAX_MS + 500)
+
+    try {
+      // 1) Определяем полный список текущего контекста
+      let fullList: any[] = []
+      let isFolder = false
+      let folderId: string | null = null
+      let targetArrayRef: 'files' | 'folderFiles' | 'galleryFiles' = 'files'
+
+      if (folderDrill) {
+        // Папка
+        if (!folderDrill.startsWith('__type_')) {
+          // Обычная папка — сюда не должны попадать (рейла нет), но на всякий случай
+          return
+        }
+        isFolder = true
+        folderId = folderDrill
+        targetArrayRef = 'folderFiles'
+        // Если полный список ещё не загружен — грузим
+        if (!folderFullLoadedRef.current.has(folderId)) {
+          const r = await window.electronAPI.telegram.listFolderFilesFromCache(folderId, 100000, 0)
+          if (r.success && r.data?.length) {
+            const processed = processRawFiles(r.data)
+            folderFullRef.current = processed
+            folderFullLoadedRef.current.add(folderId)
+            folderNextOffsetIdRef.current = r.nextOffsetId ?? null
+            setFolderTotal(r.total ?? 0)
+            setFolderFiles(processed)
+          }
+        }
+        fullList = folderFullRef.current
+      } else if (drillDown) {
+        // Drill-down (Изображения/Видео/Аудио) — используем drillFiles (как рендерится galleryFiles)
+        targetArrayRef = 'galleryFiles'
+        // Если drillFiles пуст — не прыгаем (данные ещё не загрузились)
+        if (!drillFiles || drillFiles.length === 0) return
+        // Строим базу так же, как galleryFiles memo: для "Недавние" — time-фильтр, иначе — drillFiles как есть
+        const nowSec = Math.floor(Date.now() / 1000)
+        if (drillDown === 'Недавние') {
+          fullList = drillFiles.filter(f => {
+            const fd = f.uploadedAt || fileDate(f)
+            return fd > 0 && (nowSec - fd) < RECENT_WINDOW_SEC && (nowSec - fd) > -86400
+          })
+        } else {
+          fullList = drillFiles
+        }
+        // T-20261002-018 ST4: drillFiles сортируется ПРИ УСТАНОВКЕ (byEffectiveDateDesc),
+        // поэтому порядок fullList = порядок рендера galleryFiles. targetIdx считаем
+        // в ЭТОМ же порядке (БЕЗ fileSortComparator) — якорь попадает в отрендеренную секцию.
+      } else {
+        // Корень
+        targetArrayRef = 'files'
+        fullList = fullCacheRef.current
+      }
+
+      // Race guard: если полный кэш пуст (ранний клик до загрузки) — догружаем и processRawFiles
+      if (fullList.length === 0 && !isFolder && !drillDown) {
+        const r = await window.electronAPI.telegram.listFiles()
+        if (r.success && Array.isArray(r.data)) {
+          const processed = processRawFiles(r.data)
+          fullCacheRef.current = processed
+          fullList = processed
+        }
+      }
+      if (fullList.length === 0) return
+
+      // 2) Сортируем тем же компаратором (ТОЛЬКО для root и type-папок; drill —
+      //    drillFiles уже отсортирован при установке — ST4, двойной сортировки нет)
+      let sorted: any[]
+      if (drillDown) {
+        sorted = fullList // порядок = drillFiles (sorted at set, ST4) == порядок рендера
+      } else {
+        sorted = [...fullList].sort(fileSortComparator)
+      }
+
+      // 3) Находим индекс ПЕРВОЙ записи с нужным годом/месяцем
+      let targetIdx = -1
+      for (let i = 0; i < sorted.length; i++) {
+        const f = sorted[i]
+        const ts = effectiveDate(f)
+        if (!ts) continue
+        const d = new Date(ts * 1000)
+        if (d.getFullYear() === year && (month == null || d.getMonth() + 1 === month)) {
+          targetIdx = i
+          break
+        }
+      }
+      if (targetIdx === -1) return // цель не найдена в полном списке
+
+      // 4) Оконная модель: устанавливаем окно ровно на цель, без префиксного IPC
+      if (isFolder && folderId) {
+        // Type-папка: полный список уже в folderFullRef (уже processRawFiles)
+        setFolderFiles([...folderFullRef.current]) // триггер ререндера с новым окном
+        folderNextOffsetIdRef.current = null // сброс пагинации — окно управляется windowStart
+        setFolderTotal(folderFullRef.current.length)
+      } else if (drillDown) {
+        // Drill: galleryFiles уже полный (drillFiles), окно управляется windowStart
+        setDrillFiles([...drillFiles]) // триггер ререндера
+      } else {
+        // Корень: fullCacheRef уже processRawFiles (race guard выше + эффект загрузки)
+        setFiles(processRawFiles([...fullCacheRef.current]))
+        nextOffsetIdRef.current = null
+        totalFilesRef.current = fullCacheRef.current.length
+      }
+
+      // Устанавливаем окно рендера
+      setWindowStart(targetIdx)
+      setVisibleCount(FILES_PAGE_SIZE)
+
+      // 5) Дождаться рендера якоря (ПОСЛЕДНИЙ match) — ДО единой петли
+      // FIX 3b: для года используем .mf-gy[data-year] (заголовок года), для месяца — [data-year][data-month]
+      // data-month в DOM 0-based (groupByDay), месяц из рейла 1-based
+      const selector = month != null
+        ? `[data-year="${year}"][data-month="${month - 1}"]`
+        : `.mf-gy[data-year="${year}"]`
+      let anchor: HTMLElement | null = null
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise(r => setTimeout(r, 60))
+        anchor = findLastAnchor(selector)
+        if (anchor) break
+      }
+
+      // 6) ЕДИНАЯ петля: выровнять → проверить headroom → быстро дорастить (flushSync, без rAF)
+      if (anchor) {
+        // Начальный программный скролл (петля выравнивания + финальное выравнивание)
+        markRailScroll()
+        markProgrammaticScroll()
+        const totalLen = isFolder ? folderFullRef.current.length : (drillDown ? sorted.length : fullCacheRef.current.length)
+        const cap = totalLen - targetIdx
+        let curVisible = FILES_PAGE_SIZE
+        let prevBelow: number | null = null
+        for (let attempt = 0; attempt < 10; attempt++) {
+          anchor = findLastAnchor(selector)
+          if (!anchor) break
+          applyAnchorWithHeadroom(anchor)   // мгновенно, СИНХРОННО
+          const container = document.querySelector('.v2-main')
+          if (!container) break
+          const anchorRect = anchor.getBoundingClientRect()
+          const containerRect = container.getBoundingClientRect()
+          const anchorAbs = anchorRect.top - containerRect.top + container.scrollTop
+          const below = container.scrollHeight - anchorAbs          // сколько контента ниже якоря
+          const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+
+          if (distance >= 20) break                 // достаточно: scroll-событие при подъёме к низу будет стрелять и ростить окно
+          if (!listLoaderRef.current) break                         // окно покрывает всё — расти некуда
+          if (targetIdx + curVisible >= totalLen) break           // cap
+
+          // stall-предикция (только начиная со 2-й итерации, т.е. attempt >= 1)
+          if (attempt >= 1 && prevBelow !== null) {
+            const yieldPx = below - prevBelow                 // прирост ниже якоря от прошлой партии
+            const remaining = 788 + 20 - below                // сколько ещё нужно до цели below>=808
+            if (remaining > 0 && yieldPx > 0 && Math.ceil(remaining / yieldPx) > (10 - attempt)) break  // за лимит не успеем — не дуем окно впустую
+            if (yieldPx <= 0 && attempt >= 2) break           // регион совсем без yield под якорем
+          }
+          prevBelow = below                                   // сохранять ПЕРЕД grow
+
+          curVisible = Math.min(curVisible + FILES_PAGE_SIZE, cap)
+          flushSync(() => setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, cap)))  // синхронный рендер БЕЗ rAF
+        }
+        // финальное мгновенное выравнивание (на случай, если последняя итерация ростнула)
+        const fin = findLastAnchor(selector)
+        if (fin) applyAnchorWithHeadroom(fin)
+        // Снимаем флаги после завершения скролла (rAF)
+        requestAnimationFrame(() => {
+          clearRailScroll()
+          clearProgrammaticScroll()
+        })
+      }
+
+      // 7) Доводочные пере-выравнивания: отмена — wheel/touchmove + pointerdown/mousedown
+      //    в ленте + навигационный keydown (см. выше, RW2).
+      // FIX T-20261002-018 RW1: убран baseline-гард «|scrollTop − последний наш скролл|
+      // > 50 → пропустить тик» — baseline обновлялся только после нашего программного
+      // скролла, поэтому любой контентный сдвиг scrollTop (рост sh, scroll-anchoring,
+      // компенсация prepend) молча выключал ВСЕ оставшиеся тики (deadlock). Теперь
+      // тик просто переспрашивает якорь и заново выравнивает, пока |y| > 20.
+      // После остановки серии с |y| > 20 — ограниченный re-kick (конечное число серий
+      // + временной кап RE_ALIGN_SESSION_MAX_MS, без бесконечных петель).
+      const reAlignTimeouts: ReturnType<typeof setTimeout>[] = []
+      const runAlignTick = (): boolean => {
+        if (cancelled || jumpEpochRef.current !== jumpEpoch) return false
+        const c = document.querySelector('.v2-main')
+        if (!c) return false
+        const a = findLastAnchor(selector)
+        if (!a) return true // якоря временно нет (окно перерендерилось) — ждём следующего тика
+        const cTop = c.getBoundingClientRect().top
+        const off = Math.abs(a.getBoundingClientRect().top - cTop)
+        const dist = c.scrollHeight - c.scrollTop - c.clientHeight
+        if (off <= 20 && dist >= 20) return false // цель у верха и есть запас снизу — сходимся
+        markRailScroll()
+        markProgrammaticScroll()
+        applyAnchorWithHeadroom(a)
+        requestAnimationFrame(() => {
+          clearRailScroll()
+          clearProgrammaticScroll()
+        })
+        return true
+      }
+      let reKicksLeft = RE_ALIGN_REKICK_MAX
+      const reAlignStartedAt = Date.now()
+      const armReAlign = (delays: number[]) => {
+        delays.forEach((delay, idx) => {
+          const t = setTimeout(() => {
+            const unsettled = runAlignTick()
+            if (!unsettled) return
+            if (idx !== delays.length - 1) return
+            // серия остановилась, а цель не у верха → re-kick (ограничен по числу и времени)
+            if (reKicksLeft <= 0 || Date.now() - reAlignStartedAt >= RE_ALIGN_SESSION_MAX_MS) return
+            reKicksLeft--
+            armReAlign(RE_ALIGN_REKICK_DELAYS)
+          }, delay)
+          reAlignTimeouts.push(t)
+        })
+      }
+      armReAlign(RE_ALIGN_DELAYS)
+    } finally {
+      yearJumpRef.current = false
+    }
+  }, [folderDrill, drillDown, sort, findLastAnchor, fileSortComparator, drillFiles])
+
+  // T-20261002-018 RW1: рейл начал новый переход (год/месяц, с якорем или без) —
+  // гасим отложенные тики handleYearMissing предыдущего перехода, чтобы два
+  // механизма не тянули скролл к разным якорям
+  const handleJumpIntent = useCallback(() => { jumpEpochRef.current++ }, [])
 
   const scheduleDropDone = () => {
     if (dropDoneRef.current) clearTimeout(dropDoneRef.current)
@@ -724,7 +1106,9 @@ export default function MyFilesPage() {
     if (!drillDown) { setDrillFiles([]); setDrillLoading(false); return }
     setDrillLoading(true)
     window.electronAPI.telegram.getFilesByCategory(drillDown).then((r: any) => {
-      setDrillFiles(processRawFiles(r.data || []))
+      // T-20261002-018 ST4: сортируем один раз при установке — лента (первое окно =
+      // самые свежие файлы), рейл-годы/месяцы и якоря прыжка живут в одном порядке
+      setDrillFiles(processRawFiles(r.data || []).sort(byEffectiveDateDesc))
       setDrillLoading(false)
     }).catch(() => setDrillLoading(false))
   }, [drillDown])
@@ -732,6 +1116,7 @@ export default function MyFilesPage() {
   useEffect(() => {
     if (!folderDrill) { setFolderFiles([]); folderNextOffsetIdRef.current = null; setFolderTotal(0); return }
     setVisibleCount(FILES_PAGE_SIZE)
+    setWindowStart(0)
     loadFolderFiles(folderDrill)
   }, [folderDrill, loadFolderFiles])
 
@@ -816,7 +1201,8 @@ export default function MyFilesPage() {
         // без этого бейдж разрешения появлялся только после перезахода
         if (drillDown) {
           window.electronAPI.telegram.getFilesByCategory(drillDown).then((r: any) => {
-            if (r.success) setDrillFiles(processRawFiles(r.data || []))
+            // T-20261002-018 ST4: тот же порядок, что и при первичной загрузке (см. выше)
+            if (r.success) setDrillFiles(processRawFiles(r.data || []).sort(byEffectiveDateDesc))
           }).catch(() => {})
         }
       }, 3000)
@@ -836,7 +1222,9 @@ export default function MyFilesPage() {
     arr.sort((a, b) => {
       if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
       if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0) || (b.messageId - a.messageId)
-      return (b.messageId - a.messageId)
+      const ea = effectiveDate(a), eb = effectiveDate(b)
+      if (ea !== eb) return eb - ea
+      return (b.messageId || 0) - (a.messageId || 0)
     })
     return arr
   }, [files, search, sort])
@@ -866,7 +1254,9 @@ export default function MyFilesPage() {
     return [...currentFiles].sort((a, b) => {
       if (sort === 'name') return (a.fileName || '').localeCompare(b.fileName || '')
       if (sort === 'size') return (b.fileSize || 0) - (a.fileSize || 0) || (b.messageId - a.messageId)
-      return (b.messageId - a.messageId)
+      const ea = effectiveDate(a), eb = effectiveDate(b)
+      if (ea !== eb) return eb - ea
+      return (b.messageId || 0) - (a.messageId || 0)
     })
   }, [currentFiles, sort])
 
@@ -875,11 +1265,13 @@ export default function MyFilesPage() {
     const container = document.querySelector('.v2-main')
     if (!container) return
     const handleScroll = () => {
+      if (yearJumpRef.current) return
+      if (isRailScrollActive()) return
       if (scrollRafRef.current) return
       const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       if (distanceToBottom >= SCROLL_THRESHOLD) return
       const totalLen = folderDrill ? currentFiles.length : filtered.length
-      if (visibleCount >= totalLen) {
+      if (windowStart + visibleCount >= totalLen) {
         if (folderDrill) {
           if (folderNextOffsetIdRef.current !== null && !folderLoadingMoreRef.current && !debouncedQuery.trim()) loadMoreFolderFiles()
         } else if (nextOffsetIdRef.current !== null) {
@@ -889,7 +1281,7 @@ export default function MyFilesPage() {
       }
       scrollRafRef.current = requestAnimationFrame(() => {
         scrollRafRef.current = 0
-        setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen))
+        setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen - windowStart))
       })
     }
     container.addEventListener('scroll', handleScroll, { passive: true })
@@ -897,28 +1289,128 @@ export default function MyFilesPage() {
       container.removeEventListener('scroll', handleScroll)
       if (scrollRafRef.current) { cancelAnimationFrame(scrollRafRef.current); scrollRafRef.current = 0 }
     }
-  }, [filtered.length, currentFiles.length, visibleCount, loadMore, loadMoreFolderFiles, folderDrill, debouncedQuery])
+  }, [filtered.length, currentFiles.length, visibleCount, windowStart, loadMore, loadMoreFolderFiles, folderDrill, debouncedQuery])
 
   const listLoaderRef = useRef<HTMLDivElement>(null)
+  // FIX 1: обновляем ioStateRef перед рендером (в теле компонента) — это гарантирует свежие значения в колбэке IO
+  ioStateRef.current = {
+    totalLen: folderDrill ? currentFiles.length : filtered.length,
+    windowStart,
+    visibleCount,
+    folderDrill: folderDrill ?? '',
+    debouncedQuery,
+    folderNextOffsetId: folderNextOffsetIdRef.current,
+    nextOffsetId: nextOffsetIdRef.current,
+    folderLoadingMore: folderLoadingMoreRef.current,
+    loadingMore: loadingMoreRef.current,
+  }
+  // FIX 1: обновляем рефы функций загрузки (они уже определены к этому моменту)
+  loadMoreRef.current = loadMore
+  loadMoreFolderRef.current = loadMoreFolderFiles
+
+  // FIX 1: loaderPresent — логическая переменная присутствия лоадера в DOM.
+  // Переключается только на границе «окно покрыло всё / новый прыжок» — пересоздание observer допустимо.
+  const loaderPresent = (folderDrill ? windowStart + visibleCount < currentFiles.length : windowStart + visibleCount < filtered.length)
+
   useEffect(() => {
     const el = listLoaderRef.current
     if (!el) return
-    const totalLen = folderDrill ? currentFiles.length : filtered.length
     const io = new IntersectionObserver(entries => {
       if (!entries.some(e => e.isIntersecting)) return
-      if (visibleCount < totalLen) {
-        setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen))
+      // FIX 1: guard — не расти во время прыжка по году/месяцу
+      if (yearJumpRef.current) return
+      if (isRailScrollActive()) return
+      const state = ioStateRef.current
+      if (state.windowStart + state.visibleCount < state.totalLen) {
+        setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, state.totalLen - state.windowStart))
         return
       }
-      if (folderDrill) {
-        if (folderNextOffsetIdRef.current !== null && !folderLoadingMoreRef.current && !debouncedQuery.trim()) loadMoreFolderFiles()
-      } else if (nextOffsetIdRef.current !== null && !loadingMoreRef.current) {
-        loadMore()
+      if (state.folderDrill) {
+        if (state.folderNextOffsetId !== null && !state.folderLoadingMore && !state.debouncedQuery.trim()) {
+          loadMoreFolderRef.current?.()
+        }
+      } else if (state.nextOffsetId !== null && !state.loadingMore) {
+        loadMoreRef.current?.()
       }
     }, { rootMargin: '600px 0px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [folderDrill, currentFiles.length, filtered.length, visibleCount, loadMore, loadMoreFolderFiles, debouncedQuery, loadingMoreRef])
+  }, [loaderPresent, folderDrill, currentFiles.length, filtered.length])
+
+  // Prepend logic: scroll up near top -> prepend 30 items with scroll compensation
+  useEffect(() => {
+    const container = document.querySelector('.v2-main')
+    if (!container) return
+    const handleScroll = () => {
+      // FIX 2: пропускаем наше синтетическое событие scroll после компенсации
+      if (compensatedScrollTopRef.current != null && Math.abs(container.scrollTop - compensatedScrollTopRef.current) < 2) {
+        compensatedScrollTopRef.current = null
+        return
+      }
+      if (prependCompensateRef.current) return // уже компенсируем, не трогаем
+      if (yearJumpRef.current) return // во время прыжка не мешаем
+      if (isRailScrollActive()) return
+      if (container.scrollTop >= SCROLL_THRESHOLD) return
+      if (windowStart <= 0) return
+      const totalLen = folderDrill ? currentFiles.length : filtered.length
+      if (windowStart + visibleCount >= totalLen && windowStart === 0) return
+
+      // Найти точку вставки (голова хронологии) ДО мутации
+      // Хронология рендерится в последнем дочернем элементе .mf-sections (после категорий и папок)
+      let insertPointAbs = 0
+      const sectionsEl = container.querySelector('.mf-sections')
+      if (sectionsEl) {
+        const lastSection = sectionsEl.lastElementChild
+        if (lastSection) {
+          if (view === 'grid') {
+            const firstYearGroup = lastSection.querySelector('.mf-gy')
+            if (firstYearGroup) {
+              const containerRect = container.getBoundingClientRect()
+              const elRect = firstYearGroup.getBoundingClientRect()
+              insertPointAbs = elRect.top - containerRect.top + container.scrollTop
+            }
+          } else {
+            // list mode: таблица в последней секции
+            const table = lastSection.querySelector('.mf-table')
+            if (table) {
+              const firstRow = table.querySelector('tbody tr[data-mid]')
+              if (firstRow) {
+                const containerRect = container.getBoundingClientRect()
+                const elRect = firstRow.getBoundingClientRect()
+                insertPointAbs = elRect.top - containerRect.top + container.scrollTop
+              }
+            }
+          }
+        }
+      }
+      // Fallback: если не нашли точку вставки, считаем её в 0 (компенсируем всегда — старое поведение)
+
+      // Замеряем до
+      const scrollHeightBefore = container.scrollHeight
+      const scrollTopBefore = container.scrollTop
+
+      prependCompensateRef.current = true
+      const newWindowStart = Math.max(0, windowStart - FILES_PAGE_SIZE)
+      setWindowStart(newWindowStart)
+      setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen - newWindowStart))
+
+      // Компенсация после рендера: ТОЛЬКО если верх вьюпорта на уровне или НИЖЕ точки вставки
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const scrollHeightAfter = container.scrollHeight
+          const delta = scrollHeightAfter - scrollHeightBefore
+          if (delta > 0 && insertPointAbs <= scrollTopBefore + container.clientHeight) {
+            container.scrollTop = scrollTopBefore + delta
+            // FIX 2: запоминаем компенсированное значение, чтобы пропустить синтетическое событие
+            compensatedScrollTopRef.current = scrollTopBefore + delta
+          }
+          prependCompensateRef.current = false
+        })
+      })
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [folderDrill, currentFiles.length, filtered.length, visibleCount, windowStart, view])
 
 
   const recentFiles = useMemo(() => {
@@ -971,6 +1463,248 @@ export default function MyFilesPage() {
     });
     return flat;
   }, [galleryFiles]);
+
+  // S3a: поиск активен — если есть введённый запрос (root) или debouncedQuery (folder)
+  const isSearchActive = useMemo(() => search.trim() !== '' || debouncedQuery.trim() !== '', [search, debouncedQuery]);
+
+  // Сброс windowStart при активации поиска (рейл скрыт, окно должно быть в начале)
+  useEffect(() => {
+    if (isSearchActive) setWindowStart(0)
+  }, [isSearchActive])
+
+  // T-20261002-018 ST5 (блок A, GATE #3; вариант «a» из st4_report.md П.5):
+  // гейт датовой хронологии для папок — «в папке есть хотя бы одно фото/видео →
+  // секции по датам; нет (напр. «Музыка» — только аудио) → плоский список».
+  // Корень и drill-категории от гейта не зависят (folderDrill === null → true,
+  // у них своя ветка рендера), поиск — как раньше, плоский (isSearchActive).
+  const folderChronoEnabled = useMemo(() => {
+    if (!folderDrill) return true
+    return sortedFiles.some((f: any) => {
+      const t = typeOf(f.fileName)
+      return t === 'Изображения' || t === 'Видео'
+    })
+  }, [folderDrill, sortedFiles])
+
+  // S3a: группировка файлов корня/папки по дням (для grid-режима) — оконная модель
+  const rootFilesByDay = useMemo(() => {
+    if (isSearchActive) return null
+    // ST5: папка без фото/видео — датовых секций нет, рендер уходит в плоский fallback
+    if (!folderChronoEnabled) return null
+    return groupByDay(sortedFiles.slice(windowStart, windowStart + visibleCount))
+  }, [sortedFiles, visibleCount, windowStart, isSearchActive, folderChronoEnabled]);
+
+  // S3a: группировка файлов категорий по дням (для grid-режима секций)
+  const categoryFilesByDay = useMemo(() => {
+    if (isSearchActive) return {}
+    const map: Record<string, ReturnType<typeof groupByDay>> = {}
+    CATEGORIES.forEach(cat => {
+      const items = grouped[cat] || []
+      if (items.length > 0) map[cat] = groupByDay(items.slice(0, visibleCount))
+    })
+    return map
+  }, [grouped, visibleCount, isSearchActive]);
+
+  // S5-fix: все годы из полного кэша файлов — рейл в корне показывает все годы сразу,
+  // даже если нижние годы ещё не подгружены (первый экран содержит только 2026)
+  const [cacheYears, setCacheYears] = useState<number[]>([])
+  const [cacheMonths, setCacheMonths] = useState<Record<number, number[]>>({})
+  // Полный кэш файлов (порядок = listFiles() = listFilesFromCache: messageId desc)
+  const fullCacheRef = useRef<any[]>([])
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.telegram.listFiles().then((r: any) => {
+      if (cancelled || !r?.success || !Array.isArray(r.data)) return
+      const processed = processRawFiles(r.data)
+      const months = new Map<number, Set<number>>()
+      for (const f of processed) {
+        const ts = effectiveDate(f)
+        if (!ts) continue
+        const d = new Date(ts * 1000)
+        const y = d.getFullYear()
+        if (!months.has(y)) months.set(y, new Set())
+        months.get(y)!.add(d.getMonth() + 1)
+      }
+      setCacheYears(Array.from(months.keys()).sort((a, b) => b - a))
+      const rec: Record<number, number[]> = {}
+      months.forEach((ms, y) => { rec[y] = Array.from(ms).sort((a, b) => b - a) })
+      setCacheMonths(rec)
+      // Сохраняем полный кэш для прямого прыжка (уже processRawFiles: фильтр locallyDeletedIds + displayName)
+      fullCacheRef.current = processed
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // S3a: сбор уникальных лет из всех отрендеренных групп (для DateRail)
+  const renderedYears = useMemo(() => {
+    if (isSearchActive) return []
+    const yearsSet = new Set<number>()
+    // Drill-down gallery — оконная модель
+    if (drillDown) {
+      const g = groupByDay(galleryFiles.slice(windowStart, windowStart + visibleCount))
+      Object.keys(g).forEach(y => yearsSet.add(+y))
+    }
+    // Root/folder grid — оконная модель
+    if (rootFilesByDay) {
+      Object.keys(rootFilesByDay).forEach(y => yearsSet.add(+y))
+    }
+    // Category sections — НЕ оконная (0-based)
+    Object.values(categoryFilesByDay).forEach(g => {
+      Object.keys(g).forEach(y => yearsSet.add(+y))
+    })
+    return Array.from(yearsSet).sort((a, b) => b - a)
+  }, [drillDown, galleryFiles, visibleCount, windowStart, rootFilesByDay, categoryFilesByDay, isSearchActive]);
+
+  // S5-fix: годы для рейла — в корне объединяем с полным кэшем (все годы сразу);
+  // в папке/drill — только годы самого среза (чужие годы не кликабельны)
+  // В ОБЫЧНЫХ папках (folderDrill без __type_*) — рейл не нужен вовсе
+  const railYears = useMemo(() => {
+    if (isSearchActive) return []
+    // Обычная папка (не виртуальная __type_*) — без рейла
+    if (folderDrill && !folderDrill.startsWith('__type_')) return []
+    if (folderDrill) {
+      // __type_ папка: годы из полного списка папки (folderFullRef или folderFiles).
+      // FIX T-20261002-018 ST2: main-IPC telegram:list-folder-files-from-cache фильтрует
+      // fileFoldersMap[messageId] === folderId, а виртуальных id там нет → список пуст →
+      // рейл исчезал. Fallback: полный кэш + matchVirtualFolder (renderer-only).
+      const source = folderFullRef.current.length > 0 ? folderFullRef.current
+        : folderFiles.length > 0 ? folderFiles
+        : fullCacheRef.current.filter(f => matchVirtualFolder(f.fileName, folderDrill))
+      const yearsSet = new Set<number>()
+      for (const f of source) {
+        const ts = effectiveDate(f)
+        if (!ts) continue
+        yearsSet.add(new Date(ts * 1000).getFullYear())
+      }
+      return Array.from(yearsSet).sort((a, b) => b - a)
+    }
+    if (drillDown) {
+      // Drill: годы из тех же файлов, что рендерит галерея (drillFiles = IPC
+      // getFilesByCategory). Fallback — полный кэш с renderer-фильтром категории,
+      // пока IPC не вернул (расхождение расширений main/renderer: ico/wma/djvu…)
+      const source = drillFiles.length > 0 ? drillFiles
+        : fullCacheRef.current.filter(f => typeOf(f.fileName) === drillDown)
+      const yearsSet = new Set<number>()
+      for (const f of source) {
+        const ts = effectiveDate(f)
+        if (!ts) continue
+        yearsSet.add(new Date(ts * 1000).getFullYear())
+      }
+      return Array.from(yearsSet).sort((a, b) => b - a)
+    }
+    const merged = new Set<number>(renderedYears)
+    cacheYears.forEach(y => merged.add(y))
+    return Array.from(merged).sort((a, b) => b - a)
+  }, [isSearchActive, folderDrill, drillDown, drillFiles, renderedYears, cacheYears, folderFiles])
+
+  // Месяца по годам для рейла (нужен для drill и __type_ папок, где cacheMonths не подходит)
+  const railMonthsByYear = useMemo(() => {
+    // Корень (нет folderDrill/drillDown): cacheMonths (как сейчас)
+    if (!folderDrill && !drillDown) return cacheMonths
+
+    const rec: Record<number, number[]> = {}
+    const monthsMap = new Map<number, Set<number>>()
+
+    let source: any[] = []
+    if (folderDrill && folderDrill.startsWith('__type_')) {
+      // __type_ папка: из полного списка папки; main-IPC для виртуальных id пуст →
+      // Fallback на полный кэш + matchVirtualFolder (как в railYears, ST2)
+      source = folderFullRef.current.length > 0 ? folderFullRef.current
+        : folderFiles.length > 0 ? folderFiles
+        : fullCacheRef.current.filter(f => matchVirtualFolder(f.fileName, folderDrill))
+    } else if (drillDown) {
+      // Drill: из тех же файлов, что галерея (drillFiles), fallback — кэш с фильтром
+      source = drillFiles.length > 0 ? drillFiles
+        : fullCacheRef.current.filter(f => typeOf(f.fileName) === drillDown)
+    }
+
+    for (const f of source) {
+      const ts = effectiveDate(f)
+      if (!ts) continue
+      const d = new Date(ts * 1000)
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      if (!monthsMap.has(y)) monthsMap.set(y, new Set())
+      monthsMap.get(y)!.add(m)
+    }
+    monthsMap.forEach((ms, y) => { rec[y] = Array.from(ms).sort((a, b) => b - a) })
+    return rec
+  }, [folderDrill, drillDown, drillFiles, cacheMonths, folderFiles])
+
+  // T-20261002-016: DateRail упёрся прыжком в дно скроллера — контента под якорем
+  // не хватает, чтобы встать к верху (замер: drill 2015 → scrollTop = scrollHeight - clientHeight,
+  // секция на y=465). Доращиваем окно рендера на одну партию; DateRail повторит вызов
+  // на следующем тике доводки, пока цель не выровняется или окно не покроет всё.
+  const handleNeedMoreBelow = useCallback(() => {
+    if (yearJumpRef.current) return // идёт прыжок через handleYearMissing — окно растит он сам
+    const totalLen = folderDrill
+      ? currentFiles.length
+      : (drillDown ? galleryFiles.length : filtered.length)
+    if (windowStart + visibleCount >= totalLen) return // окно покрывает всё — расти некуда
+    flushSync(() => {
+      setVisibleCount(prev => Math.min(prev + FILES_PAGE_SIZE, totalLen - windowStart))
+    })
+  }, [folderDrill, drillDown, currentFiles.length, galleryFiles.length, filtered.length, windowStart, visibleCount])
+
+  // S3a: сплющенные строки для Audio drill-down таблицы — оконная модель
+  const audioTableRows = useMemo(() => {
+    if (isSearchActive) return galleryFiles.slice(windowStart, windowStart + visibleCount).map(f => ({ type: 'file', file: f }))
+    const grouped = groupByDay(galleryFiles.slice(windowStart, windowStart + visibleCount))
+    const rows: any[] = []
+    Object.entries(grouped).sort(([a], [b]) => +b - +a).forEach(([year, months]) => {
+      Object.entries(months).sort(([a], [b]) => +b - +a).forEach(([month, days]) => {
+        Object.entries(days).sort(([a], [b]) => +b - +a).forEach(([day, dayItems]) => {
+          rows.push({ type: 'header', year: +year, month: +month, day: +day, count: dayItems.length })
+          dayItems.forEach(f => rows.push({ type: 'file', file: f }))
+        })
+      })
+    })
+    return rows
+  }, [galleryFiles, visibleCount, windowStart, isSearchActive]);
+
+  // S3a: сплющенные строки для категорий таблицы
+  const categoryTableRows = useMemo(() => {
+    const map: Record<string, any[]> = {}
+    CATEGORIES.forEach(cat => {
+      if (isSearchActive) {
+        map[cat] = (grouped[cat] || []).slice(0, visibleCount).map(f => ({ type: 'file', file: f }))
+      } else {
+        const g = categoryFilesByDay[cat]
+        if (!g) { map[cat] = []; return }
+        const rows: any[] = []
+        Object.entries(g).sort(([a], [b]) => +b - +a).forEach(([year, months]) => {
+          Object.entries(months).sort(([a], [b]) => +b - +a).forEach(([month, days]) => {
+            Object.entries(days).sort(([a], [b]) => +b - +a).forEach(([day, dayItems]) => {
+              rows.push({ type: 'header', year: +year, month: +month, day: +day, count: dayItems.length })
+              dayItems.forEach(f => rows.push({ type: 'file', file: f }))
+            })
+          })
+        })
+        map[cat] = rows
+      }
+    })
+    return map
+  }, [grouped, categoryFilesByDay, visibleCount, isSearchActive]);
+
+  // S3a: сплющенные строки для корня/папки таблицы
+  const rootTableRows = useMemo(() => {
+    if (isSearchActive) return sortedFiles.slice(0, visibleCount).map(f => ({ type: 'file', file: f }))
+    if (!rootFilesByDay) {
+      // T-20261002-018 ST5 (блок A): папка без фото/видео — плоский список без
+      // заголовков дат (ловушка 1 из st4_report.md П.5: с null из rootFilesByDay
+      // таблица не отрисовала бы файлы вообще)
+      return sortedFiles.slice(windowStart, windowStart + visibleCount).map(f => ({ type: 'file', file: f }))
+    }
+    const rows: any[] = []
+    Object.entries(rootFilesByDay).sort(([a], [b]) => +b - +a).forEach(([year, months]) => {
+      Object.entries(months).sort(([a], [b]) => +b - +a).forEach(([month, days]) => {
+        Object.entries(days).sort(([a], [b]) => +b - +a).forEach(([day, dayItems]) => {
+          rows.push({ type: 'header', year: +year, month: +month, day: +day, count: dayItems.length })
+          dayItems.forEach(f => rows.push({ type: 'file', file: f }))
+        })
+      })
+    })
+    return rows
+  }, [rootFilesByDay, sortedFiles, windowStart, visibleCount, isSearchActive]);
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -1324,7 +2058,7 @@ export default function MyFilesPage() {
 
   const toggleCategory = (cat: string) => {
     if (cat === 'Изображения' || cat === 'Видео' || cat === 'Аудио' || cat === 'Недавние') {
-      setDrillDown(cat); setVisibleCount(FILES_PAGE_SIZE)
+      setDrillDown(cat); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0)
       return
     }
     const s = new Set(expanded)
@@ -1516,83 +2250,86 @@ export default function MyFilesPage() {
       </div>
 
       {/* Premium Floating Upload Center */}
-      <div style={{
-        position: 'fixed', bottom: 30, right: 30, zIndex: 9999,
-        background: 'rgba(22, 24, 42, 0.85)',
-        backdropFilter: 'blur(24px) saturate(160%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 20,
-        padding: 20, width: 340,
-        boxShadow: '0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
-        transform: dropProgress ? 'translateY(0) scale(1)' : 'translateY(120%) scale(0.9)',
-        opacity: dropProgress ? 1 : 0,
-        pointerEvents: dropProgress ? 'auto' : 'none',
-        transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {dropProgress && dropProgress.pct >= 100 ? (
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6ee7b7' }}>
-                <Check size={18} />
-              </div>
-            ) : (
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(124,131,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bcc0ff' }}>
-                <UploadCloud size={18} />
-              </div>
-            )}
-            <div>
-              <div style={{ fontWeight: 600, color: '#fff', fontSize: 14 }}>
-                {dropProgress && dropProgress.pct >= 100 ? 'Загрузка завершена' : 'Загрузка файлов...'}
-              </div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
-                {dropProgress ? `${dropProgress.completed} из ${dropProgress.total} файлов` : ''}
+      {createPortal(
+        <div style={{
+          position: 'fixed', bottom: 56, right: 30, zIndex: 9999,
+          background: 'rgba(22, 24, 42, 0.85)',
+          backdropFilter: 'blur(24px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 20,
+          padding: 20, width: 340,
+          boxShadow: '0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
+          transform: dropProgress ? 'translateY(0) scale(1)' : 'translateY(120%) scale(0.9)',
+          opacity: dropProgress ? 1 : 0,
+          pointerEvents: dropProgress ? 'auto' : 'none',
+          transition: 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {dropProgress && dropProgress.pct >= 100 ? (
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6ee7b7' }}>
+                  <Check size={18} />
+                </div>
+              ) : (
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(124,131,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bcc0ff' }}>
+                  <UploadCloud size={18} />
+                </div>
+              )}
+              <div>
+                <div style={{ fontWeight: 600, color: '#fff', fontSize: 14 }}>
+                  {dropProgress && dropProgress.pct >= 100 ? 'Загрузка завершена' : 'Загрузка файлов...'}
+                </div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
+                  {dropProgress ? `${dropProgress.completed} из ${dropProgress.total} файлов` : ''}
+                </div>
               </div>
             </div>
+            <button onClick={() => setDropProgress(null)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}>
+              <X size={16} />
+            </button>
           </div>
-          <button onClick={() => setDropProgress(null)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4 }}>
-            <X size={16} />
-          </button>
-        </div>
 
-        {/* Progress Bar Track */}
-        <div style={{
-          width: '100%', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden', marginBottom: 12
-        }}>
+          {/* Progress Bar Track */}
           <div style={{
-            height: '100%', width: (dropProgress?.pct ?? 0) + '%',
-            background: dropProgress && dropProgress.pct >= 100 ? 'linear-gradient(90deg, #34d399, #6ee7b7)' : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
-            borderRadius: 3, transition: 'width 0.3s ease',
-            boxShadow: dropProgress && dropProgress.pct >= 100 ? '0 0 10px rgba(52,211,153,0.5)' : '0 0 10px rgba(124,131,255,0.5)'
-          }} />
-        </div>
-
-        {/* Active Uploads List */}
-        {pendingUploads.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 90, overflowY: 'auto' }}>
-            {pendingUploads.slice(0, 3).map(p => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{p.fileName || 'Файл'}</span>
-                <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                  {p.progress === 100 ? '100%' : p.total && p.total > 50 * 1024 * 1024 ? (
-                    <>{fmtSize(p.sent || 0)} / {fmtSize(p.total)}</>
-                  ) : `${p.progress}%`}
-                </span>
-                {p.progress < 100 && (
-                  <button onClick={(e) => { e.stopPropagation(); window.electronAPI.telegram.cancelUpload(p.id); pendingStore.remove(p.id) }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 2, flexShrink: 0 }} title="Отменить">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            {pendingUploads.length > 3 && (
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 4 }}>
-                и еще {pendingUploads.length - 3}...
-              </div>
-            )}
+            width: '100%', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden', marginBottom: 12
+          }}>
+            <div style={{
+              height: '100%', width: (dropProgress?.pct ?? 0) + '%',
+              background: dropProgress && dropProgress.pct >= 100 ? 'linear-gradient(90deg, #34d399, #6ee7b7)' : 'linear-gradient(90deg, #7c83ff, #a78bfa)',
+              borderRadius: 3, transition: 'width 0.3s ease',
+              boxShadow: dropProgress && dropProgress.pct >= 100 ? '0 0 10px rgba(52,211,153,0.5)' : '0 0 10px rgba(124,131,255,0.5)'
+            }} />
           </div>
-        )}
-      </div>
+
+          {/* Active Uploads List */}
+          {pendingUploads.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 90, overflowY: 'auto' }}>
+              {pendingUploads.slice(0, 3).map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 8 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{p.fileName || 'Файл'}</span>
+                  <span style={{ color: p.progress === 100 ? '#6ee7b7' : '#bcc0ff', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {p.progress === 100 ? '100%' : p.total && p.total > 50 * 1024 * 1024 ? (
+                      <>{fmtSize(p.sent || 0)} / {fmtSize(p.total)}</>
+                    ) : `${p.progress}%`}
+                  </span>
+                  {p.progress < 100 && (
+                    <button onClick={(e) => { e.stopPropagation(); window.electronAPI.telegram.cancelUpload(p.id); pendingStore.remove(p.id) }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 2, flexShrink: 0 }} title="Отменить">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {pendingUploads.length > 3 && (
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 4 }}>
+                  и еще {pendingUploads.length - 3}...
+                </div>
+              )}
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
 
       <div className="mf-toolbar">
         <div className="mf-search">
@@ -1602,7 +2339,10 @@ export default function MyFilesPage() {
 
         {activeListLength > FILES_PAGE_SIZE && (
           <span style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', marginLeft: 8 }}>
-            {visibleCount >= activeListLength ? activeListLength : `1–${visibleCount}`} из {activeListLength}
+            {windowStart + visibleCount >= activeListLength
+              ? `${windowStart + 1}–${activeListLength}`
+              : `${windowStart + 1}–${windowStart + visibleCount}`}
+            из {activeListLength}
           </span>
         )}
 
@@ -1675,6 +2415,19 @@ export default function MyFilesPage() {
         <button onClick={clearSelection}>Снять</button>
       </div>
 
+      {/* S3a: DateRail - навигация по годам */}
+      {!isSearchActive && railYears.length >= 2 && createPortal(
+        <DateRail
+          years={railYears}
+          monthsByYear={railMonthsByYear}
+          targetSelector=".v2-main"
+          onYearMissing={handleYearMissing}
+          onNeedMoreBelow={handleNeedMoreBelow}
+          onJumpIntent={handleJumpIntent}
+        />,
+        document.body
+      )}
+
       {loading ? (
         <div className="mf-skeleton-grid" style={{ marginTop: '20px' }}>
           {[...Array(12)].map((_, i) => (
@@ -1689,7 +2442,7 @@ export default function MyFilesPage() {
         </div>
       ) : drillDown ? (
         <div className="mf-gallery">
-          <div className="mf-gallery-head" onClick={() => { setDrillDown(null); setVisibleCount(FILES_PAGE_SIZE) }} style={{ '--cat-color': CAT_COLOR[drillDown] } as React.CSSProperties}>
+          <div className="mf-gallery-head" onClick={() => { setDrillDown(null); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }} style={{ '--cat-color': CAT_COLOR[drillDown] } as React.CSSProperties}>
             <ArrowLeft size={18} />
             <span className="mf-section-icon">{CAT_ICON[drillDown]}</span>
             <span className="mf-section-title">{drillDown}</span>
@@ -1702,10 +2455,10 @@ export default function MyFilesPage() {
                   <th>
                     <input
                       type="checkbox"
-                      checked={galleryFiles.length > 0 && galleryFiles.slice(0, visibleCount).every(f => selected.has(f.messageId))}
+                      checked={galleryFiles.length > 0 && galleryFiles.slice(windowStart, windowStart + visibleCount).every(f => selected.has(f.messageId))}
                       onChange={e => {
                         const checked = e.target.checked
-                        const list = galleryFiles.slice(0, visibleCount)
+                        const list = galleryFiles.slice(windowStart, windowStart + visibleCount)
                         setSelected(prev => {
                           const s = new Set(prev)
                           list.forEach(f => { checked ? s.add(f.messageId) : s.delete(f.messageId) })
@@ -1716,24 +2469,33 @@ export default function MyFilesPage() {
                   </th>
                   <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                 </tr></thead>
-                <tbody>
-                  {galleryFiles.slice(0, visibleCount).map(f => (
-                    <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                        style={{ viewTransitionName: `card_${f.messageId}` }}
-                      draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}>
-                      <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
-                      <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
-                      <td>{fmtSize(f.fileSize)}</td>
-                      <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
-                      <td>
-                        <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
-                        <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                        <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
-                        <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
-                      </td>
+<tbody>
+                  {audioTableRows.map((row, idx) => row.type === 'header' ? (
+                    <tr key={`audio-h-${row.year}-${row.month}-${row.day}`} className="mf-group-row" data-year={row.year} data-month={row.month}>
+                      <td colSpan={5}><span className="mf-group-label">{row.day} {MONTHS_RU[row.month]} {row.year !== new Date().getFullYear() ? row.year : ''} · {row.count}</span></td>
                     </tr>
+                  ) : (
+                    (() => {
+                      const f = row.file
+                      return (
+                        <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                            style={{ viewTransitionName: `card_${f.messageId}` }}
+                          draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}>
+                          <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
+                          <td className="ellip" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</td>
+                          <td>{fmtSize(f.fileSize)}</td>
+                          <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
+                          <td>
+                            <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                            <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
+                            <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
+                            <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                          </td>
+                        </tr>
+                      )
+                    })()
                   ))}
-                </tbody>
+                  </tbody>
               </table>
               {drillLoading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -1752,11 +2514,11 @@ export default function MyFilesPage() {
             </>) : (
               <div className="mf-gallery-body">
                 {galleryFiles.length > 0 ? (
-                  Object.entries(groupByDay(galleryFiles.slice(0, visibleCount))).sort(([a], [b]) => +b - +a).map(([year, months]) => (
-                    <div key={year} className="mf-gy">
+                  Object.entries(groupByDay(galleryFiles.slice(windowStart, windowStart + visibleCount))).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+                    <div key={year} className="mf-gy" data-year={year}>
                       <div className="mf-gy-title">{year}</div>
                       {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
-                        <div key={year + '-' + month} className="mf-gm">
+                        <div key={year + '-' + month} className="mf-gm" data-year={year} data-month={+month}>
                           <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
                           {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
                             <div key={year + '-' + month + '-' + day} className="mf-gd">
@@ -1852,31 +2614,73 @@ export default function MyFilesPage() {
                   {isDrillable && <span className="mf-section-drill">Открыть →</span>}
                 </div>
                 <div className={'mf-section-body' + (open ? ' open' : '')}>
-                  {items.length > 0 && (
+{items.length > 0 && (
                     view === 'grid' ? (
-                      <div className="mf-grid">
-                        {items.slice(0, visibleCount).map((f) => (
-                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                             style={{ viewTransitionName: `card_${f.messageId}` }}
-                             effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
-                             onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                             onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
-                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                            <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
-                            <div className="mf-card-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
-                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                            <div className="mf-card-actions">
-                              <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
-                              {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
-                              <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                              <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
-                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                      isSearchActive ? (
+                        <div className="mf-grid">
+                          {items.slice(0, visibleCount).map((f) => (
+                            <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                 style={{ viewTransitionName: `card_${f.messageId}` }}
+                                 effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                                 onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                 onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
+                              <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                              <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                              <div className="mf-card-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
+                              <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                              <div className="mf-card-actions">
+                                <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                                <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                                {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
+                                <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
+                                <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
+                                <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                              </div>
+                            </TiltCard>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          {Object.entries(categoryFilesByDay[cat] || {}).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+                            <div key={cat + '-' + year} className="mf-gy" data-year={year}>
+                              <div className="mf-gy-title">{year}</div>
+                              {Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
+                                <div key={cat + '-' + year + '-' + month} className="mf-gm" data-year={+year} data-month={+month}>
+                                  <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
+                                  {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, dayItems]: [string, any]) => (
+                                    <div key={cat + '-' + year + '-' + month + '-' + day} className="mf-gd">
+                                      <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{dayItems.length}</span></div>
+                                      <div className="mf-gm-items">
+                                        {dayItems.map((f: any) => (
+                                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                               style={{ viewTransitionName: `card_${f.messageId}` }}
+                                               effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                                               onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                               onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
+                                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                                            <div className="mf-card-icon" data-type={cat}>{(f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}</div>
+                                            <div className="mf-card-name" title={f.fileName}>{f.isEncrypted && '🔒 '}{f.fileName}</div>
+                                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                                            <div className="mf-card-actions">
+                                              <button title="В избранное" onClick={(e) => { e.stopPropagation(); setSelected(new Set(selected)); v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                                              {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
+                                              <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
+                                              <button title="Переместить в папку" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
+                                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                                            </div>
+                                          </TiltCard>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
                             </div>
-                          </TiltCard>
-                        ))}
-                      </div>
-                    ) : (
+                          ))}
+                        </>
+                      )
+) : (
                       <table className="mf-table">
                         <thead><tr>
                           <th>
@@ -1896,26 +2700,36 @@ export default function MyFilesPage() {
                           </th>
                           <th>Имя</th><th>Размер</th><th>Дата</th><th>Действия</th>
                         </tr></thead>
-                        <tbody>
-                          {items.slice(0, visibleCount).map(f => (
-                            <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                                style={{ viewTransitionName: `card_${f.messageId}` }}
-  onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                              draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
-                              onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
+<tbody>
+                          {(categoryTableRows[cat] || []).map((row, idx) => {
+                            if (row.type === 'header') {
+                              return (
+                                <tr key={cat + '-h-' + row.year + '-' + row.month + '-' + row.day} className="mf-group-row" data-year={row.year} data-month={row.month}>
+                                  <td colSpan={5}><span className="mf-group-label">{row.day} {MONTHS_RU[row.month]} {row.year !== new Date().getFullYear() ? row.year : ''} · {row.count}</span></td>
+                                </tr>
+                              )
+                            }
+                            const f = row.file
+                            return (
+                              <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                  style={{ viewTransitionName: `card_${f.messageId}` }}
+    onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
+                                onDoubleClick={() => { if (cat === 'Изображения' || cat === 'Видео') handlePreview(f, filtered.indexOf(f)) }}>
                               <td><input type="checkbox" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} /></td>
                                   <td className="ellip" title={f.fileName}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Star size={12} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }} />{f.isEncrypted && '🔒 '}{f.fileName}</span></td>
-                              <td>{fmtSize(f.fileSize)}</td>
-                              <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
-                              <td>
-                                <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
-                                {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
-                                <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
-                                <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
-                                <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
-                              </td>
-                            </tr>
-                          ))}
+                            <td>{fmtSize(f.fileSize)}</td>
+                            <td>{new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</td>
+                            <td>
+                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                              {(cat === 'Изображения' || cat === 'Видео') && <button title="Просмотр" onClick={() => handlePreview(f, filtered.indexOf(f))}><Eye size={14} /></button>}
+                              <button title="Копировать ссылку" onClick={() => handleCopyLink(f)}><Copy size={14} /></button>
+                              <button title="Переместить" onClick={(e) => { e.stopPropagation(); moveFileToFolder(f.messageId); }}><MoveRight size={14} /></button>
+                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                            </td>
+                          </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     )
@@ -1939,7 +2753,7 @@ export default function MyFilesPage() {
                 {folderDrill ? (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 12, marginBottom: 16, fontSize: 13, fontWeight: 500, backdropFilter: 'blur(12px)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => { setFolderDrill(null); setVisibleCount(FILES_PAGE_SIZE) }}>Мои файлы</span>
+                      <span style={{ cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => { setFolderDrill(null); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }}>Мои файлы</span>
                       {(() => {
                         const crumbs = [];
                         let curr = folderDrill;
@@ -1950,7 +2764,7 @@ export default function MyFilesPage() {
                         return crumbs.map(c => (
                           <React.Fragment key={c.id}>
                             <ChevronRight size={14} style={{ color: 'var(--text-dim)' }} />
-                            <span style={{ cursor: 'pointer', color: c.id === folderDrill ? 'var(--text)' : 'var(--text-dim)' }} onClick={() => { setFolderDrill(c.id); setVisibleCount(FILES_PAGE_SIZE) }}>{c.name}</span>
+                            <span style={{ cursor: 'pointer', color: c.id === folderDrill ? 'var(--text)' : 'var(--text-dim)' }} onClick={() => { setFolderDrill(c.id); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }}>{c.name}</span>
                           </React.Fragment>
                         ));
                       })()}
@@ -2020,10 +2834,10 @@ export default function MyFilesPage() {
                                  }
                                  else if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
                                  else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
-                               } catch {}
-                             }}
-                              onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
-                              onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+} catch {}
+                              }}
+                               onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }}
+                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                           <div className="mf-folder-preview">
                             {coverFile ? (
                               <>
@@ -2087,35 +2901,83 @@ export default function MyFilesPage() {
                       </div>
                       )}
                       {sortedFiles.length > 0 ? (
-                      <div className="mf-grid">
-                        {sortedFiles.slice(0, visibleCount).map(f => {
-                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
-                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
-                          return (
-                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                               style={{ viewTransitionName: `card_${f.messageId}` }}
-                               effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
-                               onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
-                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
-                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
-                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
-                            <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
-                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                      isSearchActive || !rootFilesByDay ? (
+                        <div className="mf-grid">
+                          {(isSearchActive ? sortedFiles.slice(0, visibleCount) : sortedFiles.slice(windowStart, windowStart + visibleCount)).map(f => {
+                            const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
+                            const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
+                            return (
+                            <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                 style={{ viewTransitionName: `card_${f.messageId}` }}
+                                 effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                                 onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                 onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
+                                 onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                              <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                              <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                                {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                              </div>
+                              <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                              <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                              <div className="mf-card-actions">
+                                <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                                <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                                {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
+                                <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                                <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                              </div>
+                            </TiltCard>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <>
+                          {Object.entries(rootFilesByDay || {}).sort(([a], [b]) => +b - +a).map(([year, months]) => (
+                            <div key={year} className="mf-gy" data-year={year}>
+                              <div className="mf-gy-title">{year}</div>
+{Object.entries(months).sort(([a], [b]) => +b - +a).map(([month, days]) => (
+                                 <div key={year + '-' + month} className="mf-gm" data-year={+year} data-month={+month}>
+                                   <div className="mf-gm-month">{MONTHS_RU[+month]}</div>
+                                  {Object.entries(days).sort(([a], [b]) => +b - +a).map(([day, items]: [string, any]) => (
+                                    <div key={year + '-' + month + '-' + day} className="mf-gd">
+                                      <div className="mf-gd-title">{day} {MONTHS_RU[+month]} <span className="mf-gm-count">{items.length}</span></div>
+                                      <div className="mf-gm-items">
+                                        {items.map((f: any) => {
+                                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
+                                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
+                                          return (
+                                          <TiltCard key={f.messageId} data-mid={f.messageId} className={'mf-card' + (selected.has(f.messageId) ? ' selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                               style={{ viewTransitionName: `card_${f.messageId}` }}
+                                               effect="evade" scale={1.03} tiltLimit={8} spotlight={true}
+                                               onClick={(e: any) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
+                                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
+                                               onContextMenu={(e: any) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }) }}>
+                                            <input type="checkbox" className="mf-check" checked={selected.has(f.messageId)} onChange={() => toggleSelect(f.messageId)} />
+                                            <div className="mf-card-icon" data-type={typeOf(f.fileName)}>
+                                              {(isImg || isVid) ? <FileThumb messageId={f.messageId} fileName={f.fileName} isVideo={!!isVid} typeLabel={isVid ? 'Видео' : 'Изображения'} width={f.width} height={f.height} /> : (f.fileName.split('.').pop() || '?').slice(0, 4).toUpperCase()}
+                                            </div>
+                                            <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
+                                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
+                                            <div className="mf-card-actions">
+                                              <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
+                                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
+                                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
+                                              <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
+                                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
+                                            </div>
+                                          </TiltCard>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
                             </div>
-                            <div className="mf-card-name" title={f.fileName}>{f.fileName}</div>
-                            <div className="mf-card-meta">{fmtSize(f.fileSize)} • {new Date((fileDate(f) || 0) * 1000).toLocaleDateString()}</div>
-                            <div className="mf-card-actions">
-                              <button title="В избранное" onClick={() => { v3store.toggleFav({ messageId: f.messageId, fileName: f.fileName, addedAt: Date.now() }); setFavs(v3store.getFavs()) }}><Star size={14} fill={v3store.isFav(f.messageId) ? '#fbbf24' : 'transparent'} stroke="currentColor" /></button>
-                              <button title="Скачать" onClick={(e) => handleDownload(f, e)}><Download size={14} /></button>
-                              {(isImg || isVid) && <button title="Просмотр" onClick={() => handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles)}><Eye size={14} /></button>}
-                              <button title="Переместить" onClick={() => moveFileToFolder(f.messageId)}><MoveRight size={14} /></button>
-                              <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
-                            </div>
-                          </TiltCard>
-                          )
-                        })}
-                      </div>
-                      ) : !folderLoading && sortedFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
+                          ))}
+                        </>
+                      )
+                    ) : !folderLoading && sortedFiles.length === 0 && currentLevelFolders.length === 0 && pendingUploads.filter(p => {
                         if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
                         return p.folderId === folderDrill
                       }).length === 0 ? (
@@ -2150,10 +3012,10 @@ export default function MyFilesPage() {
                                    const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
                                    if (data.type === 'file' && data.id) { await window.electronAPI.folders.moveFile(data.id, sf.id); loadFolders(); }
                                    else if (data.type === 'folder' && data.id && data.id !== sf.id) { await window.electronAPI.folders.moveFolder(data.id, sf.id); loadFolders(); }
-                                 } catch {}
-                               }}
-                              onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE) }}
-                              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
+} catch {}
+                                }}
+                               onClick={() => { setFolderDrill(sf.id); setVisibleCount(FILES_PAGE_SIZE); setWindowStart(0) }}
+                               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, folder: sf }) }}>
                             <td className="ellip"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Folder size={16} style={{ color: '#7c83ff', flexShrink: 0 }} />{sf.name}</span></td>
                             <td style={{ color: 'var(--text-dim)' }}>{st ? st.count : countFilesRecursive(sf.id)} файл.</td>
                             <td>{sf.createdAt ? new Date(sf.createdAt * 1000).toLocaleDateString() : '—'}</td>
@@ -2164,12 +3026,20 @@ export default function MyFilesPage() {
                           </tr>
                           )
                         })}
-                        {sortedFiles.slice(0, visibleCount).map(f => {
-                          const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
-                          const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
-                          return (
-                          <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
-                              style={{ viewTransitionName: `card_${f.messageId}` }}
+{rootTableRows.map((row, idx) => {
+                            if (row.type === 'header') {
+                              return (
+                                <tr key={'h-' + row.year + '-' + row.month + '-' + row.day} className="mf-group-row" data-year={row.year} data-month={row.month}>
+                                  <td colSpan={4}><span className="mf-group-label">{row.day} {MONTHS_RU[row.month]} {row.year !== new Date().getFullYear() ? row.year : ''} · {row.count}</span></td>
+                                </tr>
+                              )
+                            }
+                            const f = row.file
+                            const isImg = f.fileName && f.fileName.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|heic|heif)$/i)
+                            const isVid = f.fileName && f.fileName.match(/\.(mp4|mov|avi|mkv|webm|flv)$/i)
+                            return (
+                            <tr key={f.messageId} data-mid={f.messageId} className={(selected.has(f.messageId) ? 'selected' : '') + (deletingIds.has(f.messageId) ? ' deleting' : '')}
+                                style={{ viewTransitionName: `card_${f.messageId}` }}
   onClick={(e) => { if ((e.target as HTMLElement).closest('button, input')) return; toggleSelect(f.messageId); }}
                               onDoubleClick={() => { if (isImg || isVid) handlePreview(f, currentFilesIndex.get(f.messageId) ?? 0, currentFiles) }}
                               draggable={true} onDragStart={(e) => handleFileDragStart(e, f)}
@@ -2184,7 +3054,8 @@ export default function MyFilesPage() {
                               <button title="Удалить" className="danger" onClick={(e) => handleDelete(f, e)}><Trash2 size={14} /></button>
                             </td>
                           </tr>
-                        )})}
+                            )
+                          })}
                         
                         {pendingUploads.filter(p => {
       if (folderDrill?.startsWith('__type_')) return matchVirtualFolder(p.fileName, folderDrill)
@@ -2278,9 +3149,9 @@ export default function MyFilesPage() {
                   </div>
                 )}
 
-                {((folderDrill && currentFiles.length > visibleCount) || (!folderDrill && filtered.length > visibleCount)) && (
+                {((folderDrill && windowStart + visibleCount < currentFiles.length) || (!folderDrill && windowStart + visibleCount < filtered.length)) && (
                   <div className="dup-load-more" role="status">
-                    <span>Показано {Math.min(visibleCount, folderDrill ? currentFiles.length : filtered.length)} из {folderDrill ? currentFiles.length : filtered.length} файлов · прокрутите ниже</span>
+                    <span>Показано {windowStart + 1}–{Math.min(windowStart + visibleCount, folderDrill ? currentFiles.length : filtered.length)} из {folderDrill ? currentFiles.length : filtered.length} файлов · прокрутите ниже</span>
                   </div>
                 )}
                 <div ref={listLoaderRef} style={{ height: 20, flexShrink: 0 }} />

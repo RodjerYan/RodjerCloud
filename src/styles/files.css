@@ -535,3 +535,150 @@ background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent);
 .mf-empty-btn:active {
   transform: translateY(0);
 }
+
+/* ==========================================================================
+   Date Rail (T-20260930-002 S4) — вертикальная линейка дат справа
+   ========================================================================== */
+.date-rail {
+  position: fixed;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 10px;
+  background: rgba(17, 20, 37, 0.82);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  z-index: 999;               /* portal в body: ниже модалок (2000) и контекст-меню (9999) */
+  pointer-events: auto;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.date-rail::-webkit-scrollbar { display: none; }
+
+.date-rail-year-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.date-rail-year {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 76px;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: 600 13px/1 var(--font-sans);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+.date-rail-year:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.date-rail-year.active { color: var(--text); background: rgba(124, 131, 255, 0.16); }
+
+.date-rail-year:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.date-rail-year-label {
+  white-space: nowrap;
+  text-align: right;
+  min-width: 28px;
+}
+
+.date-rail-chevron {
+  font-size: 8px;
+  color: var(--text-dim);
+  transition: transform 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+.date-rail-year:hover .date-rail-chevron { color: var(--text); }
+.date-rail-year.expanded .date-rail-chevron { transform: rotate(180deg); color: var(--accent); }
+
+.date-rail-tick {
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+.date-rail-tick.small { width: 8px; }
+
+.date-rail-months {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 4px 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+.date-rail-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 64px;
+  height: 20px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: 500 11px/1 var(--font-sans);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.date-rail-month:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+
+/* Скрываем на узких экранах */
+@media (max-width: 900px) {
+  .date-rail {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Group rows for list view (T-20260930-002 S3b) — строки-заголовки групп по дням
+   ========================================================================== */
+.mf-group-row {
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border);
+}
+.mf-group-row td {
+  border: none;
+  padding: 8px 14px;
+  background: transparent;
+}
+.mf-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+.mf-group-count {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
