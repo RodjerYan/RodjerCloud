@@ -65,6 +65,8 @@ export interface ScanProgress {
   done: number
   total: number
   currentFile: string
+  running?: boolean
+  cancelled?: boolean
 }
 
 type ProgressCb = (p: ScanProgress) => void
@@ -81,6 +83,12 @@ export class BotService {
   private configPath: string
   private hashDbPath: string
   private hashDb: HashEntry[] = []
+
+  // Сканирование дубликатов — один фоновый job в main. Он живёт независимо от
+  // того, какая страница открыта в рендерере, и его можно отменить.
+  private scanning = false
+  private scanCancelled = false
+  private scanState = { running: false, done: 0, total: 0, currentFile: '', cancelled: false }
 
   constructor() {
     this.configPath = path.join(app.getPath('userData'), 'bot-config.json')
@@ -136,6 +144,48 @@ export class BotService {
     return this.hashDb
   }
 
+  /** Переносим уже посчитанные рендерером хеши — не пересчитываем их заново. */
+  importHashes(entries: HashEntry[]): number {
+    let added = 0
+    const byId = new Map(this.hashDb.map(e => [e.messageId, e]))
+    for (const raw of entries || []) {
+      if (!raw?.hash?.includes(':')) continue
+      const prev = byId.get(raw.messageId)
+      if (prev?.hash?.includes(':')) continue
+      const entry: HashEntry = {
+        messageId: raw.messageId,
+        fileName: raw.fileName || 'unknown',
+        fileSize: raw.fileSize || 0,
+        hash: raw.hash,
+        mimeType: raw.mimeType,
+      }
+      if (prev) Object.assign(prev, entry)
+      else { this.hashDb.push(entry); byId.set(entry.messageId, entry) }
+      added++
+    }
+    if (added > 0) this.saveHashDb()
+    return added
+  }
+
+  private recordHashes(entries: HashEntry[]) {
+    if (entries.length === 0) return
+    const byId = new Map(this.hashDb.map(e => [e.messageId, e]))
+    for (const e of entries) {
+      const prev = byId.get(e.messageId)
+      if (prev) Object.assign(prev, e)
+      else { this.hashDb.push(e); byId.set(e.messageId, e) }
+    }
+    this.saveHashDb()
+  }
+
+  getScanState() { return { ...this.scanState } }
+  cancelScan() {
+    if (this.scanning) {
+      this.scanCancelled = true
+      this.scanState = { ...this.scanState, cancelled: true }
+    }
+  }
+
   private isMediaEntry(e: HashEntry): boolean {
     return !!(e.mimeType?.startsWith('image/') || e.mimeType?.startsWith('video/'))
   }
@@ -168,77 +218,119 @@ export class BotService {
 
   // ── Channel scan ──
   async scanChannel(telegramService: TelegramService, onProgress?: ProgressCb) {
-    this.cleanupNonMediaEntries()
-    const all = await telegramService.listFiles()
-    if (!all || all.length === 0) return { found: 0, groups: 0 }
-
-    const activeIds = new Set(all.map((f: any) => f.messageId))
-    const initialLen = this.hashDb.length
-    this.hashDb = this.hashDb.filter(e => activeIds.has(e.messageId))
-    if (this.hashDb.length !== initialLen) {
-      this.saveHashDb()
+    if (this.scanning) {
+      return { found: 0, groups: this.getDuplicateGroups().length, alreadyRunning: true, state: this.getScanState() }
     }
+    this.scanning = true
+    this.scanCancelled = false
+    this.scanState = { running: true, done: 0, total: 0, currentFile: '', cancelled: false }
 
-    const keyCount = new Map<string, number>()
-    const dupKey = (f: any) => `${(f.fileName || '').toLowerCase()}:${f.fileSize || 0}`
-    for (const f of all) {
-      if (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) {
-        const k = dupKey(f)
-        keyCount.set(k, (keyCount.get(k) || 0) + 1)
+    try {
+      this.cleanupNonMediaEntries()
+      // Кэш уже собран при старте — не сканируем весь канал повторно.
+      const all = await telegramService.listFilesCached()
+      if (!all || all.length === 0) {
+        this.scanState = { ...this.scanState, running: false }
+        onProgress?.({ done: 0, total: 0, currentFile: '', running: false })
+        return { found: 0, groups: 0 }
       }
-    }
-    const hashedIds = new Set(this.hashDb.map(e => e.messageId))
-    const toScan = all.filter((f: any) =>
-      !hashedIds.has(f.messageId) &&
-      (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) &&
-      (keyCount.get(dupKey(f)) || 0) >= 2
-    )
-    const total = toScan.length
-    let done = 0
-    let found = 0
 
-    for (const f of toScan) {
-      const fileName = f.fileName || 'unknown'
-      onProgress?.({ done, total, currentFile: fileName })
-      try {
-        const hash = await telegramService.computePartialHash(f.messageId)
-        this.recordHash({
-          messageId: f.messageId,
-          fileName: f.fileName || 'unknown',
-          fileSize: f.fileSize || 0,
-          hash,
-          mimeType: f.mimeType || undefined,
-        })
-        done++
-      } catch {
-        this.recordHash({
-          messageId: f.messageId,
-          fileName: f.fileName || 'unknown',
-          fileSize: f.fileSize || 0,
-          hash: '',
-          mimeType: f.mimeType || undefined,
-        })
-        done++
+      const activeIds = new Set(all.map((f: any) => f.messageId))
+      const initialLen = this.hashDb.length
+      this.hashDb = this.hashDb.filter(e => activeIds.has(e.messageId))
+      if (this.hashDb.length !== initialLen) this.saveHashDb()
+
+      const keyCount = new Map<string, number>()
+      const dupKey = (f: any) => `${(f.fileName || '').toLowerCase()}:${f.fileSize || 0}`
+      for (const f of all) {
+        if (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) {
+          const k = dupKey(f)
+          keyCount.set(k, (keyCount.get(k) || 0) + 1)
+        }
       }
+      // Уже посчитанные хеши пропускаем — повторного сканирования нет.
+      const hashedIds = new Set(this.hashDb.filter(e => e.hash?.includes(':')).map(e => e.messageId))
+      const toScan = all.filter((f: any) =>
+        !hashedIds.has(f.messageId) &&
+        (f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')) &&
+        (keyCount.get(dupKey(f)) || 0) >= 2
+      )
+
+      const total = toScan.length
+      let done = 0
+      this.scanState = { ...this.scanState, total }
+      onProgress?.({ done, total, currentFile: '', running: true })
+
+      // Один запрос getMessages на пачку вместо одного запроса на файл.
+      const BATCH = 40
+      const WORKERS = 4
+      for (let start = 0; start < toScan.length; start += BATCH) {
+        if (this.scanCancelled) break
+        const batch = toScan.slice(start, start + BATCH)
+        let messages: any[] = []
+        try {
+          messages = await telegramService.getMessagesByIds(batch.map((f: any) => f.messageId))
+        } catch (e) {
+          logDebug('[scan] batch fetch failed:', (e as Error).message)
+        }
+        const byId = new Map<number, any>()
+        for (const m of messages) {
+          const id = Number(m?.id)
+          if (Number.isFinite(id)) byId.set(id, m)
+        }
+
+        const entries: HashEntry[] = []
+        let idx = 0
+        const worker = async () => {
+          while (idx < batch.length) {
+            if (this.scanCancelled) return
+            const f = batch[idx++]
+            let hash = ''
+            try {
+              hash = await telegramService.computePartialHash(f.messageId, byId.get(f.messageId))
+            } catch {}
+            entries.push({
+              messageId: f.messageId,
+              fileName: f.fileName || 'unknown',
+              fileSize: f.fileSize || 0,
+              hash,
+              mimeType: f.mimeType || undefined,
+            })
+            done++
+            const fileName = f.fileName || 'unknown'
+            this.scanState = { ...this.scanState, done, currentFile: fileName }
+            if (done % 8 === 0 || done === total) onProgress?.({ done, total, currentFile: fileName })
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(WORKERS, batch.length) }, () => worker()))
+        this.recordHashes(entries)
+        onProgress?.({ done, total, currentFile: batch[batch.length - 1]?.fileName || '' })
+        // Даем event loop и рендереру обновиться между пачками.
+        await new Promise(r => setTimeout(r, 120))
+      }
+
+      const groups = this.getDuplicateGroups()
+      const found = groups.reduce((s, g) => s + g.files.length, 0)
+
+      // Notify user if duplicates found and token is configured
+      if (!this.scanCancelled && groups.length > 0 && this.token) {
+        try {
+          const userId = await telegramService.getUserId()
+          let msg = `🔁 Найдено ${groups.length} групп дубликатов (${found} файлов):\n\n`
+          groups.slice(0, 10).forEach((g, i) => {
+            msg += `${i + 1}. ${g.files[0].fileName} — ${g.files.length} копий, ${(g.totalSize / 1024 / 1024).toFixed(1)} MB\n`
+          })
+          if (groups.length > 10) msg += `\n...и ещё ${groups.length - 10} групп`
+          await botApiRequest(this.token, 'sendMessage', { chat_id: Number(userId), text: msg })
+        } catch {}
+      }
+
+      this.scanState = { ...this.scanState, running: false, cancelled: this.scanCancelled }
+      onProgress?.({ done, total, currentFile: '', running: false, cancelled: this.scanCancelled })
+      return { found, groups: groups.length, cancelled: this.scanCancelled }
+    } finally {
+      this.scanning = false
     }
-
-    const groups = this.getDuplicateGroups()
-    found = groups.reduce((s, g) => s + g.files.length, 0)
-
-    // Notify user if duplicates found and token is configured
-    if (groups.length > 0 && this.token) {
-      try {
-        const userId = await telegramService.getUserId()
-        let msg = `🔁 Найдено ${groups.length} групп дубликатов (${found} файлов):\n\n`
-        groups.slice(0, 10).forEach((g, i) => {
-          msg += `${i + 1}. ${g.files[0].fileName} — ${g.files.length} копий, ${(g.totalSize / 1024 / 1024).toFixed(1)} MB\n`
-        })
-        if (groups.length > 10) msg += `\n...и ещё ${groups.length - 10} групп`
-        await botApiRequest(this.token, 'sendMessage', { chat_id: Number(userId), text: msg })
-      } catch {}
-    }
-
-    return { found, groups: groups.length }
   }
 
   // ── Share links (existing) ──

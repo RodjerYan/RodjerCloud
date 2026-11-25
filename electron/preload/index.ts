@@ -233,7 +233,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bot: {
     getHashDb: () => ipcRenderer.invoke('bot:get-hash-db'),
     getDuplicateGroups: () => ipcRenderer.invoke('bot:get-duplicate-groups'),
-    scanDuplicates: () => ipcRenderer.invoke('bot:scan-duplicates'),
+    scanDuplicates: (knownHashes?: any[]) => ipcRenderer.invoke('bot:scan-duplicates', knownHashes),
+    cancelScanDuplicates: () => ipcRenderer.invoke('bot:cancel-duplicate-scan'),
+    getDuplicateScanState: () => ipcRenderer.invoke('bot:get-duplicate-scan-state'),
     onScanProgress: (cb: (data: any) => void) => {
       const listener = (_: any, data: any) => cb(data)
       ipcRenderer.on('bot:scan-progress', listener)

@@ -4144,12 +4144,31 @@ ipcMain.handle('bot:get-duplicate-groups', async () => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
-ipcMain.handle('bot:scan-duplicates', async (event) => {
+ipcMain.handle('bot:scan-duplicates', async (event, knownHashes?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string; mimeType?: string }>) => {
   try {
-    const onProgress = (p: any) => event.sender.send('bot:scan-progress', p)
+    // Хеши, уже посчитанные рендерером в прошлых версиях, забираем себе —
+    // иначе 2967 кандидатов пересчитывались бы с нуля после обновления.
+    if (knownHashes?.length) botService.importHashes(knownHashes)
+    const onProgress = (p: any) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) {
+          try { w.webContents.send('bot:scan-progress', p) } catch {}
+        }
+      }
+    }
     const result = await botService.scanChannel(telegramService, onProgress)
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('bot:cancel-duplicate-scan', async () => {
+  try { botService.cancelScan(); return { success: true } }
+  catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('bot:get-duplicate-scan-state', async () => {
+  try { return { success: true, data: botService.getScanState() } }
+  catch (error) { return { success: false, error: (error as Error).message } }
 })
 
 ipcMain.handle('share:download-file', async (_, url: string, fileName: string) => {

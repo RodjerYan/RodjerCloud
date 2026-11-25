@@ -151,8 +151,10 @@ declare global {
       bot: {
         getHashDb: () => Promise<{ success: boolean; data?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string }>; error?: string }>
         getDuplicateGroups: () => Promise<{ success: boolean; data?: Array<{ hash: string; files: Array<{ messageId: number; fileName: string; fileSize: number; hash: string; mimeType?: string }>; totalSize: number }>; error?: string }>
-        scanDuplicates: () => Promise<{ success: boolean; data?: { found: number; groups: number }; error?: string }>
-        onScanProgress: (cb: (data: { done: number; total: number; currentFile: string }) => void) => () => void
+        scanDuplicates: (knownHashes?: Array<{ messageId: number; fileName: string; fileSize: number; hash: string; mimeType?: string }>) => Promise<{ success: boolean; data?: { found: number; groups: number; cancelled?: boolean; alreadyRunning?: boolean }; error?: string }>
+        cancelScanDuplicates: () => Promise<{ success: boolean; error?: string }>
+        getDuplicateScanState: () => Promise<{ success: boolean; data?: { running: boolean; done: number; total: number; currentFile: string; cancelled: boolean }; error?: string }>
+        onScanProgress: (cb: (data: { done: number; total: number; currentFile: string; running?: boolean; cancelled?: boolean }) => void) => () => void
       }
       window: {
         minimize: () => Promise<void>

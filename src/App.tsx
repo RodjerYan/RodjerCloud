@@ -79,6 +79,47 @@ function AnimatedRoutes({ channelInfo, userInfo, handleLogout, updateAvailable }
   )
 }
 
+// Живой индикатор фонового поиска дубликатов: не привязан к странице,
+// поэтому прогресс не исчезает при переходе между папками.
+function DuplicateScanIndicator() {
+  const [state, setState] = useState({ running: false, done: 0, total: 0, currentFile: '', cancelled: false })
+
+  useEffect(() => {
+    window.electronAPI.bot?.getDuplicateScanState?.().then((r: any) => {
+      if (r?.success && r.data) setState((prev) => ({ ...prev, ...r.data }))
+    }).catch(() => {})
+    const off = window.electronAPI.bot?.onScanProgress?.((p: any) => {
+      setState((prev) => ({
+        ...prev,
+        done: p.done ?? prev.done,
+        total: p.total ?? prev.total,
+        currentFile: p.currentFile || '',
+        running: p.running !== false && !prev.cancelled,
+        cancelled: p.cancelled ?? prev.cancelled,
+      }))
+    })
+    return () => off?.()
+  }, [])
+
+  if (!state.running) return null
+  const pct = state.total > 0 ? Math.min(100, Math.round((state.done / state.total) * 100)) : 0
+
+  return (
+    <div style={{ position: 'fixed', right: 18, top: 48, zIndex: 1200, width: 268, padding: '12px 14px', borderRadius: 12, background: 'rgba(18,18,22,0.96)', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 12px 36px rgba(0,0,0,0.35)', color: '#fff', fontFamily: 'inherit' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Поиск дубликатов · {pct}%</div>
+        <button title="Остановить поиск" onClick={() => void window.electronAPI.bot?.cancelScanDuplicates?.()} style={{ border: 0, background: 'transparent', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+      </div>
+      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+        {state.done} из {state.total} кандидатов · фон
+      </div>
+      <div style={{ height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.1)', marginTop: 8, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: 'var(--accent)', borderRadius: 99, transition: 'width 0.3s' }} />
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -291,6 +332,7 @@ function App() {
                 </div>
               )}
               <AggregateProgress />
+              <DuplicateScanIndicator />
               <AnimatedRoutes channelInfo={channelInfo} userInfo={userInfo} handleLogout={handleLogout} updateAvailable={!!updateData} />
             </main>
             <AudioPlayerBar />

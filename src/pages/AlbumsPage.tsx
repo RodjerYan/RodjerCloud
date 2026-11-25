@@ -29,15 +29,19 @@ export default function AlbumsPage() {
   const [albums, setAlbums] = useState(v3store.getAlbums())
   const [newName, setNewName] = useState('')
   const [openAlbum, setOpenAlbum] = useState<string | null>(null)
-  const [hashing, setHashing] = useState(false)
-  const [hashProgress, setHashProgress] = useState({ done: 0, total: 0, sourceTotal: 0, mediaTotal: 0 })
+  const [scanState, setScanState] = useState({ running: false, done: 0, total: 0, currentFile: '', cancelled: false })
+  const [botGroups, setBotGroups] = useState<Array<{ hash: string; files: any[]; totalSize: number }>>([])
+  const hashing = scanState.running
+  const mediaTotal = useMemo(
+    () => allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).length,
+    [allFiles]
+  )
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: any } | null>(null)
   const [renameTarget, setRenameTarget] = useState<any>(null)
   const [renameInput, setRenameInput] = useState('')
   const [showSub, setShowSub] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [duckAnim, setDuckAnim] = useState<any>(null)
-  const [hashTrigger, setHashTrigger] = useState(0)
   const [selectedDupIds, setSelectedDupIds] = useState<Set<number>>(new Set())
   const [dupProgress, setDupProgress] = useState<{ title: string; items: any[]; current: number; total: number; visible: boolean; onClose: () => void } | null>(null)
   const [keepStrategy, setKeepStrategy] = useState<'oldest' | 'newest'>('oldest')
@@ -99,78 +103,69 @@ export default function AlbumsPage() {
     ? SMART_ALBUMS.find(a => a.id === openAlbum) || albums.find(a => a.id === openAlbum) || null
     : null
 
-  const computeHashes = useCallback(async (files: any[], force = false) => {
-    let source = files
-    if (source.length === 0) {
-      const r = await window.electronAPI.telegram.listFiles()
-      if (r?.success && r.data) { source = r.data; setAllFiles(r.data) }
-    }
-    const mediaFiles = source.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
-    const dupKey = (f: any) => `${(f.fileName || '').toLowerCase()}:${f.fileSize || 0}`
-    const keyCount = new Map<string, number>()
-    for (const f of mediaFiles) {
-      const k = dupKey(f)
-      keyCount.set(k, (keyCount.get(k) || 0) + 1)
-    }
-    const candidates: any[] = []
-    for (const f of mediaFiles) {
-      if ((keyCount.get(dupKey(f)) || 0) < 2) continue
-      if (!force) {
-        const existing = v3store.metaFor(f.messageId)
-        if (existing?.hash?.includes(':')) continue
-      }
-      candidates.push(f)
-    }
-    const total = candidates.length
-    const sourceTotal = source.length
-    const mediaTotal = mediaFiles.length
-    if (total === 0) {
-      setHashing(false)
-      setHashTrigger(prev => prev + 1)
-      if (force) toast.info('Нет файлов с совпадающими именем и размером — сравнивать нечего')
-      return
-    }
-    setHashProgress({ done: 0, total, sourceTotal, mediaTotal }); setHashing(true)
-    let done = 0
-    let idx = 0
-    const CONCURRENCY = 4
-    const worker = async () => {
-      while (idx < candidates.length) {
-        const i = idx++
-        const f = candidates[i]
-        try {
-          const r = await window.electronAPI.file.computeHash(f.messageId)
-          if (r.success && r.data) v3store.setMeta({ messageId: f.messageId, hash: r.data })
-        } catch {}
-        done++
-        if (done === total || done % 8 === 0) {
-          setHashProgress(prev => ({ ...prev, done }))
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker()))
-    setHashProgress(prev => ({ ...prev, done: total }))
-    setHashing(false); setAlbums(v3store.getAlbums()); setHashTrigger(prev => prev + 1)
+  const refreshDuplicateGroups = useCallback(async () => {
+    try {
+      const r = await window.electronAPI.bot.getDuplicateGroups()
+      if (r?.success) setBotGroups((r.data || []) as any)
+    } catch {}
   }, [])
 
-  const hashGroups = useMemo(() => {
-    const groups = new Map<string, any[]>()
-    const metaById = new Map<number, string>()
-    v3store.getMeta().forEach(m => { if (m.hash) metaById.set(m.messageId, m.hash) })
-    allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-      const hash = metaById.get(f.messageId)
-      if (!hash) return
-      const key = `${(f.fileName || '').toLowerCase()}:${hash}`
-      const g = groups.get(key) || []
-      g.push(f)
-      groups.set(key, g)
+  useEffect(() => {
+    refreshDuplicateGroups()
+    window.electronAPI.bot.getDuplicateScanState?.().then((r: any) => {
+      if (r?.success && r.data) setScanState(prev => ({ ...prev, ...r.data }))
+    }).catch(() => {})
+    const off = window.electronAPI.bot.onScanProgress?.((p: any) => {
+      setScanState(prev => ({
+        ...prev,
+        done: p.done ?? prev.done,
+        total: p.total ?? prev.total,
+        currentFile: p.currentFile || '',
+        running: p.running !== false && !prev.cancelled,
+        cancelled: p.cancelled ?? prev.cancelled,
+      }))
+      if (p.running === false) refreshDuplicateGroups()
     })
-    return groups
-  }, [allFiles, hashTrigger])
+    return () => off?.()
+  }, [refreshDuplicateGroups])
 
+  const startDuplicateScan = useCallback(async () => {
+    if (scanState.running) return
+    // Передаем в main хеши, посчитанные предыдущими версиями, чтобы не делать работу дважды.
+    const metaById = new Map<number, any>(
+      v3store.getMeta().filter((m: any) => m.hash?.includes(':')).map((m: any) => [m.messageId, m])
+    )
+    const knownHashes = allFiles
+      .filter(f => metaById.has(f.messageId))
+      .map(f => ({
+        messageId: f.messageId,
+        fileName: f.fileName,
+        fileSize: f.fileSize || 0,
+        hash: metaById.get(f.messageId)!.hash,
+        mimeType: f.mimeType,
+      }))
+    setScanState(prev => ({ ...prev, running: true, cancelled: false }))
+    toast.info('Сканирование дубликатов в фоне — можно переходить в другие папки')
+    try {
+      const r = await window.electronAPI.bot.scanDuplicates(knownHashes)
+      if (!r?.success) toast.error(r?.error || 'Не удалось запустить сканирование')
+      await refreshDuplicateGroups()
+    } catch {
+      toast.error('Ошибка сканирования дубликатов')
+    }
+    setScanState(prev => ({ ...prev, running: false }))
+  }, [allFiles, refreshDuplicateGroups, scanState.running])
+
+  const stopDuplicateScan = useCallback(async () => {
+    await window.electronAPI.bot.cancelScanDuplicates?.()
+    setScanState(prev => ({ ...prev, running: false, cancelled: true }))
+  }, [])
+
+  // Группы приходят из main: хеши живут в bot-hash-db.json и переживают навигацию.
   const dupGroupList = useMemo(() => {
-    const list: [string, any[]][] = []
-    hashGroups.forEach((group, key) => { if (group.length > 1) list.push([key, group]) })
+    const list: [string, any[]][] = (botGroups || [])
+      .filter(g => (g.files?.length || 0) > 1)
+      .map(g => [g.hash, g.files] as [string, any[]])
     list.sort((a, b) => {
       const sa = (a[1][0]?.fileSize || 0) * (a[1].length - 1)
       const sb = (b[1][0]?.fileSize || 0) * (b[1].length - 1)
@@ -178,7 +173,7 @@ export default function AlbumsPage() {
       return b[1].length - a[1].length
     })
     return list
-  }, [hashGroups])
+  }, [botGroups])
 
   const sortGroupByStrategy = useCallback((files: any[]) => {
     const sorted = [...files].sort((a, b) => a.messageId - b.messageId)
@@ -213,7 +208,7 @@ export default function AlbumsPage() {
     setVisibleDupCount(DUP_PAGE_SIZE)
     setVisibleAlbumCount(DUP_PAGE_SIZE)
     setAlbumWindowStart(0)
-  }, [openAlbum, hashTrigger])
+  }, [openAlbum])
 
   const visibleDupGroups = useMemo(
     () => dupGroupList.slice(0, visibleDupCount),
@@ -227,14 +222,14 @@ export default function AlbumsPage() {
     const isDuplicates = SMART_ALBUMS.find(a => a.id === currentAlbum.id)?.isDuplicates
     if (isDuplicates) {
       const dups: any[] = []
-      hashGroups.forEach(group => { if (group.length > 1) dups.push(...group) })
+      dupGroupList.forEach(([, group]) => dups.push(...group))
       return dups
     }
     const smart = SMART_ALBUMS.find(a => a.id === currentAlbum.id)
     if (smart?.filter) return allFiles.filter(smart.filter)
     const ua = albums.find(a => a.id === currentAlbum.id)
     if (!ua) return []; return allFiles.filter(f => ua.messageIds.includes(f.messageId))
-  }, [currentAlbum, allFiles, albums, hashGroups])
+  }, [currentAlbum, allFiles, albums, dupGroupList])
 
   const sortedAlbumFiles = useMemo(
     () => [...albumFiles].sort((a, b) => (fileDate(b) - fileDate(a)) || (b.messageId - a.messageId)),
@@ -648,7 +643,7 @@ export default function AlbumsPage() {
       toast.error('Ошибка удаления')
       setDupProgress(prev => prev ? { ...prev, current: prev.total } : prev)
     }
-    setHashTrigger(prev => prev + 1)
+    void refreshDuplicateGroups()
   }
 
   const deleteAllDupsKeepOne = () => {
@@ -662,18 +657,9 @@ export default function AlbumsPage() {
     if (openAlbum) {
       window.electronAPI.telegram.listFiles().then((r: any) => { if (r?.success) setAllFiles(r.data || []) })
       const isDuplicates = SMART_ALBUMS.find(a => a.id === openAlbum)?.isDuplicates
-      if (isDuplicates) {
-        window.electronAPI.bot.getHashDb().then((r: any) => {
-          if (r?.success && r?.data) {
-            for (const e of r.data) {
-              if (e.hash) v3store.setMeta({ messageId: e.messageId, hash: e.hash })
-            }
-            setHashTrigger(prev => prev + 1)
-          }
-        }).catch(() => {})
-      }
+      if (isDuplicates) void refreshDuplicateGroups()
     }
-  }, [openAlbum])
+  }, [openAlbum, refreshDuplicateGroups])
 
 
   const createAlbum = () => {
@@ -891,7 +877,7 @@ export default function AlbumsPage() {
                 <button
                   className="v3-btn"
                   disabled={hashing}
-                  onClick={() => { toast.info('Запуск сканирования…'); computeHashes(allFiles, true) }}
+                  onClick={startDuplicateScan}
                 >
                   <Layers size={14} /> {hashing ? 'Сканирование…' : 'Сканировать'}
                 </button>
@@ -933,18 +919,23 @@ export default function AlbumsPage() {
                   <Loader2 size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 16 }} />
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Поиск дубликатов…</div>
                   <div className="v3-sub">
-                    {hashProgress.done} из {hashProgress.total} кандидатов (совпадают имя и размер)
+                    {scanState.done} из {scanState.total} кандидатов (совпадают имя и размер)
                   </div>
                   <div className="v3-sub" style={{ marginTop: 4, opacity: 0.7 }}>
-                    Всего файлов: {hashProgress.sourceTotal || allFiles.length}
-                    {hashProgress.mediaTotal > 0 ? ` · медиа: ${hashProgress.mediaTotal}` : ''}
+                    Всего файлов: {allFiles.length}{mediaTotal > 0 ? ` · медиа: ${mediaTotal}` : ''}
                   </div>
+                  {scanState.currentFile && (
+                    <div className="v3-sub" style={{ marginTop: 4, opacity: 0.7, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 'auto', marginRight: 'auto' }}>
+                      {scanState.currentFile}
+                    </div>
+                  )}
                   <div className="v3-sub" style={{ marginTop: 4, opacity: 0.7 }}>
-                    Хеш подтверждает содержимое
+                    Хеш подтверждает содержимое · поиск идёт в фоне, можно перейти в другую папку
                   </div>
                   <div style={{ width: 200, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 99, margin: '16px auto 0', overflow: 'hidden' }}>
-                    <div style={{ width: hashProgress.total > 0 ? (hashProgress.done / hashProgress.total) * 100 : 0 + '%', height: '100%', background: 'var(--accent)', borderRadius: 99, transition: 'width 0.3s' }} />
+                    <div style={{ width: scanState.total > 0 ? (scanState.done / scanState.total) * 100 : 0 + '%', height: '100%', background: 'var(--accent)', borderRadius: 99, transition: 'width 0.3s' }} />
                   </div>
+                  <button className="v3-btn" style={{ marginTop: 14 }} onClick={stopDuplicateScan}>Остановить</button>
                 </div>
               ) : dupGroupList.length === 0 ? (
                 <div className="dup-empty" role="status">
@@ -956,7 +947,7 @@ export default function AlbumsPage() {
                     Совпадают имя, размер и хеш содержимого.
                     <br />Запустите сканирование, если добавляли файлы.
                   </div>
-                  <button className="v3-btn primary" onClick={() => { toast.info('Запуск сканирования…'); computeHashes(allFiles, true) }}>
+                  <button className="v3-btn primary" onClick={startDuplicateScan}>
                     Сканировать сейчас
                   </button>
                 </div>
@@ -1226,7 +1217,7 @@ export default function AlbumsPage() {
           {SMART_ALBUMS.map(sa => {
             let count = 0
             if (sa.isDuplicates) {
-              hashGroups.forEach(group => { if (group.length > 1) count += group.length })
+              dupGroupList.forEach(([, group]) => { count += group.length })
             } else if (sa.filter) count = allFiles.filter(sa.filter).length
             return (
               <div key={sa.id} className="v3-card" style={{ padding: 14, cursor: 'pointer' }} onClick={() => setOpenAlbum(sa.id)}>

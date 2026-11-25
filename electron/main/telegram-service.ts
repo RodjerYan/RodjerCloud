@@ -3056,11 +3056,18 @@ if (isEncrypted) {
     return tmpFile
   }
 
-  async computePartialHash(messageId: number): Promise<string> {
+  /** Батчевое чтение сообщений: 40 ID за один запрос вместо 40 одиночных. */
+  async getMessagesByIds(ids: number[]): Promise<any[]> {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
-    const messages = await this.client.getMessages(this.channelId as any, { ids: [messageId] })
-    if (!messages || messages.length === 0) throw new Error('Message not found')
-    const message: any = messages[0]
+    if (ids.length === 0) return []
+    return await this.client.getMessages(this.channelId as any, { ids }) as any[]
+  }
+
+  /** knownMessage приходит из батча и избавляет от повторного getMessages. */
+  async computePartialHash(messageId: number, knownMessage?: any): Promise<string> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const message: any = knownMessage || (await this.client.getMessages(this.channelId as any, { ids: [messageId] }))?.[0]
+    if (!message) throw new Error('Message not found')
     if (!message.file) throw new Error('No file attached to message')
 
     const caption = message.message || ''
