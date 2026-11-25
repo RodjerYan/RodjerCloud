@@ -1167,10 +1167,30 @@ ipcMain.handle('telegram:restore-file', async (_, messageId: number) => {
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
+ipcMain.handle('telegram:restore-batch', async (_, messageIds: number[]) => {
+  try {
+    const r = await telegramService.restoreFilesBatch(messageIds || [])
+    sendFilesChanged()
+    return {
+      success: r.failedIds.length === 0,
+      data: { failedIds: r.failedIds },
+      error: r.failedIds.length > 0 ? 'Часть файлов не восстановлена' : undefined,
+    }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
 ipcMain.handle('telegram:perm-delete-file', async (_, messageId: number) => {
   try {
     await telegramService.permanentDelete(messageId)
     return { success: true }
+  } catch (error) { return { success: false, error: (error as Error).message } }
+})
+
+ipcMain.handle('telegram:perm-delete-batch', async (_, messageIds: number[]) => {
+  try {
+    const r = await telegramService.permanentDeleteBatch(messageIds || [])
+    sendFilesChanged()
+    return { success: r.failed === 0, data: r, error: r.failed > 0 ? 'Часть файлов не удалена' : undefined }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
 
@@ -1299,14 +1319,21 @@ ipcMain.handle('telegram:bulk-download', async (event, items: Array<{ messageId:
 })
 
 ipcMain.handle('telegram:bulk-delete', async (event, messageIds: number[]) => {
-  const results: any[] = []
-  for (let i = 0; i < messageIds.length; i++) {
-    try { await telegramService.trashFile(messageIds[i]); results.push({ success: true }) }
-    catch (e) { results.push({ success: false, error: (e as Error).message }) }
-    event.sender.send('telegram:bulk-progress', { kind: 'delete', index: i + 1, total: messageIds.length })
-    if (i < messageIds.length - 1) await new Promise(r => setTimeout(r, 400))
+  const ids = messageIds || []
+  try {
+    const r = await telegramService.trashFilesBatch(ids, (done, total) => {
+      try { event.sender.send('telegram:bulk-progress', { kind: 'delete', index: done, total }) } catch {}
+    })
+    sendFilesChanged()
+    const failed = new Set(r.failedIds)
+    return {
+      success: failed.size === 0,
+      data: ids.map(id => ({ success: !failed.has(id), error: failed.has(id) ? 'Не удалось обновить caption' : undefined })),
+      error: failed.size > 0 ? 'Часть файлов не перемещена в корзину' : undefined,
+    }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
   }
-  return { success: true, data: results }
 })
 
 ipcMain.handle('app:copy-to-clipboard', async (_, text: string) => {

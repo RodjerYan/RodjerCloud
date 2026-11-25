@@ -48,7 +48,9 @@ declare global {
         deleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
         listTrash: () => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
         restoreFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        restoreFilesBatch: (ids: number[]) => Promise<{ success: boolean; data?: { failedIds: number[] }; error?: string }>
         permDeleteFile: (messageId: number) => Promise<{ success: boolean; error?: string }>
+        permDeleteBatch: (ids: number[]) => Promise<{ success: boolean; data?: { deleted: number; failed: number; failedIds: number[] }; error?: string }>
         clearTrash: (messageIds: number[]) => Promise<{ success: boolean; data?: { deleted: number; ghostsDeleted: number; failed: number; total: number }; error?: string }>
         bulkDownload: (items: Array<{ messageId: number; fileName: string }>) => Promise<{ success: boolean; data?: any; error?: string }>
         bulkDelete: (ids: number[]) => Promise<{ success: boolean; data?: any; error?: string }>

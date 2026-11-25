@@ -682,3 +682,13 @@ background: linear-gradient(180deg, rgba(42, 42, 85, 0.4), transparent);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
 }
+
+/* Выделение рамкой: свайп должен выбирать только файлы, не текст карточек. */
+body.rc-marquee-selecting,
+body.rc-marquee-selecting * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body.rc-marquee-selecting {
+  cursor: crosshair;
+}

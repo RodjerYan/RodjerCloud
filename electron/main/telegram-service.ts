@@ -2670,6 +2670,153 @@ export class TelegramService {
     this.postSyncRunning = false
   }
 
+  /**
+   * Массовое перемещение/восстановление: одну операцию на файл (getMessages +
+   * editMessage + пауза) заменяем одним чтением кэша/канала и параллельными
+   * правками caption. Локальное состояние меняется сразу, поэтому UI не ждёт
+   * ответа Telegram и не показывает «крутилку» после того, как файл уже скрыт.
+   */
+  private async editCaptionSafe(messageId: number, text: string): Promise<void> {
+    try {
+      await this.client!.editMessage(this.channelId as any, { message: messageId, text })
+    } catch (e: any) {
+      const msg = `${e?.message || ''} ${e?.errorMessage || ''}`
+      if (msg.includes('MESSAGE_NOT_MODIFIED')) return
+      if (msg.includes('FLOOD_WAIT') || /420/.test(msg)) {
+        const waitSec = parseInt(msg.match(/FLOOD_WAIT[^\d]*(\d+)/)?.[1] || msg.match(/\d+/)?.[0] || '15', 10)
+        appLog('warn', `[trashBatch] flood wait ${waitSec}s for ${messageId}`)
+        await new Promise(r => setTimeout(r, (waitSec + 1) * 1000))
+        await this.client!.editMessage(this.channelId as any, { message: messageId, text })
+        return
+      }
+      throw e
+    }
+  }
+
+  private async collectTrashCaptions(ids: number[]): Promise<Map<number, string>> {
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const cached = new Map<number, any>()
+    for (const f of this.fileCache) cached.set(f.messageId, f)
+
+    const captions = new Map<number, string>()
+    const missing: number[] = []
+    for (const id of ids) {
+      const f = cached.get(id)
+      if (f && typeof f.caption === 'string') captions.set(id, f.caption)
+      else missing.push(id)
+    }
+    if (missing.length > 0) {
+      const failedChunks: number[][] = []
+      const msgs = await this.fetchMessagesByIds(missing, failedChunks)
+      for (const m of msgs) {
+        const id = this.msgId(m)
+        if (this.isOwnChannelMessage(m)) captions.set(id, m.message || '')
+      }
+      if (failedChunks.length > 0) {
+        appLog('warn', `[trashBatch] caption fetch failed for ${failedChunks.flat().length} id(s), local trash state still applied`)
+      }
+    }
+    return captions
+  }
+
+  private async updateTrashMarkersBatch(
+    messageIds: number[],
+    mode: 'trash' | 'restore',
+    onProgress?: (done: number, total: number) => void
+  ): Promise<{ failedIds: number[] }> {
+    if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
+    const unique = Array.from(new Set(messageIds.filter(id => Number.isFinite(id) && id > 0)))
+    if (unique.length === 0) {
+      onProgress?.(0, 0)
+      return { failedIds: [] }
+    }
+
+    const now = Date.now()
+    const markerEscaped = this.TRASH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const markerRe = new RegExp(`\\n?${markerEscaped}\\d+`)
+
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const cached = new Map<number, any>()
+    for (const f of this.fileCache) cached.set(f.messageId, f)
+
+    // main-сообщение и его #multipart-части должны получить один и тот же маркер
+    const targets = new Set<number>()
+    for (const id of unique) {
+      targets.add(id)
+      const f = cached.get(id)
+      if (f && Array.isArray(f.multipartIds)) {
+        for (const part of f.multipartIds) {
+          const pid = Number(part)
+          if (pid > 0) targets.add(pid)
+        }
+      }
+    }
+
+    for (const id of unique) {
+      if (mode === 'trash') {
+        this.localTrashedIds.set(id, now)
+        this.localRestoredIds.delete(id)
+      } else {
+        this.localTrashedIds.delete(id)
+        this.localRestoredIds.add(id)
+      }
+    }
+    this.saveTrashState()
+
+    const captions = await this.collectTrashCaptions(Array.from(targets))
+    const nextByTarget = new Map<number, string>()
+    for (const id of targets) {
+      const old = captions.get(id)
+      if (!old) continue
+      if (mode === 'trash') {
+        const next = old.includes(this.TRASH_MARKER) ? old : `${old}\n${this.TRASH_MARKER}${now}`
+        if (next !== old) nextByTarget.set(id, next)
+      } else {
+        const next = old.replace(markerRe, '')
+        if (next !== old) nextByTarget.set(id, next)
+      }
+    }
+
+    let cacheDirty = false
+    for (const [id, next] of nextByTarget) {
+      const f = cached.get(id)
+      if (f && f.caption !== next) { f.caption = next; cacheDirty = true }
+    }
+    if (cacheDirty) this.saveFileCache(this.fileCache)
+
+    const edits = Array.from(nextByTarget, ([id, text]) => ({ id, text }))
+    const failedIds: number[] = []
+    const CONCURRENCY = 4
+    let done = 0
+    for (let i = 0; i < edits.length; i += CONCURRENCY) {
+      const chunk = edits.slice(i, i + CONCURRENCY)
+      const settled = await Promise.allSettled(chunk.map(e => this.editCaptionSafe(e.id, e.text)))
+      for (let j = 0; j < chunk.length; j++) {
+        if (settled[j].status === 'rejected') failedIds.push(chunk[j].id)
+      }
+      done += chunk.length
+      onProgress?.(Math.min(done, unique.length), unique.length)
+    }
+    if (edits.length === 0) onProgress?.(unique.length, unique.length)
+
+    appLog('info', `[trashBatch] ${mode} ${unique.length} file(s), edited ${edits.length} message(s), failed ${failedIds.length}`)
+    return { failedIds }
+  }
+
+  async trashFilesBatch(messageIds: number[], onProgress?: (done: number, total: number) => void) {
+    return this.updateTrashMarkersBatch(messageIds, 'trash', onProgress)
+  }
+
+  async restoreFilesBatch(messageIds: number[], onProgress?: (done: number, total: number) => void) {
+    return this.updateTrashMarkersBatch(messageIds, 'restore', onProgress)
+  }
+
   async trashFile(messageId: number) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
     this.localTrashedIds.set(messageId, Date.now())
@@ -2897,16 +3044,16 @@ export class TelegramService {
       failed = result.failed
     }
 
-    // Phase 2: orphan #chunk_of cleanup (bounded scan — MAX_BATCHES/withTimeout as listTrash)
-    let ghostsDeleted = 0
-    try {
-      ghostsDeleted = await this.cleanupOrphanChunks(onOrphansProgress)
-    } catch (e: any) {
-      appLog('warn', `[clearTrash] orphan cleanup failed: ${e?.message || e}`)
-    }
+    // Phase 2: orphan #chunk_of cleanup в фоне. Сканирование 1000 сообщений
+    // упиралось в 8-секундный таймаут и задерживало toast «Удалено» на 10s,
+    // хотя сами файлы уже были удалены. Пользователю нечего ждать — считаем
+    // операцию завершённой сразу после Phase 1.
+    void this.cleanupOrphanChunks(onOrphansProgress)
+      .then(ghosts => appLog('info', `[clearTrash] orphan cleanup finished ghosts=${ghosts}`))
+      .catch((e: any) => appLog('warn', `[clearTrash] orphan cleanup failed: ${e?.message || e}`))
 
-    appLog('info', `[clearTrash] done deleted=${deleted} ghostsDeleted=${ghostsDeleted} failed=${failed} total=${total}`)
-    return { deleted, ghostsDeleted, failed, total }
+    appLog('info', `[clearTrash] done deleted=${deleted} failed=${failed} total=${total} (orphan scan in background)`)
+    return { deleted, ghostsDeleted: 0, failed, total }
   }
 
   /**

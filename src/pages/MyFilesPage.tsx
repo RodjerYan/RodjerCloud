@@ -204,6 +204,8 @@ export default function MyFilesPage() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isSelecting.current || !selectionStart.current) return
+      // Свайп выбирает файлы, а не текст внутри карточек.
+      window.getSelection()?.removeAllRanges()
       
       cancelAnimationFrame(rafRef.current)
       rafRef.current = requestAnimationFrame(() => {
@@ -256,6 +258,8 @@ export default function MyFilesPage() {
         elementRectsRef.current.clear()
         cancelAnimationFrame(rafRef.current)
       }
+      document.body.classList.remove('rc-marquee-selecting')
+      window.getSelection()?.removeAllRanges()
     }
     
     window.addEventListener('mousemove', handleMouseMove)
@@ -265,6 +269,7 @@ export default function MyFilesPage() {
       window.removeEventListener('mouseup', handleMouseUp)
       cancelAnimationFrame(rafRef.current)
       elementRectsRef.current.clear()
+      document.body.classList.remove('rc-marquee-selecting')
     }
   }, [])
 
@@ -274,6 +279,10 @@ export default function MyFilesPage() {
     const handleGlobalMouseDown = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.mf-card, .mf-folder-card, .mf-table, .v3-btn, button, input, .mf-gm-card')) return
       if (e.button !== 0) return
+      // Иначе браузер параллельно с рамкой выделяет текст названий файлов.
+      e.preventDefault()
+      window.getSelection()?.removeAllRanges()
+      document.body.classList.add('rc-marquee-selecting')
       const currentScroll = container.scrollTop
       selectionStart.current = { x: e.clientX, y: e.clientY, scrollY: currentScroll }
       isSelecting.current = true
@@ -1929,8 +1938,7 @@ export default function MyFilesPage() {
     }
     if (!(await appConfirm(`Переместить ${ids.length} файлов в корзину?`))) return
     const selectedFiles = pool.filter((f: any) => ids.includes(f.messageId))
-    let hadError = false
-    
+
     let x = 0.5, y = 0.5
     if (e) {
       x = e.clientX / window.innerWidth
@@ -1945,80 +1953,32 @@ export default function MyFilesPage() {
       zIndex: 9999
     })
 
-    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
-    setDeletingIds(prev => {
-      const n = new Set(prev)
-      ids.forEach(id => n.add(id))
-      return n
+    // Локальное состояние — источник истины для UI: убираем файлы из списка и
+    // показываем «Готово» сразу. Обновление caption в канале идёт в фоне, поэтому
+    // никакой «крутилки» после подтверждения больше нет.
+    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'done' as const }))
+    setProgressModal({ title: 'Перемещение в корзину', items, current: ids.length, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
+
+    ids.forEach(id => {
+      locallyDeletedIds.current.add(id)
+      setFiles(prev => prev.filter(x => x.messageId !== id))
+      setFolderFiles(prev => prev.filter((x: any) => x.messageId !== id))
     })
-    toast.info('Перемещение в корзину…')
-
-    setProgressModal({ title: 'Перемещение в корзину', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
-
-    const removeFromLists = (fid: number) => {
-      locallyDeletedIds.current.add(fid)
-      setFiles(prev => prev.filter(x => x.messageId !== fid))
-      setFolderFiles(prev => prev.filter((x: any) => x.messageId !== fid))
-    }
-
-    const onProgress = (data: { kind: string; index: number; total: number }) => {
-      if (data.kind !== 'delete') return
-      setProgressModal(prev => {
-        if (!prev) return prev
-        const newItems = prev.items.map((it, i) => {
-          if (i < data.index) return { ...it, status: 'done' as const }
-          if (i === data.index - 1) return { ...it, status: 'done' as const }
-          if (i === data.index) return { ...it, status: 'active' as const }
-          return it
-        })
-        return { ...prev, items: newItems, current: data.index }
-      })
-      if (data.index >= 1 && data.index <= ids.length) {
-        removeFromLists(ids[data.index - 1])
-      }
-    }
-    const unsub = window.electronAPI.telegram.onBulkProgress(onProgress)
-
+    setDeletingIds(new Set())
     clearSelection()
-
-    try {
-      const r = await window.electronAPI.telegram.bulkDelete(ids)
-      unsub()
-
-      if (r.success) {
-        setProgressModal(prev => {
-          if (!prev) return prev
-          return { ...prev, items: prev.items.map(it => ({ ...it, status: 'done' as const })), current: prev.total }
-        })
-        ids.forEach(removeFromLists)
-      } else {
-        hadError = true
-        setProgressModal(prev => {
-          if (!prev) return prev
-          const newItems = prev.items.map((it, i) => {
-            const result = r.data?.[i]
-            return { ...it, status: result?.success ? 'done' as const : 'error' as const }
-          })
-          return { ...prev, items: newItems, current: prev.total }
-        })
-      }
-    } catch (err) {
-      unsub()
-      hadError = true
-      setProgressModal(prev => {
-        if (!prev) return prev
-        return { ...prev, items: prev.items.map(it => ({ ...it, status: 'error' as const })), current: prev.total }
-      })
-    }
-    if (hadError) toast.error('Часть файлов не удалась')
-    setDeletingIds(prev => {
-      const n = new Set(prev)
-      ids.forEach(id => n.delete(id))
-      return n
-    })
     setIsDragOver(false)
     dragCounter.current = 0
     setSelectionBox(null)
+    toast.success('Перемещено в корзину')
+
+    void (async () => {
+      try {
+        const r = await window.electronAPI.telegram.bulkDelete(ids)
+        if (!r.success) toast.error(r.error || 'Не удалось обновить канал')
+      } catch (err: any) {
+        toast.error('Ошибка перемещения в корзину: ' + (err?.message || String(err || '')))
+      }
+    })()
   }
   const bulkDownload = async () => {
     if (selected.size === 0) return

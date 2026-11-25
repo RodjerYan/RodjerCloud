@@ -366,15 +366,8 @@ export default function TrashPage() {
     }
     safeViewTransition(applyRemove)
 
-    let allSuccess = true
-    for (const id of ids) {
-      const r = await window.electronAPI.telegram.restoreFile(id)
-      if (!r.success) allSuccess = false
-    }
-    if (allSuccess) {
-      toast.success(`Восстановлено ${ids.length} файлов`)
-    } else {
-      toast.error('Ошибка восстановления некоторых файлов')
+    toast.success(`Восстановлено ${ids.length} файлов`)
+    void (async () => {
       const revert = () => {
         flushSync(() => {
           setFiles(prev => {
@@ -384,8 +377,17 @@ export default function TrashPage() {
           })
         })
       }
-      safeViewTransition(revert)
-    }
+      try {
+        const r = await window.electronAPI.telegram.restoreFilesBatch(ids)
+        if (!r.success) {
+          toast.error(r.error || 'Ошибка восстановления некоторых файлов')
+          safeViewTransition(revert)
+        }
+      } catch {
+        toast.error('Ошибка восстановления некоторых файлов')
+        safeViewTransition(revert)
+      }
+    })()
   }
 
   const handleBulkPurge = async (e?: React.MouseEvent) => {
@@ -403,49 +405,28 @@ export default function TrashPage() {
     confetti({ particleCount: 150, spread: 120, origin: { x, y }, colors: ['#ef4444', '#dc2626', '#a1a1aa'], disableForReducedMotion: true, zIndex: 9999 })
 
     const selectedFiles = files.filter(f => ids.includes(f.messageId))
-    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'pending' as const }))
-    setProgressModal({ title: 'Удаление навсегда', items, current: 0, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
+    const items = selectedFiles.map(f => ({ name: f.fileName, status: 'done' as const }))
+    setProgressModal({ title: 'Удаление навсегда', items, current: ids.length, total: ids.length, visible: true, onClose: () => setProgressModal(null) })
 
     clearSelection()
-    let successCount = 0
-    let errorCount = 0
-
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i]
-      setProgressModal(prev => {
-        if (!prev) return prev
-        const newItems = prev.items.map((it, idx) => {
-          if (idx < i) return { ...it, status: 'done' as const }
-          if (idx === i) return { ...it, status: 'active' as const }
-          return it
-        })
-        return { ...prev, items: newItems, current: i }
-      })
-      const r = await window.electronAPI.telegram.permDeleteFile(id)
-      if (r.success) {
-        successCount++
-        setFiles(prev => prev.filter(f => f.messageId !== id))
-        setProgressModal(prev => {
-          if (!prev) return prev
-          const newItems = prev.items.map((it, idx) => idx === i ? { ...it, status: 'done' as const } : it)
-          return { ...prev, items: newItems, current: i + 1 }
-        })
-      } else {
-        errorCount++
-        setProgressModal(prev => {
-          if (!prev) return prev
-          const newItems = prev.items.map((it, idx) => idx === i ? { ...it, status: 'error' as const } : it)
-          return { ...prev, items: newItems, current: i + 1 }
-        })
-      }
-    }
-
-    setProgressModal(prev => {
-      if (!prev) return prev
-      return { ...prev, current: prev.total }
+    flushSync(() => {
+      const idSet = new Set(ids)
+      setFiles(prev => prev.filter(f => !idSet.has(f.messageId)))
     })
-    if (errorCount > 0) toast.error(`Удалено ${successCount}, ошибок ${errorCount}`)
-    else toast.success(`Удалено навсегда ${successCount} файлов`)
+    toast.success(`Удалено навсегда ${ids.length} файлов`)
+
+    void (async () => {
+      try {
+        const r = await window.electronAPI.telegram.permDeleteBatch(ids)
+        if (!r.success || (r.data?.failed ?? 0) > 0) {
+          toast.error(r.error || 'Некоторые файлы не удалены')
+          load()
+        }
+      } catch {
+        toast.error('Ошибка удаления')
+        load()
+      }
+    })()
   }
 
   const handleClearTrash = async (e?: React.MouseEvent) => {

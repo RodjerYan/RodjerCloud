@@ -59,7 +59,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (messageId: number) => ipcRenderer.invoke('telegram:delete-file', messageId),
     listTrash: () => ipcRenderer.invoke('telegram:list-trash'),
     restoreFile: (messageId: number) => ipcRenderer.invoke('telegram:restore-file', messageId),
+    restoreFilesBatch: (ids: number[]) => ipcRenderer.invoke('telegram:restore-batch', ids),
     permDeleteFile: (messageId: number) => ipcRenderer.invoke('telegram:perm-delete-file', messageId),
+    permDeleteBatch: (ids: number[]) => ipcRenderer.invoke('telegram:perm-delete-batch', ids),
     clearTrash: (messageIds: number[]) => ipcRenderer.invoke('telegram:clear-trash', messageIds),
     cacheAudio: (messageId: number, fileName: string) => ipcRenderer.invoke('telegram:cache-audio', messageId, fileName),
     bulkDownload: (items: Array<{ messageId: number; fileName: string }>) =>
