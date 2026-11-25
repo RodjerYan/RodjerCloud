@@ -28,6 +28,7 @@ function shareLog(...args: unknown[]) {
 
 const TRASH_DATA_PATH = path.join(app.getPath('userData'), 'trashed_ids.json')
 const FILE_CACHE_PATH = path.join(app.getPath('userData'), 'file-cache.json')
+const CHANNEL_ID_PATH = path.join(app.getPath('userData'), 'channel-id.json')
 const APP_LOG_PATH = path.join(app.getPath('userData'), 'rodjercloud.log')
 // T-20260925-002 P4: расширения видео (пробы размеров для file-cache)
 const VIDEO_EXT_RE = /\.(mov|mp4|m4v|mkv|webm|avi|3gp|mts|m2ts|flv|wmv)$/i
@@ -123,6 +124,8 @@ export class TelegramService {
   private client: TelegramClient | null = null
   private phoneNumber: string = ''
   private channelId: bigint | null = null
+  /** messageId, которые сервер подтвердил как пересланные/из другого чата. */
+  private foreignCacheIds = new Set<number>()
   private uploadChain: Promise<void> = Promise.resolve()
 
   private heavyThumbQueue: { messageId: number, message: any, cachePath: string, partialVideo?: boolean, escalated?: boolean }[] = []
@@ -715,35 +718,73 @@ export class TelegramService {
     }
   }
 
+  /** Только приватный канал (не группа, не личный чат, не Saved Messages). */
+  private isStorageChannelEntity(entity: any): boolean {
+    return !!entity &&
+      (entity instanceof Api.Channel || entity.className === 'Channel') &&
+      entity.broadcast === true &&
+      !entity.megagroup
+  }
+
+  private persistChannelId(id: bigint) {
+    try {
+      fs.writeFileSync(CHANNEL_ID_PATH, JSON.stringify({ channelId: id.toString() }), 'utf8')
+    } catch {}
+  }
+
+  private readPersistedChannelId(): bigint | null {
+    try {
+      const raw = JSON.parse(fs.readFileSync(CHANNEL_ID_PATH, 'utf8'))
+      if (raw?.channelId) return BigInt(String(raw.channelId))
+    } catch {}
+    return null
+  }
+
+  private async resolvePersistedChannel(): Promise<any | null> {
+    const id = this.readPersistedChannelId()
+    if (!id || !this.client) return null
+    try {
+      const entity = await this.client.getEntity(new Api.PeerChannel({ channelId: bigInt(id.toString()) }))
+      if (this.isStorageChannelEntity(entity)) {
+        this.channelId = id
+        return entity
+      }
+      appLog('warn', `[channel] saved id ${id} is not a broadcast channel, ignoring`)
+    } catch (e) {
+      appLog('warn', `[channel] saved channel unavailable: ${(e as Error).message}`)
+    }
+    return null
+  }
+
   async createPrivateChannel() {
     if (!this.client) throw new Error('Client not initialized')
+
+    // Сначала сохранённый ID: так переименование канала не приведёт к созданию
+    // нового и не подменит источник файлов другим чатом.
+    const saved = await this.resolvePersistedChannel()
+    if (saved) {
+      return { channelId: this.channelId!.toString(), channelName: saved.title || CHANNEL_NAME }
+    }
 
     try {
       const dialogs = await this.client.getDialogs({ limit: 200 })
       const matches: any[] = []
       for (const dialog of dialogs) {
         const entity = dialog.entity as any
-        if (entity?.title && typeof entity.title === 'string' && entity.title === CHANNEL_NAME) {
-          matches.push(entity)
+        if (this.isStorageChannelEntity(entity) && entity.title === CHANNEL_NAME) {
+          matches.push({ entity, lastDate: dialog.date || 0 })
         }
       }
       if (matches.length > 0) {
-        let activeChannel = matches[0]
-        let latestDate = 0
-        for (const match of matches) {
-          try {
-            const msgs = await this.client.getMessages(match.id, { limit: 1 })
-            const date = msgs.length > 0 ? msgs[0].date : 0
-            if (date >= latestDate) {
-              latestDate = date
-              activeChannel = match
-            }
-          } catch (e) {}
+        let activeMatch = matches[0]
+        for (const m of matches) {
+          if (m.lastDate >= activeMatch.lastDate) activeMatch = m
         }
-        this.channelId = BigInt(activeChannel.id.toString())
+        this.channelId = BigInt(activeMatch.entity.id.toString())
+        this.persistChannelId(this.channelId)
         return {
           channelId: this.channelId.toString(),
-          channelName: activeChannel.title,
+          channelName: activeMatch.entity.title,
         }
       }
     } catch (e) {
@@ -761,6 +802,7 @@ export class TelegramService {
     if (result.chats && result.chats.length > 0) {
       const channel = result.chats[0] as any
       this.channelId = BigInt(channel.id.toString())
+      this.persistChannelId(this.channelId)
       this.setChannelPhoto()
       return {
         channelId: this.channelId.toString(),
@@ -779,11 +821,22 @@ export class TelegramService {
     this.client = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 5, floodSleepThreshold: 120 })
     await this.client.connect()
 
+    const saved = await this.resolvePersistedChannel()
+    if (saved) {
+      // Save session and suppress self-heal for 60s after successful reconnect
+      this.lastSession = sessionString
+      this.suppressSelfHealUntil = Date.now() + 60_000
+      return {
+        channelId: this.channelId!.toString(),
+        channelName: saved.title || CHANNEL_NAME,
+      }
+    }
+
     const dialogs = await this.client.getDialogs({ limit: 200 })
     const matches: any[] = []
     for (const dialog of dialogs) {
       const entity = dialog.entity as any
-      if (entity?.title && typeof entity.title === 'string' && entity.title === CHANNEL_NAME) {
+      if (this.isStorageChannelEntity(entity) && entity.title === CHANNEL_NAME) {
         matches.push({ entity, lastDate: dialog.date || 0 })
       }
     }
@@ -793,6 +846,7 @@ export class TelegramService {
         if (m.lastDate >= activeMatch.lastDate) activeMatch = m
       }
       this.channelId = BigInt(activeMatch.entity.id.toString())
+      this.persistChannelId(this.channelId)
       // Save session and suppress self-heal for 60s after successful reconnect
       this.lastSession = sessionString
       this.suppressSelfHealUntil = Date.now() + 60_000
@@ -1297,8 +1351,19 @@ export class TelegramService {
     }
   }
 
+  /** Файлы берём только из нашего канала: пересланное из диалогов/избранного не показываем. */
+  private isOwnChannelMessage(m: any): boolean {
+    if (!m) return false
+    if (m.fwdFrom || m.savedPeerId) return false
+    const peer: any = m.peerId
+    const peerChannelId = peer?.channelId
+    if (peerChannelId && this.channelId && BigInt(peerChannelId.toString()) !== this.channelId) return false
+    return true
+  }
+
   private isFileVisible(m: any) {
     if (!m.file || m.message === TelegramService.STATE_CAPTION) return false
+    if (!this.isOwnChannelMessage(m)) return false
     const msgId = this.msgId(m)
     if (this.localTrashedIds.has(msgId)) return false
     if (this.localRestoredIds.has(msgId)) return true
@@ -1677,6 +1742,10 @@ export class TelegramService {
 
   private isCachedEntryVisible(f: any): boolean {
     if (!f || !f.messageId) return false
+    if (this.foreignCacheIds.has(f.messageId)) return false
+    // Кэш может остаться от предыдущего канала/версии — чужие записи не показываем.
+    const currentChatId = this.channelId ? String(this.channelId).replace(/^-100/, '') : ''
+    if (currentChatId && f.chatId && String(f.chatId).replace(/^-100/, '') !== currentChatId) return false
     if (this.localTrashedIds.has(f.messageId)) return false
     if (this.localRestoredIds.has(f.messageId)) return true
     const caption: string = f.caption || ''
@@ -2058,6 +2127,7 @@ export class TelegramService {
 
     this.verifyingCacheIds = true
     const deletedIds: number[] = []
+    const foreignIds: number[] = []
     const CHUNK = 100
     let accumulatedStallMs = 0
 
@@ -2111,6 +2181,9 @@ export class TelegramService {
         for (let j = 0; j < chunkIds.length; j++) {
           if (!fetched[j]) {
             deletedIds.push(chunkIds[j])
+          } else if (!this.isOwnChannelMessage(fetched[j])) {
+            // Пересланное из других чатов/избранного было сохранено старой версией кэша.
+            foreignIds.push(chunkIds[j])
           }
         }
 
@@ -2118,11 +2191,13 @@ export class TelegramService {
         await new Promise(r => setTimeout(r, 300))
       }
 
-      if (deletedIds.length > 0) {
-        this.removeIdsFromFileCache(deletedIds)
-        appLog('warn', `[sync] verified ${allIds.length} ids, removed ${deletedIds.length} deleted`)
+      const dropIds = Array.from(new Set([...deletedIds, ...foreignIds]))
+      for (const id of foreignIds) this.foreignCacheIds.add(id)
+      if (dropIds.length > 0) {
+        this.removeIdsFromFileCache(dropIds)
+        appLog('warn', `[sync] verified ${allIds.length} ids, removed ${deletedIds.length} deleted, ${foreignIds.length} foreign`)
       } else {
-        appLog('info', `[sync] verified ${allIds.length} ids, removed 0 deleted`)
+        appLog('info', `[sync] verified ${allIds.length} ids, removed 0 foreign/deleted`)
       }
     } finally {
       this.verifyingCacheIds = false
@@ -3589,11 +3664,8 @@ if (isEncrypted) {
     return null
   }
 
-  async forwardMessages(toPeer: bigint, messageIds: number[], fromPeer: bigint) {
-    if (!this.client) throw new Error('Client not initialized')
-    const ids = [...messageIds]
-    await (this.client as any).forwardMessages(fromPeer, { messages: ids, toPeer })
-  }
+  // Удалено: импорт сообщений из других чатов в облако запрещён.
+  // Источник файлов — только Messages API основного приватного канала.
 
   async getUserId(): Promise<bigint> {
     if (!this.client) throw new Error('Client not initialized')
@@ -4161,7 +4233,7 @@ if (isEncrypted) {
     if (this.stateMsgId) {
       try {
         const msgs = await this.client.getMessages(this.channelId as any, { ids: [this.stateMsgId] })
-        if (msgs && msgs.length > 0 && (msgs[0] as any).file) {
+        if (msgs && msgs.length > 0 && (msgs[0] as any).file && this.isOwnChannelMessage(msgs[0])) {
           const tmpDir = app.getPath('temp')
           const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)
           await this.client.downloadMedia(msgs[0] as any, { outputFile: tmpFile } as any)
@@ -4187,7 +4259,7 @@ if (isEncrypted) {
     const allMsgs = await this.client.getMessages(this.channelId as any, { limit: 200 } as any)
     for (const m of allMsgs) {
       const msg = m as any
-      if (msg.file && msg.message === TelegramService.STATE_CAPTION) {
+      if (msg.file && msg.message === TelegramService.STATE_CAPTION && this.isOwnChannelMessage(msg)) {
         this.saveStateMsgId(this.msgId(msg))
         const tmpDir = app.getPath('temp')
         const tmpFile = path.join(tmpDir, TelegramService.STATE_FILENAME)

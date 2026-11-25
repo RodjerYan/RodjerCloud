@@ -75,7 +75,7 @@ export default function AudioPlayerBar() {
   const VolIcon = shownVolume === 0 ? VolumeX : shownVolume < 0.5 ? Volume1 : Volume2
 
   return (
-    <div className="ap-bar" style={{
+    <div className={`ap-bar ap-mini-bar${playing ? ' is-playing' : ''}`} style={{
       position: 'fixed', bottom: 16, left: 'calc(var(--sidebar-w, 200px) + 16px)', right: 16,
       height: 90, borderRadius: 24,
       background: 'rgba(12, 14, 26, 0.95)',
@@ -99,7 +99,13 @@ export default function AudioPlayerBar() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)', color: '#fff', flexShrink: 0
         }}>
-          <Music size={24} opacity={0.8} />
+          {playing ? (
+            <div className="ap-mini-eq" aria-hidden="true">
+              <span /><span /><span /><span />
+            </div>
+          ) : (
+            <Music size={24} opacity={0.8} />
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -118,7 +124,7 @@ export default function AudioPlayerBar() {
             <SkipBack size={20} fill="currentColor" />
           </button>
           
-          <button onClick={togglePlay} style={{
+          <button className="ap-mini-play" onClick={togglePlay} style={{
             width: 40, height: 40, borderRadius: '50%', border: 'none',
             background: '#fff', color: '#000',
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
@@ -137,7 +143,7 @@ export default function AudioPlayerBar() {
           <div ref={progressRef} onClick={handleSeek} style={{
             flex: 1, height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 99, cursor: 'pointer', position: 'relative',
           }}>
-            <div style={{
+            <div className="ap-mini-progress-fill" style={{
               width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`, height: '100%',
               background: '#fff', borderRadius: 99,
             }} />

@@ -261,3 +261,74 @@
   0% { height: 4px; }
   100% { height: 14px; }
 }
+
+/* Mini-player: живое, но ненавязчивое дыхание во время воспроизведения */
+@keyframes ap-mini-breathe {
+  0%, 100% {
+    transform: translateY(0);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 0 rgba(124, 131, 255, 0);
+  }
+  50% {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 44px rgba(0, 0, 0, 0.52), 0 0 22px rgba(124, 131, 255, 0.16);
+  }
+}
+
+@keyframes ap-mini-ring {
+  0% { box-shadow: 0 0 0 0 rgba(124, 131, 255, 0.32); }
+  70% { box-shadow: 0 0 0 8px rgba(124, 131, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(124, 131, 255, 0); }
+}
+
+@keyframes ap-mini-progress-glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(124, 131, 255, 0); }
+  50% { box-shadow: 0 0 10px rgba(124, 131, 255, 0.55); }
+}
+
+@keyframes ap-mini-eq-bars {
+  0% { height: 5px; opacity: 0.65; }
+  100% { height: 22px; opacity: 1; }
+}
+
+.ap-mini-bar.is-playing {
+  animation: ap-mini-breathe 3.2s ease-in-out infinite;
+}
+
+.ap-mini-bar.is-playing .ap-mini-play {
+  animation: ap-mini-ring 2.6s ease-out infinite;
+}
+
+.ap-mini-bar.is-playing .ap-mini-progress-fill {
+  animation: ap-mini-progress-glow 2.6s ease-in-out infinite;
+}
+
+.ap-mini-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+
+.ap-mini-eq span {
+  width: 3px;
+  height: 5px;
+  border-radius: 99px;
+  background: #fff;
+  animation: ap-mini-eq-bars 900ms ease-in-out infinite alternate;
+}
+
+.ap-mini-eq span:nth-child(1) { animation-delay: -450ms; }
+.ap-mini-eq span:nth-child(2) { animation-delay: -150ms; }
+.ap-mini-eq span:nth-child(3) { animation-delay: -650ms; }
+.ap-mini-eq span:nth-child(4) { animation-delay: -300ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ap-mini-bar.is-playing,
+  .ap-mini-bar.is-playing .ap-mini-play,
+  .ap-mini-bar.is-playing .ap-mini-progress-fill,
+  .ap-mini-eq span {
+    animation: none;
+  }
+
+  .ap-mini-eq span { height: 12px; opacity: 0.85; }
+}
