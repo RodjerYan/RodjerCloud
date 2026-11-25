@@ -828,7 +828,12 @@ async function runUpload(job: UploadJob): Promise<void> {
     }
     sendProgress(result.fileSize, result.fileSize)
     log('info', `[upload] done: ${job.filePath} (${result.fileSize} bytes, ${Math.floor((Date.now() - startTime) / 1000)}s)`)
-    try { telegramService.addUploadedFileToCache(result) } catch {}
+    try {
+      await telegramService.confirmUploadedFile(result.messageId, result)
+    } catch (e) {
+      log('warn', `[upload] cache confirm failed: ${(e as Error).message}`)
+      try { telegramService.addUploadedFileToCache(result) } catch (e2) { log('warn', `[upload] fallback cache add failed: ${(e2 as Error).message}`) }
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       try { mainWindow.webContents.send('telegram:upload-complete', { id: job.id, success: true, data: result }) } catch {}
     }

@@ -1199,7 +1199,10 @@ export class TelegramService {
       messageId: mainMessageId as number,
       fileName,
       fileSize: originalSizeBytes,
-      uploadedAt: fileTime,
+      // Это именно время загрузки в облако. Дата создания файла — отдельное поле,
+      // иначе новые файлы попадают в прошлое и не видны в «Моих файлах».
+      uploadedAt: Math.floor(Date.now() / 1000),
+      originalDate: fileTime,
       mimeType: detectedMime,
       hash: fileHash,
       isEncrypted: !!encrypt,
@@ -2504,7 +2507,92 @@ export class TelegramService {
     void this.processDimsNetQueue()
   }
 
-  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; mimeType?: string; isEncrypted?: boolean; hash?: string; isMultipart?: boolean; multipartIds?: number[]; width?: number; height?: number; duration?: number }) {
+  /**
+   * После загрузки перечитываем сообщение из канала и добавляем в кэш уже по
+   * серверным данным. Раньше ошибка addUploadedFileToCache гасилась молча,
+   * и файл, видимый в Telegram, оставался невидимым в «Моих файлах».
+   */
+  async confirmUploadedFile(messageId: number, fallback: any): Promise<void> {
+    if (!this.client || !this.channelId || !messageId) {
+      this.addUploadedFileToCache(fallback)
+      return
+    }
+    try {
+      const msgs = await this.client.getMessages(this.channelId as any, {
+        ids: [messageId],
+        waitTime: 0,
+      } as any)
+      const msg = (msgs || []).find((m: any) => m && this.msgId(m) === messageId)
+      if (msg && this.isFileVisible(msg)) {
+        const entry: any = this.parseFileMessage(msg)
+        entry.hash = fallback?.hash || entry.hash
+        entry.width = fallback?.width || entry.width
+        entry.height = fallback?.height || entry.height
+        entry.duration = fallback?.duration ?? entry.duration
+        if (!this.fileCache.some((f: any) => f.messageId === messageId)) {
+          this.fileCache.push(entry)
+          this.fileCache.sort((a: any, b: any) => (b.messageId || 0) - (a.messageId || 0))
+        }
+        if (messageId > (this.cacheMeta.latestMessageId || 0)) {
+          this.cacheMeta = { ...this.cacheMeta, latestMessageId: messageId, lastSyncAt: Date.now() }
+        }
+        this.saveFileCache(this.fileCache)
+        return
+      }
+      appLog('warn', `[upload] message ${messageId} not found/visible in channel, using local fallback`)
+    } catch (e) {
+      appLog('warn', `[upload] confirm ${messageId} failed: ${(e as Error).message}, using local fallback`)
+    }
+    this.addUploadedFileToCache(fallback)
+  }
+
+  /**
+   * Раньше locally-добавленные файлы получали uploadedAt = дате создания файла,
+   * из-за чего свежая загрузка оставлялась в старом дне и не находилась в UI.
+   */
+  private async repairLocalUploadDates(): Promise<void> {
+    if (!this.client || !this.channelId) return
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
+    const suspects = this.fileCache.filter((f: any) =>
+      !f.originalDate && typeof f.uploadedAt === 'number' && /^#origsize/.test(f.caption || '')
+    )
+    if (suspects.length === 0) return
+    let repaired = 0
+    for (let i = 0; i < suspects.length; i += 100) {
+      const chunk = suspects.slice(i, i + 100)
+      try {
+        const fetched = await this.client.getMessages(this.channelId as any, {
+          ids: chunk.map((f: any) => f.messageId),
+          waitTime: 0,
+        } as any)
+        const byId = new Map<number, any>()
+        for (const m of fetched || []) {
+          if (m) byId.set(this.msgId(m), m)
+        }
+        for (const row of chunk as any[]) {
+          const m = byId.get(row.messageId)
+          if (!m || !this.isOwnChannelMessage(m)) continue
+          const serverDate = typeof m.date === 'number' ? m.date : this.toNum(m.date)
+          if (!serverDate) continue
+          const created = (m.message || '').match(/Created:\s*(.+)/)
+          row.originalDate = created ? new Date(created[1]).getTime() / 1000 : row.uploadedAt
+          row.uploadedAt = serverDate
+          repaired++
+        }
+      } catch (e) {
+        appLog('warn', `[cache] upload-date repair chunk failed: ${(e as Error).message}`)
+      }
+    }
+    if (repaired > 0) {
+      this.saveFileCache(this.fileCache)
+      appLog('info', `[cache] repaired ${repaired} local upload dates`)
+    }
+  }
+
+  addUploadedFileToCache(result: { messageId: number; fileName: string; fileSize: number; uploadedAt: number; originalDate?: number; mimeType?: string; isEncrypted?: boolean; hash?: string; isMultipart?: boolean; multipartIds?: number[]; width?: number; height?: number; duration?: number }) {
     if (!result?.messageId) return
     const existing = this.fileCache.find((f: any) => f.messageId === result.messageId)
     if (existing) return
@@ -2517,7 +2605,7 @@ export class TelegramService {
       fileSize: result.fileSize,
       mimeType: result.mimeType || 'application/octet-stream',
       uploadedAt: result.uploadedAt || Math.floor(Date.now() / 1000),
-      originalDate: undefined as number | undefined,
+      originalDate: result.originalDate || undefined,
       caption: isMultipart ? `#origsize ${result.fileSize}\n#multipart ${multipartIds.join(',')}` : `#origsize ${result.fileSize}`,
       chatId: this.channelId ? String(this.channelId).replace(/^-100/, '') : '',
       isEncrypted: !!result.isEncrypted,
@@ -2570,6 +2658,7 @@ export class TelegramService {
     try {
       await new Promise(r => setTimeout(r, 5000))
       this.emitReadProgress({ phase: 'verify', label: 'Сверяем список с облаком', files: this.fileCache.length })
+      try { await this.repairLocalUploadDates() } catch (e) { console.warn('[postSyncEnrichment] repair dates error:', (e as Error).message) }
       try { await this.verifyCachedIdsAgainstServer() } catch (e) { console.warn('[syncFilesInBackground] verifyCachedIds error:', (e as Error).message) }
       this.emitReadProgress({ phase: 'verify', label: 'Уточняем данные файлов', files: this.fileCache.length })
       await this.healVideoDimensions()
