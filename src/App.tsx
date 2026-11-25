@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react"
 import { MemoryRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import SplashScreen from "./components/SplashScreen"
-import DuckSplash from "./components/DuckSplash"
+import CloudLoadingScreen from "./components/CloudLoadingScreen"
 import LoginScreen from "./components/LoginScreen"
 import Sidebar from "./components/Sidebar"
 import CommandPalette from "./components/CommandPalette"
@@ -235,7 +235,7 @@ function App() {
       <ErrorBoundary>
         <div style={{ position: 'relative', height: '100%' }}>
           <Titlebar />
-          <DuckSplash onDone={handleDuckDone} />
+          <CloudLoadingScreen onDone={handleDuckDone} />
         </div>
       </ErrorBoundary>
     )

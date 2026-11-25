@@ -34,11 +34,17 @@
       {
         "target": "dmg",
         "arch": [
-          "arm64",
-          "x64"
+          "arm64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "arm64"
         ]
       }
     ],
+    "artifactName": "RodjerCloud-${version}-arm64.${ext}",
     "icon": "resources/icon.icns",
     "category": "public.app-category.utilities",
     "hardenedRuntime": true,

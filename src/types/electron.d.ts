@@ -32,6 +32,9 @@ declare global {
         getUploadState: () => Promise<{ success: boolean; data?: { queue: TelegramFile[]; activeUploads: number; uploadsInProgress: boolean }; error?: string }>
         onQueueState: (cb: (data: { queue: TelegramFile[]; activeUploads: number }) => void) => () => void
         onBulkProgress: (cb: (data: { kind: string; index: number; total: number }) => void) => () => void
+        onCloudProgress: (cb: (data: { phase: string; label: string; scanned?: number; total?: number; files?: number; batch?: number; percent?: number }) => void) => () => void
+        onCloudLoaded: (cb: () => void) => () => void
+        getCloudLoadState: () => Promise<{ success: boolean; complete?: boolean; progress?: { phase: string; label: string; scanned?: number; total?: number; files?: number; batch?: number; percent?: number } | null }>
         listFiles: () => Promise<{ success: boolean; data?: TelegramFile[]; error?: string }>
         listFilesFromCache: (limit: number, offsetId: number) => Promise<{ success: boolean; data?: TelegramFile[]; nextOffsetId?: number | null; total?: number; error?: string }>
         listFolderFilesFromCache: (folderId: string, limit: number, offsetId: number) => Promise<{ success: boolean; data?: TelegramFile[]; nextOffsetId?: number | null; total?: number; error?: string }>

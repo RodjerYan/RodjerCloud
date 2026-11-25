@@ -15,10 +15,9 @@ jobs:
         include:
           - os: windows-latest
             build: build:ci:win
-            glob: '*.exe*'
-          - os: macos-latest
+          # macos-15 — это Apple Silicon (arm64), НЕ Intel. Intel-раннеры имеют суффикс -intel.
+          - os: macos-15
             build: build:ci:mac:arm64
-            glob: '*.dmg*'
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -32,10 +31,14 @@ jobs:
 
       - run: npm run ${{ matrix.build }}
 
+      - name: Show built artifacts
+        shell: bash
+        run: ls -la dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ runner.os }}
-          path: dist/${{ matrix.glob }}
+          path: dist/RodjerCloud-*
 
   release:
     needs: build
@@ -50,23 +53,40 @@ jobs:
       - run: ls -la
 
       - name: Create or update release
+        shell: bash
         run: |
-          git log -1 --pretty=%B > commit_msg.txt
-          echo "## Что нового в ${{ github.ref_name }}" > generated_notes.md
-          echo "" >> generated_notes.md
-          cat commit_msg.txt >> generated_notes.md
-          
-          if gh release view "${{ github.ref_name }}" --json tagName > /dev/null 2>&1; then
-            # Delete all old assets
-            gh api "/repos/RodjerYan/RodjerCloud/releases/${{ github.ref_name }}/assets" --jq '.[].name' | while read asset; do
-              gh release delete-asset "${{ github.ref_name }}" "$asset" --yes 2>/dev/null || true
-            done
-            gh release upload "${{ github.ref_name }}" *.exe *.exe.blockmap *.dmg *.dmg.blockmap --clobber || true
-            gh release edit "${{ github.ref_name }}" -F generated_notes.md || true
+          TAG="${{ github.ref_name }}"
+
+          # Заметки к релизу лежат в репозитории (RU + EN через разделитель).
+          # Файл есть не всегда — тогда используем сообщение последнего коммита.
+          if [ -f .github/latest-release-notes.md ]; then
+            cp .github/latest-release-notes.md generated_notes.md
           else
-            gh release create "${{ github.ref_name }}" *.exe *.exe.blockmap *.dmg *.dmg.blockmap \
-              --title "${{ github.ref_name }}" \
-              -F generated_notes.md || true
+            {
+              echo "## Что нового в ${TAG}"
+              echo ""
+              git log -1 --pretty=%B
+            } > generated_notes.md
+          fi
+
+          assets=()
+          for f in *.exe *.blockmap *.dmg *.zip *.yml; do
+            if [ -e "$f" ]; then assets+=("$f"); fi
+          done
+
+          if gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            # Delete all old assets
+            gh api "/repos/RodjerYan/RodjerCloud/releases/${TAG}/assets" --jq '.[].name' | while read asset; do
+              gh release delete-asset "$TAG" "$asset" --yes 2>/dev/null || true
+            done
+            if [ ${#assets[@]} -gt 0 ]; then
+              gh release upload "$TAG" "${assets[@]}" --clobber
+            fi
+            gh release edit "$TAG" -F generated_notes.md
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --title "$TAG" \
+              -F generated_notes.md
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -36,6 +36,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('files:sync-progress', listener)
       return () => ipcRenderer.removeListener('files:sync-progress', listener)
     },
+    onCloudProgress: (cb: (data: { phase: string; label: string; scanned?: number; total?: number; files?: number; batch?: number; percent?: number }) => void) => {
+      const listener = (_: any, data: any) => cb(data)
+      ipcRenderer.on('cloud:load-progress', listener)
+      return () => ipcRenderer.removeListener('cloud:load-progress', listener)
+    },
+    onCloudLoaded: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on('cloud:load-complete', listener)
+      return () => ipcRenderer.removeListener('cloud:load-complete', listener)
+    },
+    getCloudLoadState: () => ipcRenderer.invoke('cloud:load-state'),
     downloadFile: (messageId: number, fileName: string) =>
       ipcRenderer.invoke('telegram:download-file', messageId, fileName),
     downloadThumbnail: (messageId: number, fileName?: string) =>

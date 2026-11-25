@@ -97,6 +97,39 @@ const botService = new BotService()
 botService.loadToken()
 let initialFolderSyncDone = false
 
+// RodjerCloud — просмотрщик облака. Прогресс чтения канала должен быть видимым:
+// main рассылает его рендереру, splash показывает реальные этапы и пакеты.
+export type CloudLoadProgress = {
+  phase: 'connect' | 'channel' | 'folders' | 'files' | 'verify' | 'done'
+  label: string
+  scanned?: number
+  total?: number
+  files?: number
+  batch?: number
+  percent?: number
+}
+let lastCloudProgress: CloudLoadProgress | null = null
+let cloudLoadComplete = false
+function broadcastCloudProgress(p: CloudLoadProgress) {
+  lastCloudProgress = p
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) {
+      try { w.webContents.send('cloud:load-progress', p) } catch {}
+    }
+  }
+}
+function broadcastCloudLoaded() {
+  cloudLoadComplete = true
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) {
+      try { w.webContents.send('cloud:load-complete', { at: Date.now() }) } catch {}
+    }
+  }
+}
+telegramService.setProgressSink((p) => broadcastCloudProgress(p as CloudLoadProgress))
+// Пакетное обновление кэша: список файлов и миниатюры появляются по мере чтения.
+ipcMain.on('cloud:cache-progress', () => sendFilesChanged())
+
 // T-20260925-002 S2: раньше throttle ПОЛНОСТЬЮ дропал событие при <5000ms —
 // последнее files:changed могло потеряться (renderer ждал его 3s debounce).
 // Теперь: первое событие уходит сразу, остальные накапливаются (pendingFilesChanged)
@@ -363,7 +396,15 @@ app.whenReady().then(async () => {
   autoSyncService.loadTracker()
   const prefs = await readPrefs()
   if (prefs.autoSync) autoSyncService.updateConfig(prefs.autoSync)
-  if (prefs.autoSync?.enabled) autoSyncService.start()
+  // Приложение — просмотрщик облака: загрузка локальных файлов в облако НИКОГДА
+  // не запускается сама. Даже если в старом конфиге остался enabled=true.
+  if (prefs.autoSync?.enabled) {
+    autoSyncService.stop()
+    prefs.autoSync.enabled = false
+    await writePrefs(prefs)
+    log('info', '[autosync] auto-start disabled: upload only on explicit user action')
+  }
+  restorePersistedQueue()
   telegramService.startTrashCleanup()
   telegramService.cleanThumbnailCache()
   try {
@@ -397,6 +438,7 @@ app.whenReady().then(async () => {
   let syncInterval = 3000
   let lastFileCount = -1
   let idleCycles = 0
+  let initialSyncBroadcastDone = false
 
   async function adaptiveSync() {
     if (!mainWindow || mainWindow.isDestroyed()) return
@@ -419,6 +461,10 @@ app.whenReady().then(async () => {
       } else {
         idleCycles++
         if (idleCycles > 10) syncInterval = Math.min(syncInterval + 3000, 30000)
+      }
+      if (!initialSyncBroadcastDone) {
+        initialSyncBroadcastDone = true
+        broadcastCloudLoaded()
       }
     } catch {}
     setTimeout(adaptiveSync, syncInterval)
@@ -487,6 +533,28 @@ async function readPrefs(): Promise<any> {
 async function writePrefs(prefs: any): Promise<void> {
   await fs.promises.writeFile(prefsPath(), JSON.stringify(prefs, null, 2), 'utf8')
 }
+
+// Bot нужен только для дополнительных операций с папками — не для просмотра облака.
+// Поэтому его проверка/создание больше не задерживает вход (BotFather отвечает до 15с).
+function ensureBotInBackground() {
+  void (async () => {
+    try {
+      const savedToken = botService.getToken()
+      if (savedToken) {
+        try {
+          const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
+          const json = await resp.json()
+          if (json.ok) return
+        } catch {}
+      }
+      const botResult = await telegramService.createBotAndAddToChannel()
+      botService.setToken(botResult.token)
+      log('info', 'Bot ensured in background (non-blocking)')
+    } catch (e) {
+      log('warn', 'Bot setup in background failed (non-fatal): ' + (e as Error).message)
+    }
+  })()
+}
 function historyPath(): string {
   return path.join(app.getPath('userData'), 'rodjercloud-sync-history.json')
 }
@@ -509,6 +577,10 @@ ipcMain.handle('telegram:check-session', async () => {
     return { success: true, hasSession: !!session }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
+
+// Splash монтируется позже, чем main успевает закончить первую синхронизацию —
+// поэтому отдаём последнее известное состояние, а не ждём 12 секунд впустую.
+ipcMain.handle('cloud:load-state', async () => ({ success: true, complete: cloudLoadComplete, progress: lastCloudProgress }))
 
 ipcMain.handle('vault:has-password', async () => {
   return vaultService.hasPassword()
@@ -541,24 +613,7 @@ ipcMain.handle('telegram:verify-code', async (_, code: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      const savedToken = botService.getToken()
-      if (savedToken) {
-        try {
-          const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
-          const json = await resp.json()
-          if (json.ok) {
-            log('info', 'Reusing existing valid bot token')
-            return { success: true, data: channelResult }
-          }
-        } catch {}
-        log('warn', 'Saved bot token invalid, creating new bot')
-      }
-      try {
-        const botResult = await telegramService.createBotAndAddToChannel()
-        botService.setToken(botResult.token)
-      } catch (e) {
-        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
-      }
+      ensureBotInBackground()
       return { success: true, data: channelResult }
     }
     return result
@@ -572,24 +627,7 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
       const sessionString = telegramService.getSessionString()
       const channelResult = await telegramService.createPrivateChannel()
       await storageService.saveSession(sessionString)
-      const savedToken = botService.getToken()
-      if (savedToken) {
-        try {
-          const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
-          const json = await resp.json()
-          if (json.ok) {
-            log('info', 'Reusing existing valid bot token (2FA)')
-            return { success: true, data: channelResult }
-          }
-        } catch {}
-        log('warn', 'Saved bot token invalid (2FA), creating new bot')
-      }
-      try {
-        const botResult = await telegramService.createBotAndAddToChannel()
-        botService.setToken(botResult.token)
-      } catch (e) {
-        log('warn', 'Bot creation failed (non-fatal): ' + (e as Error).message)
-      }
+      ensureBotInBackground()
       return { success: true, data: channelResult }
     }
     return result
@@ -598,59 +636,34 @@ ipcMain.handle('telegram:verify-2fa', async (_, password: string) => {
 
 ipcMain.handle('telegram:reconnect', async () => {
   try {
+    broadcastCloudProgress({ phase: 'connect', label: 'Подключение к Telegram', percent: 4 })
     const sessionData = await storageService.getSession()
     if (!sessionData) return { success: false, error: 'No session found' }
     const result = await telegramService.reconnect(sessionData.session)
-    const savedToken = botService.getToken()
-    if (!savedToken) {
+    broadcastCloudProgress({ phase: 'channel', label: 'Канал «My area» найден', percent: 12 })
+    log('info', '[viewer] reconnect done — открываем локальный кэш без записи в облако')
+
+    // Все некритичные операции (бот, папки) уходят в фон и НЕ блокируют старт UI.
+    // Приложение только читает облако: создавать бота/папки при каждом входе не нужно.
+    void (async () => {
       try {
-        const botResult = await telegramService.createBotAndAddToChannel()
-        botService.setToken(botResult.token)
-        log('info', 'Bot created automatically after reconnect')
-      } catch (e) {
-        log('warn', 'Bot creation after reconnect failed (non-fatal): ' + (e as Error).message)
-      }
-    } else {
-      try {
-        const resp = await fetch(`https://api.telegram.org/bot${savedToken}/getMe`)
-        const json = await resp.json()
-        if (json.ok && json.result?.username) {
-          await telegramService.addBotToChannel(json.result.username)
-          log('info', 'Ensured bot @' + json.result.username + ' is admin in channel')
-          await telegramService.cleanupBots(savedToken)
-        } else {
-          log('warn', 'Saved bot token invalid, creating new bot')
-          botService.clearToken()
-          try {
-            const botResult = await telegramService.createBotAndAddToChannel()
-            botService.setToken(botResult.token)
-          } catch (e) {
-            log('warn', 'Bot creation after invalid token failed: ' + (e as Error).message)
+        const local = await readFolders()
+        const hasLocal = (local.folders || []).length > 0 || Object.keys(local.fileFolders || {}).length > 0
+        if (!hasLocal) {
+          broadcastCloudProgress({ phase: 'folders', label: 'Читаем структуру папок', percent: 18 })
+          const cloud = await telegramService.loadFoldersFromChannel()
+          if (cloud && ((cloud.folders || []).length > 0 || Object.keys(cloud.fileFolders || {}).length > 0)) {
+            if (cloud.botToken && !botService.getToken()) botService.setToken(cloud.botToken)
+            await writeFolders({ folders: cloud.folders, fileFolders: cloud.fileFolders, trashedFolders: local.trashedFolders || [] })
+            log('info', `Folders loaded from channel on reconnect: ${cloud.folders.length}`)
           }
         }
-      } catch (e) {
-        log('warn', 'Failed to verify bot token: ' + (e as Error).message)
-      }
-    }
-    await telegramService.createCloudFolder()
-    restorePersistedQueue()
-    try {
-      const local = await readFolders()
-      const hasLocal = local.folders.length > 0 || Object.keys(local.fileFolders || {}).length > 0
-      if (!initialFolderSyncDone && !hasLocal) {
-        const cloud = await telegramService.loadFoldersFromChannel()
-        if (cloud && (cloud.folders.length > 0 || Object.keys(cloud.fileFolders || {}).length > 0)) {
-          if (cloud.botToken && !botService.getToken()) botService.setToken(cloud.botToken)
-          await writeFolders({ folders: cloud.folders, fileFolders: cloud.fileFolders, trashedFolders: local.trashedFolders || [] })
-          log('info', `Folders loaded from channel on reconnect: ${cloud.folders.length}`)
-        } else if (hasLocal) {
-          syncFoldersToTelegram().catch(() => {})
-        }
         initialFolderSyncDone = true
+      } catch (e) {
+        log('warn', 'Folder cloud sync on reconnect failed (non-fatal): ' + (e as Error).message)
       }
-    } catch (e) {
-      log('warn', 'Folder cloud sync on reconnect failed: ' + (e as Error).message)
-    }
+    })()
+
     return { success: true, data: result }
   } catch (error) { return { success: false, error: (error as Error).message } }
 })
@@ -714,30 +727,14 @@ let persistedQueueRestored = false
 function restorePersistedQueue() {
   if (persistedQueueRestored) return
   persistedQueueRestored = true
-
+  // Раньше здесь автоматически возобновлялась загрузка файлов из ~/Downloads
+  // после перезапуска — пользователь ничего не инициировал, но облако «заливалось».
+  // Теперь очередь на диске просто очищается: загрузка только по явному действию.
   const restored = loadPersistedQueue()
-  for (const item of restored) {
-    try {
-      const stat = fs.statSync(item.filePath)
-      if (!stat.isFile()) continue
-      if (uploadQueue.some(job => job.id === item.id) || activeUploadJobs.has(item.id)) continue
-      uploadQueue.push({
-        ...item,
-        fileName: item.fileName || path.basename(item.filePath),
-        fileSize: stat.size,
-        resolve: () => {},
-      })
-    } catch {}
+  if (restored.length > 0) {
+    log('warn', `[viewer] dropping ${restored.length} persisted upload(s) — no automatic upload on startup`)
   }
-
-  if (uploadQueue.length > 0) {
-    uploadsInProgress = true
-    persistUploadQueue()
-    broadcastUploadState()
-    void processQueue()
-  } else {
-    clearPersistedQueue()
-  }
+  clearPersistedQueue()
 }
 
 let tgReconnectPromise: Promise<void> | null = null
@@ -1071,6 +1068,7 @@ ipcMain.handle('telegram:list-files', async () => {
 
 ipcMain.handle('telegram:sync-files-bg', async (event) => {
   try {
+    broadcastCloudProgress({ phase: 'files', label: 'Читаем файлы из облака', percent: 25 })
     telegramService.syncFilesInBackground((fileCount, scannedMessages) => {
       try {
         event.sender.send('files:sync-progress', { fileCount, scannedMessages })
@@ -1082,6 +1080,7 @@ ipcMain.handle('telegram:sync-files-bg', async (event) => {
       } catch {}
       // P4: после healVideoDimensions рендерер должен перечитать кэш
       try { sendFilesChanged() } catch {}
+      broadcastCloudLoaded()
     })
     return { success: true }
   } catch (error) { return { success: false, error: (error as Error).message } }
@@ -1669,14 +1668,14 @@ ipcMain.handle('folders:list', async () => {
 ipcMain.handle('folders:load-from-telegram', async () => {
   try {
     return await withFoldersLock(async () => {
-      // Fast path: already synced this session and local store has data — skip channel scan
-      if (initialFolderSyncDone) {
-        const localFast: any = await readFolders()
-        if (localFast && ((localFast.folders || []).length > 0 || Object.keys(localFast.fileFolders || {}).length > 0)) {
-          return { success: true, data: localFast }
-        }
+      // Fast path: локальные папки уже есть — просмотрщик не сканирует канал при старте.
+      // Раньше при каждом открытии «Мои файлы» уходил ручной скан до 12000 сообщений.
+      const localFast: any = await readFolders()
+      if (localFast && ((localFast.folders || []).length > 0 || Object.keys(localFast.fileFolders || {}).length > 0)) {
+        return { success: true, data: localFast }
       }
 
+      broadcastCloudProgress({ phase: 'folders', label: 'Читаем структуру папок', percent: 20 })
       const data = await telegramService.loadFoldersFromChannel()
       if (data) {
         if (data.botToken && !botService.getToken()) {

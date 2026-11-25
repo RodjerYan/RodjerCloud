@@ -88,6 +88,17 @@ function deferred<T>(): Deferred<T> {
 
 const CHANNEL_NAME = 'My area'
 
+/** Реальный прогресс чтения облака (без выдуманных процентов). */
+export type CloudReadProgress = {
+  phase: 'folders' | 'files' | 'verify' | 'done'
+  label: string
+  scanned?: number
+  total?: number
+  files?: number
+  batch?: number
+  percent?: number
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Operation'): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
@@ -1365,25 +1376,47 @@ export class TelegramService {
     }
 
     const visibleMsgs: any[] = []
+    const parsedFiles: any[] = []
     let offsetId = 0
     let scanned = 0
+    let batchNo = 0
+
+    this.emitReadProgress({ phase: 'files', label: 'Читаем файлы из облака', scanned: 0, files: 0, batch: 0 })
 
     while (scanned < MAX_MESSAGES) {
       const batch = await fetchBatch(offsetId, BATCH)
       if (batch.length === 0) break
 
+      const newVisible: any[] = []
       for (const m of batch) {
-        if (this.isFileVisible(m)) visibleMsgs.push(m)
+        if (this.isFileVisible(m)) { visibleMsgs.push(m); newVisible.push(m) }
       }
+      parsedFiles.push(...newVisible.map((m: any) => this.parseFileMessage(m)))
       scanned += batch.length
+      batchNo++
+
+      // Пакет за пакетом: кэш обновляется по ходу, поэтому список и миниатюры
+      // появляются в UI сразу, а не только после полного сканирования канала.
+      if (batchNo % 3 === 0) {
+        this.fileCache = this.saveFileCache(parsedFiles.slice())
+        try { ipcMain.emit('cloud:cache-progress') } catch {}
+      }
       if (onProgress) onProgress(visibleMsgs.length, scanned)
+      this.emitReadProgress({
+        phase: 'files',
+        label: 'Читаем файлы из облака',
+        scanned,
+        files: parsedFiles.length,
+        batch: batchNo,
+      })
       if (batch.length < BATCH) break
       offsetId = this.msgId(batch[batch.length - 1])
-      await new Promise(r => setTimeout(r, 500))
+      await new Promise(r => setTimeout(r, 150))
     }
 
     console.log(`[listFiles] done: ${visibleMsgs.length} files from ${scanned} messages`)
-    return visibleMsgs.map((m: any) => this.parseFileMessage(m))
+    if (batchNo % 3 !== 0 && parsedFiles.length > 0) this.fileCache = this.saveFileCache(parsedFiles.slice())
+    return parsedFiles
   }
 
   async listTrash() {
@@ -1566,6 +1599,14 @@ export class TelegramService {
   }
 
   private cacheMeta: { latestMessageId: number; lastSyncAt: number } = { latestMessageId: 0, lastSyncAt: 0 }
+
+  // Просмотр облака должен быть видимым: main подписывает sink и шлёт события
+  // в splash. Никаких фейковых таймеров — только реальные пакеты и счётчики.
+  private progressSink: ((p: CloudReadProgress) => void) | null = null
+  setProgressSink(fn: ((p: CloudReadProgress) => void) | null) { this.progressSink = fn }
+  private emitReadProgress(p: CloudReadProgress) {
+    try { this.progressSink?.(p) } catch {}
+  }
 
   private loadFileCache(): any[] {
     try {
@@ -1840,6 +1881,8 @@ export class TelegramService {
     const newFiles: any[] = []
     let offsetId = 0
     let scanned = 0
+    let batchNo = 0
+    this.emitReadProgress({ phase: 'files', label: 'Проверяем новые файлы', scanned: 0, files: this.fileCache.length, batch: 0 })
 
     while (true) {
       let batch: any[]
@@ -1865,7 +1908,15 @@ export class TelegramService {
         if (this.isFileVisible(m)) newFiles.push(this.parseFileMessage(m))
       }
       scanned += batch.length
+      batchNo++
       if (onProgress) onProgress(this.fileCache.length + newFiles.length, scanned)
+      this.emitReadProgress({
+        phase: 'files',
+        label: 'Проверяем новые файлы',
+        scanned,
+        files: this.fileCache.length + newFiles.length,
+        batch: batchNo,
+      })
       if (foundOld || batch.length < BATCH) break
       const last = batch[batch.length - 1]
       if (!last) break
@@ -2427,16 +2478,32 @@ export class TelegramService {
         }
         await this.listFilesPromise
       }
-      // T-20260928-001: verify cached IDs against server to detect remote deletions
-      try { await this.verifyCachedIdsAgainstServer() } catch (e) { console.warn('[syncFilesInBackground] verifyCachedIds error:', (e as Error).message) }
-      // P4: дозаполняем width/height/duration у старых строк кэша
-      await this.healVideoDimensions()
-      // P4 rework-3: локальный probe исходников на диске (mdfind + ffmpeg) для видео без dims
-      await this.startLocalDimsResolver()
+      // Список файлов готов — открываем UI. Сверки уходят в фон (см. ниже).
+      this.emitReadProgress({ phase: 'done', label: 'Облако готово', files: this.fileCache.length, percent: 100 })
     } catch (e) {
       console.warn('[syncFilesInBackground] error:', (e as Error).message)
     }
     this.syncingFiles = false
+    void this.postSyncEnrichment()
+  }
+
+  private postSyncRunning = false
+  /** Медленные сверки (flood-wait до 30с, mdfind, ffmpeg) — после открытия UI. */
+  private async postSyncEnrichment(): Promise<void> {
+    if (this.postSyncRunning) return
+    this.postSyncRunning = true
+    try {
+      await new Promise(r => setTimeout(r, 5000))
+      this.emitReadProgress({ phase: 'verify', label: 'Сверяем список с облаком', files: this.fileCache.length })
+      try { await this.verifyCachedIdsAgainstServer() } catch (e) { console.warn('[syncFilesInBackground] verifyCachedIds error:', (e as Error).message) }
+      this.emitReadProgress({ phase: 'verify', label: 'Уточняем данные файлов', files: this.fileCache.length })
+      await this.healVideoDimensions()
+      await this.startLocalDimsResolver()
+      try { ipcMain.emit('cloud:cache-progress') } catch {}
+    } catch (e) {
+      console.warn('[postSyncEnrichment] error:', (e as Error).message)
+    }
+    this.postSyncRunning = false
   }
 
   async trashFile(messageId: number) {
@@ -3405,7 +3472,9 @@ if (isEncrypted) {
       const BATCH = 100
       const MAX_SCAN = 12000
       let scanned = 0
+      let batchNo = 0
       const textMsgs: any[] = []
+      this.emitReadProgress({ phase: 'folders', label: 'Ищем структуру папок', scanned: 0, total: MAX_SCAN, batch: 0 })
 
       while (scanned < MAX_SCAN) {
         const batch = await this.client.getMessages(this.channelId as any, {
@@ -3414,6 +3483,15 @@ if (isEncrypted) {
         })
         if (batch.length === 0) break
         scanned += batch.length
+        batchNo++
+        this.emitReadProgress({
+          phase: 'folders',
+          label: 'Ищем структуру папок',
+          scanned,
+          total: MAX_SCAN,
+          batch: batchNo,
+          percent: Math.min(99, Math.floor((scanned / MAX_SCAN) * 100)),
+        })
 
         for (const m of batch) {
           if (m.message && !m.file) textMsgs.push(m)
@@ -3444,11 +3522,14 @@ if (isEncrypted) {
         }
         if (foundSyncMsg) break
         offsetId = this.msgId(batch[batch.length - 1])
+        // Даём event loop и рендереру обновиться между пакетами.
+        await new Promise(r => setImmediate(r))
       }
     }
 
     if (!foundSyncMsg) {
       this.debugLog('NO sync message found!')
+      this.emitReadProgress({ phase: 'folders', label: 'Структура папок: локальный кэш', scanned: 0, total: 0, percent: 100 })
       return null
     }
 
