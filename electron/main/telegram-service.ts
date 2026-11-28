@@ -1414,11 +1414,16 @@ export class TelegramService {
     return { files, nextOffsetId }
   }
 
-  async listFiles(onProgress?: (fileCount: number, scannedMessages: number) => void) {
+  async listFiles(
+    onProgress?: (fileCount: number, scannedMessages: number) => void,
+    resumeOffsetId = 0,
+    existingFiles: any[] = []
+  ) {
     if (!this.client || !this.channelId) throw new Error('Client not initialized or channel not found')
 
     const BATCH = 200
     const MAX_MESSAGES = 500000
+    const label = resumeOffsetId > 0 ? 'Продолжаем читать файлы из облака' : 'Читаем файлы из облака'
 
     const fetchBatch = async (offsetId: number, limit: number): Promise<any[]> => {
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -1443,13 +1448,19 @@ export class TelegramService {
       return []
     }
 
-    const visibleMsgs: any[] = []
-    const parsedFiles: any[] = []
-    let offsetId = 0
+    // При возобновлении уже найденные файлы остаются в списке: читаем только
+    // более старые сообщения, чем курсор, и не добавляем дубликаты.
+    const parsedFiles = existingFiles.slice()
+    const seenIds = new Set<number>()
+    for (const f of parsedFiles) {
+      const id = Number(f?.messageId)
+      if (id > 0) seenIds.add(id)
+    }
+    let offsetId = resumeOffsetId
     let scanned = 0
     let batchNo = 0
 
-    this.emitReadProgress({ phase: 'files', label: 'Читаем файлы из облака', scanned: 0, files: 0, batch: 0 })
+    this.emitReadProgress({ phase: 'files', label, scanned: 0, files: parsedFiles.length, batch: 0 })
 
     while (scanned < MAX_MESSAGES) {
       const batch = await fetchBatch(offsetId, BATCH)
@@ -1457,33 +1468,35 @@ export class TelegramService {
 
       const newVisible: any[] = []
       for (const m of batch) {
-        if (this.isFileVisible(m)) { visibleMsgs.push(m); newVisible.push(m) }
+        if (!m || !this.isFileVisible(m)) continue
+        const id = this.msgId(m)
+        if (seenIds.has(id)) continue
+        seenIds.add(id)
+        newVisible.push(m)
       }
       parsedFiles.push(...newVisible.map((m: any) => this.parseFileMessage(m)))
+
+      const last = batch[batch.length - 1]
+      const nextOffsetId = last ? this.msgId(last) : 0
       scanned += batch.length
       batchNo++
 
       // Пакет за пакетом: кэш обновляется по ходу, поэтому список и миниатюры
       // появляются в UI сразу, а не только после полного сканирования канала.
-      if (batchNo % 3 === 0) {
-        this.fileCache = this.saveFileCache(parsedFiles.slice())
+      // Вместе с файлами сохраняем курсор, чтобы после выхода продолжить с него.
+      if (batchNo % 3 === 0 && nextOffsetId > 0) {
+        this.fileCache = this.saveFileCache(parsedFiles.slice(), { scanComplete: false, scanOffsetId: nextOffsetId })
         try { ipcMain.emit('cloud:cache-progress') } catch {}
       }
-      if (onProgress) onProgress(visibleMsgs.length, scanned)
-      this.emitReadProgress({
-        phase: 'files',
-        label: 'Читаем файлы из облака',
-        scanned,
-        files: parsedFiles.length,
-        batch: batchNo,
-      })
-      if (batch.length < BATCH) break
-      offsetId = this.msgId(batch[batch.length - 1])
+      if (onProgress) onProgress(parsedFiles.length, scanned)
+      this.emitReadProgress({ phase: 'files', label, scanned, files: parsedFiles.length, batch: batchNo })
+      if (batch.length < BATCH || !nextOffsetId) break
+      offsetId = nextOffsetId
       await new Promise(r => setTimeout(r, 150))
     }
 
-    console.log(`[listFiles] done: ${visibleMsgs.length} files from ${scanned} messages`)
-    if (batchNo % 3 !== 0 && parsedFiles.length > 0) this.fileCache = this.saveFileCache(parsedFiles.slice())
+    console.log(`[listFiles] done: ${parsedFiles.length} files, ${scanned} messages scanned (resume from ${resumeOffsetId})`)
+    this.fileCache = this.saveFileCache(parsedFiles.slice(), { scanComplete: true, scanOffsetId: 0 })
     return parsedFiles
   }
 
@@ -1666,7 +1679,19 @@ export class TelegramService {
     } catch(e) { console.error('Failed to load trash state', e) }
   }
 
-  private cacheMeta: { latestMessageId: number; lastSyncAt: number } = { latestMessageId: 0, lastSyncAt: 0 }
+  /**
+   * scanComplete/scanOffsetId — курсор первичного чтения канала. Без него
+   * прерванная загрузка выглядела как готовая: latestMessageId указывал на
+   * самую новую уже прочитанную запись, и после рестарта deltaSync решал,
+   * что «старых файлов нет», хотя сканирование доходило только до 4 тысяч.
+   */
+  private cacheMeta: {
+    latestMessageId: number
+    lastSyncAt: number
+    scanComplete?: boolean
+    scanOffsetId?: number
+    cacheSchema?: number
+  } = { latestMessageId: 0, lastSyncAt: 0, scanComplete: false, scanOffsetId: 0, cacheSchema: 2 }
 
   // Просмотр облака должен быть видимым: main подписывает sink и шлёт события
   // в splash. Никаких фейковых таймеров — только реальные пакеты и счётчики.
@@ -1682,12 +1707,24 @@ export class TelegramService {
         const raw = JSON.parse(fs.readFileSync(FILE_CACHE_PATH, 'utf-8'))
         if (Array.isArray(raw)) {
           const latestId = raw.length > 0 ? raw.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
-          this.cacheMeta = { latestMessageId: latestId, lastSyncAt: 0 }
+          // Древний формат без метаданных: полнота сканирования неизвестна →
+          // при следующем запуске дочитаем канал с начала, сохранив уже найденное.
+          this.cacheMeta = { latestMessageId: latestId, lastSyncAt: 0, scanComplete: false, scanOffsetId: 0, cacheSchema: 0 }
           return raw
         }
         if (raw && Array.isArray(raw.files)) {
           this.fileCache = raw.files
-          this.cacheMeta = { latestMessageId: raw.latestMessageId || 0, lastSyncAt: raw.lastSyncAt || 0 }
+          const latestId = raw.latestMessageId || 0
+          if ((raw.cacheSchema || 0) < 2) {
+            console.log(`[file-cache] legacy cache (${raw.files.length} files): full rescan will be resumed from the channel`)
+          }
+          this.cacheMeta = {
+            latestMessageId: latestId,
+            lastSyncAt: raw.lastSyncAt || 0,
+            scanComplete: raw.cacheSchema >= 2 ? raw.scanComplete === true : false,
+            scanOffsetId: raw.cacheSchema >= 2 ? (raw.scanOffsetId || 0) : 0,
+            cacheSchema: raw.cacheSchema || 0,
+          }
           return raw.files
         }
       }
@@ -1695,7 +1732,10 @@ export class TelegramService {
     return []
   }
 
-  private saveFileCache(files: any[]): any[] {
+  private saveFileCache(
+    files: any[],
+    scan?: { scanComplete?: boolean; scanOffsetId?: number; latestMessageId?: number }
+  ): any[] {
     try {
       let out = files
       if (this.localTrashedIds.size > 0) {
@@ -1714,9 +1754,20 @@ export class TelegramService {
           if (extras.length > 0) out = out.concat(extras)
         }
       }
-      const latestId = out.length > 0 ? out.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
-      this.cacheMeta = { latestMessageId: latestId, lastSyncAt: Date.now() }
-      const data = { files: out, latestMessageId: latestId, lastSyncAt: Date.now() }
+      const maxId = out.length > 0 ? out.reduce((max: number, f: any) => Math.max(max, f.messageId || 0), 0) : 0
+      const prev = this.cacheMeta
+      const latestId = scan?.latestMessageId ?? maxId
+      const scanComplete = scan?.scanComplete ?? prev.scanComplete ?? false
+      const scanOffsetId = scan?.scanOffsetId ?? prev.scanOffsetId ?? 0
+      const lastSyncAt = Date.now()
+      this.cacheMeta = {
+        latestMessageId: Math.max(latestId, maxId),
+        lastSyncAt,
+        scanComplete,
+        scanOffsetId,
+        cacheSchema: 2,
+      }
+      const data = { files: out, ...this.cacheMeta }
       fs.writeFileSync(FILE_CACHE_PATH, JSON.stringify(data), 'utf-8')
       return out
     } catch {}
@@ -1726,7 +1777,7 @@ export class TelegramService {
   invalidateFileCache() {
     try { if (fs.existsSync(FILE_CACHE_PATH)) fs.unlinkSync(FILE_CACHE_PATH) } catch {}
     this.fileCache = []
-    this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0 }
+    this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0, scanComplete: false, scanOffsetId: 0, cacheSchema: 2 }
   }
 
   invalidateOldFileCache(maxAgeMs: number) {
@@ -1737,7 +1788,7 @@ export class TelegramService {
         if (age > maxAgeMs) {
           fs.unlinkSync(FILE_CACHE_PATH)
           this.fileCache = []
-          this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0 }
+          this.cacheMeta = { latestMessageId: 0, lastSyncAt: 0, scanComplete: false, scanOffsetId: 0, cacheSchema: 2 }
         }
       }
     } catch {}
@@ -2628,16 +2679,29 @@ export class TelegramService {
   async syncFilesInBackground(onProgress?: (fileCount: number, scannedMessages: number) => void): Promise<void> {
     if (!this.client || !this.channelId) return
     if (this.syncingFiles) return
+    if (this.fileCache.length === 0) {
+      const disk = this.loadFileCache()
+      if (disk.length > 0) this.fileCache = disk
+    }
     this.syncingFiles = true
     try {
-      if (this.cacheMeta.latestMessageId > 0 || this.fileCache.length > 0) {
+      if (this.cacheMeta.scanComplete !== true) {
+        // Первичное чтение канала было прервано (или кэш старого формата):
+        // дочитываем с сохранённого курсора, а не считаем 4 тысячи файлов концом.
+        const resumeFrom = this.cacheMeta.scanOffsetId || 0
+        const existing = this.fileCache.slice()
+        console.log(`[syncFilesInBackground] resume full scan from=${resumeFrom}, cached=${existing.length}`)
+        if (!this.listFilesPromise) {
+          this.listFilesPromise = this.listFiles(onProgress, resumeFrom, existing)
+            .finally(() => { this.listFilesPromise = null })
+        }
+        await this.listFilesPromise
+      } else if (this.cacheMeta.latestMessageId > 0 || this.fileCache.length > 0) {
         await this.deltaSync(onProgress)
       } else {
         if (!this.listFilesPromise) {
-          this.listFilesPromise = this.listFiles(onProgress).then(files => {
-            this.fileCache = this.saveFileCache(files)
-            return this.fileCache
-          }).finally(() => { this.listFilesPromise = null })
+          this.listFilesPromise = this.listFiles(onProgress)
+            .finally(() => { this.listFilesPromise = null })
         }
         await this.listFilesPromise
       }
